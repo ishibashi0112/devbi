@@ -11,6 +11,8 @@ export interface Dataset {
   description: string;
   /** The `-- connection: <name>` line: which DEVBI_DB_<NAME> to use. Undefined: DEVBI_DB. */
   connection?: string;
+  /** The `-- snapshot: 06:00, 12:00` line: the times of day (server time, `HH:MM`) its snapshot is made. */
+  snapshot?: string[];
   /** The statement, without the comments above it and without a final `;`. */
   sql: string;
   /** Parameter names (`:from` → `from`), each once, in the order they first appear. */
@@ -68,6 +70,32 @@ export function connectionOf(text: string): string | undefined {
   return undefined;
 }
 
+const SNAPSHOT_LINE = /^\s*--\s*snapshot\s*:(.*)$/i;
+
+/**
+ * The `-- snapshot: 06:00, 12:00` line among the comment lines at the top of the file: the times of day its
+ * snapshot is made (sorted, `HH:MM`). Undefined: no snapshot, `read_api` asks the database each time.
+ * Throws DatasetError for a time it cannot read.
+ */
+export function snapshotOf(text: string, name = "?"): string[] | undefined {
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const m = SNAPSHOT_LINE.exec(line);
+    if (m) {
+      const times = m[1]!.split(/[,、\s]+/).filter(Boolean).map((t) => {
+        const hm = /^(\d{1,2}):(\d{2})$/.exec(t);
+        if (!hm || Number(hm[1]) > 23 || Number(hm[2]) > 59) {
+          throw new DatasetError(`api/${name}.sql: snapshot の時刻は 06:00 のように書きます（${t}）`, 400);
+        }
+        return `${hm[1]!.padStart(2, "0")}:${hm[2]}`;
+      });
+      if (times.length === 0) throw new DatasetError(`api/${name}.sql: snapshot に時刻を書いてください（例: -- snapshot: 06:00）`, 400);
+      return [...new Set(times)].sort();
+    }
+    if (line.trim() && !/^\s*--/.test(line)) return undefined;
+  }
+  return undefined;
+}
+
 export function parseDataset(name: string, text: string, dialect?: Dialect): Dataset {
   const rel = `api/${name}.sql`;
   const statements = splitStatements(text, dialect);
@@ -85,12 +113,20 @@ export function parseDataset(name: string, text: string, dialect?: Dialect): Dat
     throw new DatasetError(`${rel}: ${why}`, 400);
   }
   const connection = connectionOf(text);
-  const description = st.title.split("\n").filter((line) => !/^connection\s*:/i.test(line.trim()));
+  const snapshot = snapshotOf(text, name);
+  const description = st.title.split("\n").filter((line) => !/^(connection|snapshot)\s*:/i.test(line.trim()));
   const params: string[] = [];
   for (const p of parameters(st.sql, dialect)) {
     if (!params.some((q) => q.toLowerCase() === p.name.toLowerCase())) params.push(p.name);
   }
-  return { name, description: description.join("\n").trim(), ...(connection ? { connection } : {}), sql: st.sql, params };
+  return {
+    name,
+    description: description.join("\n").trim(),
+    ...(connection ? { connection } : {}),
+    ...(snapshot ? { snapshot } : {}),
+    sql: st.sql,
+    params,
+  };
 }
 
 export type ParamValue = string | number | boolean | null;

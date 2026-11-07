@@ -99,6 +99,21 @@ function addEmbedEntry(user: UserConfig, root: string): string[] {
   return warnings;
 }
 
+/**
+ * The API's SQL files read from a snapshot: name → times of day, from the `-- snapshot: 06:00` lines in api/*.sql.
+ * Only that goes to the browser, not the SQL.
+ */
+export async function readSnapshots(dir: string): Promise<Record<string, string[]>> {
+  if (!existsSync(path.join(dir, "api"))) return {};
+  const { listDatasets, readDatasetText, snapshotOf } = await import("@devbi/server");
+  const out: Record<string, string[]> = {};
+  for (const name of await listDatasets(dir)) {
+    const times = snapshotOf(await readDatasetText(dir, name), name);
+    if (times) out[name] = times;
+  }
+  return out;
+}
+
 interface ProjectFiles {
   dashboards: Record<string, { path: string; spec: unknown }>;
   metrics: Record<string, { path: string; spec: unknown }>;
@@ -301,6 +316,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       lastData = project.data;
       for (const f of project.watched) this.addWatchFile(f);
       const duck = resolveDuckdb(config.root);
+      const snapshots = await readSnapshots(dir);
       const prefix = relDir ? `/${relDir}` : "";
       const base = relDir ? `${relDir}/` : "";
       return [
@@ -312,6 +328,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
         `  metrics: ${JSON.stringify(project.metrics)},`,
         `  components: Object.fromEntries(Object.entries(components).map(([k, v]) => [k.slice(${prefix.length}), v])),`,
         `  baseUrl: import.meta.env.BASE_URL + ${JSON.stringify(base)},`,
+        Object.keys(snapshots).length ? `  snapshots: ${JSON.stringify(snapshots)},` : "",
         `  duckdb: { mainModule, mainWorker },`,
         options.extensionRepository ? `  extensionRepository: ${JSON.stringify(options.extensionRepository)},` : "",
         `};`,

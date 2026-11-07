@@ -1,0 +1,58 @@
+{
+  "$schema": "../.devbi/dash.schema.json",
+  "title": "売上の日次集計（毎朝のスナップショット）",
+  "description": "サーバーが毎朝 6:00 にデータベースで集計して保存したもの（api/sales_daily.sql）を読む",
+  "metrics": "sales_daily",
+  "tiles": [
+    {
+      "id": "period",
+      "x": 0, "y": 0, "w": 12, "h": 1,
+      "type": "date-range",
+      "options": { "default": "latest_fiscal_year" }
+    },
+    {
+      "id": "kpi-revenue",
+      "x": 0, "y": 1, "w": 6, "h": 2,
+      "type": "kpi",
+      "title": "売上",
+      "query": { "measures": ["revenue", "revenue_ly", "revenue_yoy"] }
+    },
+    {
+      "id": "kpi-quantity",
+      "x": 6, "y": 1, "w": 6, "h": 2,
+      "type": "kpi",
+      "title": "数量",
+      "query": { "measures": ["quantity"] }
+    },
+    {
+      "id": "monthly",
+      "x": 0, "y": 3, "w": 8, "h": 4,
+      "type": "bar",
+      "title": "月別売上",
+      "query": { "measures": ["revenue"], "time": "month" }
+    },
+    {
+      "id": "region",
+      "x": 8, "y": 3, "w": 4, "h": 4,
+      "type": "barlist",
+      "title": "地域別売上",
+      "query": { "measures": ["revenue"], "dimensions": ["region"] }
+    },
+    {
+      "id": "category",
+      "x": 0, "y": 7, "w": 12, "h": 4,
+      "type": "pivot",
+      "title": "商品分類 × 地域",
+      "query": { "measures": ["revenue"], "dimensions": ["category", "region"] },
+      "options": { "columns": "region" }
+    },
+    {
+      "id": "about",
+      "x": 0, "y": 11, "w": 12, "h": 1,
+      "type": "markdown",
+      "options": {
+        "text": "**このダッシュボードについて** 開くたびにデータベースへは行きません。`api/sales_daily.sql` の「-- snapshot: 06:00」で、サーバー（devbi-serve）が毎朝 6:00 に集計してファイルに保存し、ブラウザはそれを読みます。サーバーがないときは `devbi-snapshot` をタスクスケジューラから動かします。"
+      }
+    }
+  ]
+}

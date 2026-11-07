@@ -54,6 +54,20 @@ describe("the dev server", () => {
   });
 });
 
+describe("snapshots", () => {
+  it("passes the times of the api/*.sql with a snapshot line to the browser, not the SQL", async () => {
+    const { readSnapshots } = await import("../src/index.js");
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-snap-"));
+    expect(await readSnapshots(dir)).toEqual({});
+    mkdirSync(path.join(dir, "api"));
+    writeFileSync(path.join(dir, "api", "daily.sql"), "-- 日次\n-- snapshot: 12:00, 06:00\nSELECT 1");
+    writeFileSync(path.join(dir, "api", "live.sql"), "SELECT 1");
+    expect(await readSnapshots(dir)).toEqual({ daily: ["06:00", "12:00"] });
+    writeFileSync(path.join(dir, "api", "bad.sql"), "-- snapshot: 朝\nSELECT 1");
+    await expect(readSnapshots(dir)).rejects.toThrow("api/bad.sql: snapshot の時刻は 06:00 のように書きます（朝）");
+  });
+});
+
 describe("embed: true", () => {
   type Built = { build: { rolldownOptions: { input: Record<string, string>; preserveEntrySignatures?: string; output: { entryFileNames: (c: { name: string }) => string } } } };
   const configure = async (user: Record<string, unknown>, command: "build" | "serve" = "build") => {

@@ -36,7 +36,7 @@ export {
   type CompileOptions,
   type CompiledQuery,
 } from "./compile.js";
-export { ident, literal, timeLiteral, isoDate, isoTimestamp, hasUrlScheme, scanSources, apiParams, unquoteString, type SourceRef, type SourceFormat } from "./sql.js";
+export { ident, literal, timeLiteral, isoDate, isoTimestamp, hasUrlScheme, scanSources, apiParams, apiCalls, snapshotFile, unquoteString, type SourceRef, type SourceFormat, type ApiParamValue } from "./sql.js";
 export { formatNumber, formatTime, formatValue } from "./format.js";
 export {
   readXlsx,

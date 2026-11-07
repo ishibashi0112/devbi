@@ -29,6 +29,7 @@ data/
   *.xlsx / *.csv / *.arrow / *.parquet / *.json
 api/
   <名前>.sql              # read_api('<名前>') でデータベースから読む SELECT。サーバーだけが使う（ビルドに入らず、開発サーバーもブラウザに渡さない）
+dist/snapshots/           # 毎朝のスナップショット（devbi-serve / devbi-snapshot が作る。git に入れない）
 .env                      # API の接続先（DEVBI_DB=...）。パスワードを含む本物の接続先は .env.local に書き、git に入れない
 .devbi/                   # pnpm gen が作る（エディタの補完と TypeScript の型）。git に入れない
 ```
@@ -376,6 +377,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
 - `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
+- `api/` の SQL の先頭の `-- snapshot:` の行を読み、どの SQL を[スナップショット](#毎朝のスナップショット)から読むかを `virtual:devbi` に入れます（SQL の中身は入れません）。開発サーバーと `vite preview` は、スナップショットのファイルを保存せず、聞かれるたびにデータベースから読んで返します。
 - 開発サーバーは、`api/` の SQL と SQLite のファイル（`*.sqlite`、`*.sqlite3`、`*.db` と、`DEVBI_DB…` の `sqlite:` が指すファイル）をブラウザに渡しません（Vite の `server.fs.deny` に足します。`.env` は Vite がもとから渡しません）。
 
 ## データベースから読む（@devbi/server）
@@ -389,6 +391,8 @@ read_api('orders', from = '2024-04-01')（metrics.yaml の model）  ◀──�
 ```
 
 1 つのダッシュボードを開くと、`read_api` 1 つにつき 1 回だけ API を呼びます。そのあとの絞り込みや並べ替えは、ブラウザの中で集計し直します。
+
+開くたびにデータベースへ行かず、毎朝決まった時刻に作ったものを読ませることもできます（[毎朝のスナップショット](#毎朝のスナップショット)）。
 
 ### `api/<名前>.sql`
 
@@ -406,6 +410,7 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - `:名前` がパラメーターです。値は `read_api` の引数から来ます。同じ名前は何度でも使えます。大文字と小文字は区別しません。PostgreSQL の `::date` はパラメーターになりません。
 - SELECT のすぐ上のコメントは、説明として `api/schema` に出ます。
 - ファイルの先頭の `--` のコメントの中に `-- connection: erp` の行を書くと、接続先を `DEVBI_DB_ERP` にします（SELECT より前に書きます。間に空の行があってもかまいません）。
+- 同じところに `-- snapshot: 06:00` の行を書くと、[スナップショット](#毎朝のスナップショット)から読むようになります。
 - 引用符などの読み方は、接続先のデータベースに合わせます（SQLite と SQL Server の `[列名]`、PostgreSQL の `$$ … $$`）。
 - ファイルを保存すると、開発サーバーではページを読み込み直します。`devbi-serve` は呼ばれるたびにファイルを読むので、止めなくても反映されます。
 
@@ -456,6 +461,48 @@ SQLite は値と、表の列の宣言（`INTEGER`、`REAL`、`TEXT`、`DATE`、`
 - `l.qty * l.unit_price` や `SUM(...)` などの計算した列には宣言がないので、中身から決めます。0 行や全部 NULL で決まらないときは DuckDB の `NULL` 型になります。`SUM()` も比較もそのまま通るので、タイルはエラーにならず空になります。
 - パラメーターの整数は整数として渡します（`TEXT` の列に `code = :code` で `10` を渡すと、SQL に `code = 10` と書いたときと同じく `'10'` に当たります）。
 
+### 毎朝のスナップショット
+
+重い集計や、日に 1 回の更新で足りるデータは、決まった時刻に作ったものを読ませます。開くたびにデータベースへは行きません。
+
+```sql
+-- 日・地域・商品分類ごとの売上。受注日が :from 以降のもの。
+-- snapshot: 06:00
+SELECT o.order_date AS 受注日, c.region AS 地域, SUM(l.qty * l.unit_price) AS 金額
+  FROM …
+ WHERE o.order_date >= :from
+ GROUP BY o.order_date, c.region
+```
+
+- `api/<名前>.sql` の先頭のコメントに `-- snapshot: 06:00` と書きます。時刻はサーバーの時計で、`-- snapshot: 06:00, 12:00` のように何回でも書けます。
+- metrics.yaml の書き方は変わりません（`read_api('sales_daily', from = '2024-04-01')`）。
+- 作るのは、`models/` の `read_api` で使っているものだけです。パラメーターは `read_api` に書いた値で、値の組ごとに 1 つ作ります。
+- 中身は API の答えと同じ Arrow で、サイトの `snapshots/` に `<名前>.arrows`（パラメーターがあれば `<名前>~<16 桁>.arrows`。[ファイル名の決め方](#api-の形)）として置きます。
+- ブラウザは API ではなくこのファイルを読みます。ダッシュボードの見出しの下に「データは 11月8日 6:00 の時点（毎日 6:00 に更新）」と出し、一覧には「毎日 6:00 の時点のデータ」と出します。
+- どの SQL をファイルから読むかは、ビルドしたときに決まります。`-- snapshot:` の行を足したり消したり、`read_api` のパラメーターを変えたりしたら、ビルドし直します。
+- ファイルがないとき（`404`）は、API から読みます（そのときは「…の時点」は出しません）。API もないときは、タイルに「スナップショット（snapshots/…）がありません。サーバーで devbi-snapshot を実行するか…」と出ます。
+
+作るのは次のどれかです。
+
+- **`devbi-serve`**: 起動したときに、ないものと、最後の時刻より古いものを作ります。そのあとは毎日その時刻に作り直します。まだないファイルを聞かれたときは、その場で作ってから返します。
+- **`devbi-snapshot`**: いま作ります。`devbi-serve` を使わず、IIS などにサイトを置くときに、Windows のタスクスケジューラ（または cron）から毎朝動かします。
+- **開発サーバー**: ファイルは作らず、聞かれるたびにデータベースから読みます。
+
+```sh
+npx devbi-snapshot --dir C:\reports\sales --out C:\inetpub\wwwroot\sales
+```
+
+| オプション | 中身 |
+| --- | --- |
+| `--dir` | プロジェクトのフォルダ（`api/`、`models/`、`.env` のある場所）。既定は今のフォルダ |
+| `--out` | サイトのフォルダ。`<out>/snapshots/` に置く。既定は `<dir>/dist`（`@devbi/vite` の `dir` を変えたときは、ビルドの中のそのフォルダ） |
+| `--max-rows` / `--timeout` / `--debug` | `devbi-serve` と同じ |
+| `<名前>…` | その SQL のものだけ作る（`devbi-snapshot sales_daily`）。書かなければ全部 |
+
+- 作れなかったものがあると、終了コードが 1 になります。前のファイルはそのまま残ります（新しいファイルは、書き終わってから置き換えます）。くわしい理由はログに出ます。
+- IIS では `.arrows` も配れるように、`web.config` の `<staticContent>` に `<mimeMap fileExtension=".arrows" mimeType="application/vnd.apache.arrow.stream" />` を足します（[サーバーの設定](#5-サーバーの設定)）。
+- `pnpm build` は `dist/` を作り直すので、`snapshots/` も消えます。`devbi-serve` は次に聞かれたときに作り直します。静的に置くときは、ビルドしたあとに `devbi-snapshot` を動かします。
+
 ### `devbi-serve`
 
 ビルドしたサイト（`dist/`）と API を、1 つのプロセスで出します。社内のサーバーで動かすときの形です。
@@ -476,7 +523,8 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 | `--debug` | データベースのエラーをそのままブラウザに返す。ふつうは「サーバーのログを見てください」とだけ返し、くわしい内容はログに書く |
 
 - 社内の人に見せるときは、IIS などを前に置いて Windows 認証をかけ、`devbi-serve` には IIS から転送します。`devbi-serve` 自身はログインの仕組みを持ちません。
-- API はパスの最後が `/api/schema`、`/api/query` のリクエストに答えます。前に何が付いていてもかまわないので、`/reports/` の下に転送しても動きます。
+- API はパスの最後が `/api/schema`、`/api/query`、`/snapshots/<ファイル>.arrows` のリクエストに答えます。前に何が付いていてもかまわないので、`/reports/` の下に転送しても動きます。
+- [スナップショット](#毎朝のスナップショット)を、決まった時刻に `<static>/snapshots/` に作ります。
 - 知らないホスト名で来たリクエストは `403` で断ります。ほかのサイトが自分の名前をこのコンピューターに向けて（DNS リバインディング）、ブラウザから API を読むのを防ぐためです。`--host 0.0.0.0` で社内に出すときも、名前で開くなら `--allowed-hosts` にその名前を書きます。
 - `dist/assets/` のファイルは長くキャッシュさせ、ほかは毎回確かめさせます。Parquet などの部分読み（Range）にも答えます。
 - 開発サーバー（`vite`）と `vite preview` にも、`@devbi/vite` が同じ API を付けます。こちらはデータベースのエラーをそのまま出します。
@@ -488,8 +536,19 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 `GET <場所>/api/schema`
 
 ```json
-{ "datasets": [{ "name": "orders", "description": "受注の明細…", "params": ["from"], "connection": "DEVBI_DB" }] }
+{
+  "datasets": [
+    { "name": "orders", "description": "受注の明細…", "params": ["from"], "connection": "DEVBI_DB" },
+    { "name": "sales_daily", "description": "…", "params": ["from"], "connection": "DEVBI_DB", "snapshot": ["06:00"] }
+  ],
+  "snapshots": [
+    { "file": "sales_daily~9e979dd94c517434.arrows", "name": "sales_daily", "params": { "from": "2024-04-01" },
+      "times": ["06:00"], "models": ["sales_daily"], "updatedAt": "2026-11-08T21:00:00.000Z" }
+  ]
+}
 ```
+
+`snapshots` は、作るスナップショットと、最後に作った時刻（まだなければ `null`）です。作れなかったときは `error` も付きます。
 
 `POST <場所>/api/query`（`Content-Type: application/json`）
 
@@ -501,7 +560,15 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
 - `Content-Type: application/json` 以外は受け付けません。ほかのサイトのページから、ブラウザに確かめさせずに送ることができないようにするためです。
 
-`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
+`GET <サイト>/snapshots/<ファイル>.arrows`
+
+- スナップショットのファイルです。ふつうの静的ファイルとして置けば足ります（API のサーバーでなくてよい）。ブラウザは `Last-Modified` を「何時点のデータか」として出します。
+- ブラウザは毎回確かめに来ます（`Cache-Control: no-cache` と同じ。変わっていなければ `304` で足ります）。
+- `404` のときは、ブラウザは `POST …/api/query` で読みます。
+- `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。
+- ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
+
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。`run(name, params)` で SQL を 1 つ実行し、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
 ## ほかのアプリの画面に埋め込む
 
@@ -579,7 +646,7 @@ mount("#report", { dashboard: "sales", fetch: (url, init) => fetch(url, { ...ini
 ### 5. サーバーの設定
 
 - `dist/` は、ページと同じオリジン（スキーム・ホスト・ポートが同じ）から配るのがかんたんです。ほかのオリジンから配るときは、そのサーバーがすべてのファイルに CORS のヘッダー（`Access-Control-Allow-Origin`）を付ける必要があります。API がほかのオリジンにあるときは、API にも CORS が要り、Cookie は送られません。
-- IIS は `.wasm` を配らないことがあります。`dist/` に `web.config` を置いて足します。
+- IIS は `.wasm` を配らないことがあります。`dist/` に `web.config` を置いて足します（`.arrows` は[スナップショット](#毎朝のスナップショット)のファイル）。
 
 ```xml
 <configuration>
@@ -587,6 +654,8 @@ mount("#report", { dashboard: "sales", fetch: (url, init) => fetch(url, { ...ini
     <staticContent>
       <remove fileExtension=".wasm" />
       <mimeMap fileExtension=".wasm" mimeType="application/wasm" />
+      <remove fileExtension=".arrows" />
+      <mimeMap fileExtension=".arrows" mimeType="application/vnd.apache.arrow.stream" />
     </staticContent>
   </system.webServer>
 </configuration>
@@ -640,11 +709,12 @@ function DevbiDashboard({ name }: { name: string }) {
 | `<Dashboard project={…} name="sales" back?="#/" theme? isolate? />` | ダッシュボード 1 つ。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
 | `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
 | `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
-| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ |
+| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる） |
+| `snapshotTimesOf(project, dashboard)` | そのダッシュボードが読むスナップショットの時刻（`["06:00"]` など。なければ空）。一覧の「毎日 6:00 の時点のデータ」に使っている |
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
-| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view, { apiUrl?, fetch? })` を持つ（`loadView` に渡すと、そのビューだけほかの API から読む。同じエンジンで、API ごとに別の表になる。`useDevbi().engine` の `loadView(view)` は、そのダッシュボードの API と `fetch` で読む）。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
+| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, snapshots?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view, { apiUrl?, fetch? })` を持つ（`loadView` に渡すと、そのビューだけほかの API から読む。同じエンジンで、API ごとに別の表になる。`useDevbi().engine` の `loadView(view)` は、そのダッシュボードの API と `fetch` で読む）。`snapshots` は[スナップショット](#毎朝のスナップショット)から読む SQL の名前と時刻で、`snapshotsOf(view)` はそのビューが読んだスナップショットと、作られた時刻を返す。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
 | `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない） |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |
@@ -663,6 +733,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `compileQuery(view, query, { filters?, model? })` | クエリを DuckDB の SQL にする。戻り値は `{ sql, fields }`。名前の間違いは `QueryError` |
 | `compileTimeExtent(view)` | 日付の最初と最後を出す SQL |
 | `scanSources(sql)` / `apiParams(source)` | `model` の中の `read_*(...)` と `read_api(...)` を見つける / `read_api` の引数をパラメーターの値にする |
+| `apiCalls(sql)` / `snapshotFile(name, params)` | `model` の中の `read_api` の名前とパラメーター / そのスナップショットのファイル名（ブラウザとサーバーで同じ） |
 | `readXlsx(bytes, { sheet?, range?, header?, allVarchar? })` | Excel を型つきの列で読む。戻り値は `{ sheet, rowCount, columns: [{ name, type, values }] }` |
 | `listSheets(bytes)` | シートの名前 |
 | `writeXlsx([{ name, rows }])` | Excel を書く（テストやサンプルデータ用） |
@@ -712,7 +783,8 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | --- | --- |
 | `pnpm example:dev` | パッケージをビルドして、サンプルの開発サーバーを開く（<http://localhost:5173>） |
 | `pnpm example:preview` | サンプルを静的ビルドして開く（<http://localhost:4173>） |
-| `pnpm example:serve` | サンプルをビルドして、`devbi-serve` で開く（<http://localhost:8080>）。「売上ダッシュボード（DB から）」はサンプルの SQLite を API から読む |
+| `pnpm example:serve` | サンプルをビルドして、`devbi-serve` で開く（<http://localhost:8080>）。「売上ダッシュボード（DB から）」はサンプルの SQLite を API から読み、「売上の日次集計」は起動したときに作ったスナップショットを読む |
+| `pnpm --filter devbi-example-sales exec devbi-snapshot` | サンプルのスナップショットを、いま `dist/snapshots/` に作る（先にビルド） |
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
 | `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |
 | `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式、API）。パッケージのソースを直接読むので、先にビルドしなくてよい。`DEVBI_TEST_PG` に PostgreSQL の URL を入れると、PostgreSQL のテストも流す |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MetricsError, apiParams, componentProblem, defineDashboard, parseMetricsYaml, resolveComponent, scanSources } from "../src/index.js";
+import { MetricsError, apiCalls, apiParams, componentProblem, snapshotFile, defineDashboard, parseMetricsYaml, resolveComponent, scanSources } from "../src/index.js";
 
 function issues(yaml: string): string[] {
   try {
@@ -115,6 +115,21 @@ describe("scanSources", () => {
     expect(() => apiParams(scanSources("SELECT * FROM read_api('orders', from = current_date)")[0]!)).toThrow(
       "read_api('orders') の from には、文字（'…'）か数値か true / false / null を書いてください: current_date",
     );
+  });
+  it("names a snapshot file by the SQL name and the parameters, in any order", () => {
+    expect(apiCalls("SELECT * FROM read_api('a') JOIN read_api('b', x = 1, y = 'z') USING (k)")).toEqual([
+      { name: "a", params: {} },
+      { name: "b", params: { x: 1, y: "z" } },
+    ]);
+    expect(snapshotFile("orders")).toBe("orders.arrows");
+    const one = snapshotFile("orders", { from: "2024-04-01", n: 10 });
+    expect(one).toMatch(/^orders~[0-9a-f]{16}\.arrows$/);
+    expect(snapshotFile("orders", { n: 10, from: "2024-04-01" })).toBe(one);
+    expect(snapshotFile("orders", { from: "2024-04-02", n: 10 })).not.toBe(one);
+    // The same in the browser and on the server: a fixed value, not one that depends on the platform.
+    expect(snapshotFile("orders", { from: "2024-04-01" })).toBe("orders~9e979dd94c517434.arrows");
+    // For other servers (docs/reference.md): FNV-1a 64 over the UTF-8 of [["all",true],["n",1.5],["none",null],["地域","関東"]].
+    expect(snapshotFile("売上", { 地域: "関東", n: 1.5, all: true, none: null })).toBe("売上~ada27a0b5a13b1c4.arrows");
   });
 });
 

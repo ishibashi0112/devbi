@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { createApiHandler, type ApiOptions } from "./handler.js";
 
 export interface ServeOptions extends ApiOptions {
@@ -19,6 +20,11 @@ export interface ServeOptions extends ApiOptions {
    * at this computer (DNS rebinding).
    */
   allowedHosts?: string[] | true;
+  /**
+   * Make the snapshots at their times of day (`-- snapshot: 06:00` in api/*.sql), and when starting those that are
+   * missing or out of date. Default true. They are saved in `snapshotDir` (default `<staticDir>/snapshots`).
+   */
+  schedule?: boolean;
 }
 
 export interface RunningServer {
@@ -135,7 +141,8 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, root: string,
     res.end();
     return;
   }
-  createReadStream(file, { start, end }).on("error", () => res.destroy()).pipe(res);
+  // pipeline closes the file when the browser goes away, too.
+  await pipeline(createReadStream(file, { start, end }), res).catch(() => undefined);
 }
 
 /**
@@ -147,7 +154,7 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
   if (!existsSync(path.join(root, "index.html"))) {
     throw new Error(`${root} に index.html がありません。先にビルドしてください（pnpm build）`);
   }
-  const api = createApiHandler(options);
+  const api = createApiHandler({ ...options, snapshotDir: options.snapshotDir ?? path.join(root, "snapshots") });
   const host = options.host ?? "127.0.0.1";
   const listening = host === "0.0.0.0" || host === "::" ? undefined : host;
   const server = createServer((req, res) => {
@@ -183,6 +190,15 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
   });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : options.port;
+  if (options.schedule !== false) {
+    const jobs = await api.snapshots.jobs().catch(() => []);
+    if (jobs.length) {
+      const names = [...new Map(jobs.map((j) => [j.name, `${j.name}（${j.times.join("、")}）`])).values()];
+      options.log?.(`スナップショット: ${names.join("、")}`);
+    }
+    api.snapshots.schedule();
+    void api.snapshots.catchUp().catch((e: Error) => options.log?.(`スナップショット: ${e.message}`));
+  }
   return {
     server,
     url: `http://${host.includes(":") ? `[${host}]` : host}:${port}/`,
