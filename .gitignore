@@ -7,6 +7,8 @@ dist/
 test-results/
 playwright-report/
 .DS_Store
+# 本物の接続先（パスワードを含む）を書く .env.local は git に入れない
+.env*.local
 
 # 自分の Excel で試すときのファイル（pnpm try-xlsx が作る）。git に入れない
 examples/*/data/local/

@@ -32,12 +32,13 @@ const engines = new Map<string, Promise<Engine>>();
 
 /** One engine per page and DuckDB bundle, shared by every dashboard. */
 export function getEngine(project: Project): Promise<Engine> {
-  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.extensionRepository ?? ""}`;
+  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.apiUrl ?? ""}|${project.extensionRepository ?? ""}`;
   let e = engines.get(key);
   if (!e) {
     e = createEngine({
       bundle: project.duckdb,
       baseUrl: project.baseUrl,
+      ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}),
       ...(project.extensionRepository ? { extensionRepository: project.extensionRepository } : {}),
     });
     engines.set(key, e);

@@ -1,6 +1,6 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
 import * as arrow from "apache-arrow";
-import { hasUrlScheme, ident, readXlsx, scanSources, unquoteString, type MetricsView, type Row, type XlsxTable } from "devbi";
+import { apiParams, hasUrlScheme, ident, readXlsx, scanSources, unquoteString, type MetricsView, type Row, type SourceRef, type XlsxTable } from "devbi";
 
 export interface DuckDBBundle {
   /** URL of `duckdb-base.wasm`. */
@@ -18,6 +18,13 @@ export interface EngineOptions {
    * Point it at a copy on your own server when the browser cannot reach the internet.
    */
   extensionRepository?: string;
+  /**
+   * Where the read-only API is (`read_api('orders')` posts to `<apiUrl>query`). Default: `api/` next to the data
+   * (`baseUrl`).
+   */
+  apiUrl?: string;
+  /** Used for the API requests instead of the global `fetch`: to add a header, for example. */
+  fetch?: typeof fetch;
   debug?: boolean;
 }
 
@@ -106,6 +113,16 @@ function xlsxToArrow(t: XlsxTable): arrow.Table {
   return new arrow.Table(vectors);
 }
 
+/** DuckDB's type for an Arrow column, to create the table when the API returns no rows. */
+function duckType(type: arrow.DataType): string {
+  if (arrow.DataType.isInt(type)) return "BIGINT";
+  if (arrow.DataType.isFloat(type) || arrow.DataType.isDecimal(type)) return "DOUBLE";
+  if (arrow.DataType.isBool(type)) return "BOOLEAN";
+  if (arrow.DataType.isDate(type)) return "DATE";
+  if (arrow.DataType.isTimestamp(type)) return "TIMESTAMP";
+  return "VARCHAR";
+}
+
 async function fetchBytes(url: string): Promise<Uint8Array> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`データを取得できません（${res.status}）: ${url}`);
@@ -127,6 +144,32 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
   });
   const conn = await db.connect();
   const base = new URL(options.baseUrl ?? "./", document.baseURI);
+  const apiUrl = new URL(options.apiUrl ?? "api/", base);
+  const doFetch = options.fetch ?? fetch.bind(globalThis);
+
+  // Rows from the read-only API (api/<name>.sql on the server), as a table named `name`.
+  const loadApi = async (s: SourceRef, name: string) => {
+    const url = new URL("query", apiUrl).href;
+    const res = await doFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/vnd.apache.arrow.stream" },
+      body: JSON.stringify({ name: s.path, params: apiParams(s) }),
+    });
+    if (!res.ok) {
+      const error = await res
+        .json()
+        .then((b: { error?: string }) => b.error)
+        .catch(() => undefined);
+      throw new Error(`API の ${s.path} を読めません（${res.status}）${error ? `: ${error}` : ""}`);
+    }
+    const table = arrow.tableFromIPC(new Uint8Array(await res.arrayBuffer()));
+    if (table.numRows === 0) {
+      const cols = table.schema.fields.map((f) => `${ident(f.name)} ${duckType(f.type)}`);
+      await conn.query(`CREATE TABLE ${ident(name)} (${cols.join(", ")})`);
+    } else {
+      await conn.insertArrowTable(table, { name, create: true });
+    }
+  };
   const registered = new Set<string>();
   const views = new Map<string, Promise<string>>();
   let sourceSeq = 0;
@@ -149,6 +192,12 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
     const sources = scanSources(sql);
     // Replace from the end so earlier offsets stay valid.
     for (const s of [...sources].reverse()) {
+      if (s.format === "api") {
+        const name = `__devbi_src_${++sourceSeq}`;
+        await loadApi(s, name);
+        sql = `${sql.slice(0, s.start)}${ident(name)}${sql.slice(s.end)}`;
+        continue;
+      }
       if (hasUrlScheme(s.path) && !/^https?:/i.test(s.path)) continue;
       const url = new URL(s.path, base).href;
       if (s.format === "xlsx") {

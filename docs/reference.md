@@ -10,6 +10,7 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [エディタでの補完と型（pnpm gen）](#エディタでの補完と型pnpm-gen)
 - [書式](#書式)
 - [@devbi/vite](#devbivite)
+- [データベースから読む（@devbi/server）](#データベースから読むdevbiserver)
 - [@devbi/react](#devbireact)
 - [devbi（コア）](#devbiコア)
 - [見た目の変更（CSS 変数）](#見た目の変更css-変数)
@@ -25,6 +26,9 @@ models/
   <名前>.metrics.yaml     # 指標と軸。dash.json の "metrics" で名前を指す
 data/
   *.xlsx / *.csv / *.arrow / *.parquet / *.json
+api/
+  <名前>.sql              # read_api('<名前>') でデータベースから読む SELECT。サーバーだけが使う（ビルドに入らない）
+.env                      # API の接続先（DEVBI_DB=...）。パスワードを含む本物の接続先は .env.local に書き、git に入れない
 .devbi/                   # pnpm gen が作る（エディタの補完と TypeScript の型）。git に入れない
 ```
 
@@ -66,6 +70,7 @@ measures:
 | `read_arrow('data/x.arrow')` | Arrow IPC | DuckDB が読む |
 | `read_parquet('data/x.parquet')` | Parquet | DuckDB の拡張が要る（[@devbi/vite](#devbivite) の `extensionRepository`） |
 | `read_json(...)` / `read_ndjson(...)` | JSON | DuckDB が読む |
+| `read_api('orders', from = '2025-04-01')` | データベース | サーバーの `api/orders.sql` の結果を API から受け取る。[データベースから読む](#データベースから読むdevbiserver) |
 
 パスはプロジェクトからの相対パスで、ブラウザが `data/` から取りに行きます。`https://` の URL も書けます。ブラウザではワイルドカード（`*`）は使えません。`model` の中では JOIN や WHERE、列の計算など、DuckDB の SQL が自由に書けます。
 
@@ -367,7 +372,124 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - 開発サーバーでは、dash.json・metrics.yaml・data/ のファイルを保存するとページを読み込み直します。
 - 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
-- ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。
+- ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
+- `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。接続先は環境変数か、Vite の root の `.env` / `.env.local` の `DEVBI_DB…` から読みます。
+
+## データベースから読む（@devbi/server）
+
+データベースの表は、サーバーに置いた SQL ファイルを通して読みます。ブラウザは SQL を送らず、名前とパラメーターだけを送ります。
+
+```
+api/orders.sql（サーバー）  ──  SELECT を読み取り専用で実行  ──▶  Arrow で返す
+        ▲                                                          │
+read_api('orders', from = '2024-04-01')（metrics.yaml の model）  ◀──┘  ブラウザの DuckDB-wasm が集計
+```
+
+1 つのダッシュボードを開くと、`read_api` 1 つにつき 1 回だけ API を呼びます。そのあとの絞り込みや並べ替えは、ブラウザの中で集計し直します。
+
+### `api/<名前>.sql`
+
+```sql
+-- 受注の明細（1 行 = 受注の 1 明細）。受注日が :from 以降のもの。
+SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * l.unit_price AS 金額
+  FROM orders o
+  JOIN order_lines l ON l.order_no = o.order_no
+  JOIN customers c ON c.id = o.customer_id
+ WHERE o.order_date >= :from
+```
+
+- 1 つのファイルに書けるのは、`SELECT` か `WITH` で始まる文 1 つだけです。最後の `;` はあってもなくてもかまいません。
+- `INSERT`、`UPDATE`、`DELETE`、`SELECT ... INTO`、`FOR UPDATE` など、書き込みやロックにつながる言葉があると実行しません。同じ名前の列は `"update"` のように引用符で囲みます。
+- `:名前` がパラメーターです。値は `read_api` の引数から来ます。同じ名前は何度でも使えます。大文字と小文字は区別しません。PostgreSQL の `::date` はパラメーターになりません。
+- 上のコメントは説明として `api/schema` に出ます。コメントに `-- connection: erp` と書くと、接続先を `DEVBI_DB_ERP` にします。
+- ファイルを保存すると、開発サーバーではページを読み込み直します。`devbi-serve` は呼ばれるたびにファイルを読むので、止めなくても反映されます。
+
+### `read_api`
+
+```yaml
+model: SELECT * FROM read_api('orders', from = '2024-04-01')
+```
+
+- 最初の引数は `api/` のファイル名（`.sql` なし）です。
+- パラメーターは `名前 = 値` の形で書きます。値に書けるのは文字（`'…'`）、数値、`true` / `false`、`null` だけです。SQL のすべてのパラメーターに値が要ります。
+- `read_api` の結果は、ほかの `read_*` と同じように `model` の SQL の中で表として使えます（JOIN、WHERE、`CAST` など）。
+- ビルドの時に、`api/<名前>.sql` があるかを確かめます。
+
+### 接続先
+
+接続先の URL は環境変数に書きます。`devbi-serve` と開発サーバーは、プロジェクトの `.env` と `.env.local` も読みます（`.env.local` が優先、すでにある環境変数がさらに優先）。
+
+| 変数 | 使うファイル |
+| --- | --- |
+| `DEVBI_DB` | ふつうの `api/*.sql` |
+| `DEVBI_DB_<名前>` | `-- connection: <名前>` と書いた `api/*.sql`（名前は大文字、英数字以外は `_`） |
+
+| データベース | URL の例 | 補足 |
+| --- | --- | --- |
+| SQLite | `sqlite:db/sales.sqlite` | 相対パスはプロジェクトのフォルダから。読み取り専用で開く。Node 22.16 以上 |
+| PostgreSQL | `postgres://user:pass@host:5432/db` | `pg` を入れる（`npm install pg`）。毎回 `BEGIN READ ONLY` の中で実行し、60 秒で打ち切る |
+
+- データベースのユーザーは SELECT の権限だけにしてください。上の確認は最初の守りで、最後の守りではありません。
+- パスワードに `@` や `:` が入るときは、`%40`、`%3A` のように書きます。
+- PostgreSQL の `timestamptz` は、接続のタイムゾーンでの時刻になります。変えるときは URL に `?options=-c%20TimeZone%3DAsia%2FTokyo` を足します。
+
+列の型は次のように受け取ります。
+
+| データベースの型 | DuckDB での型 |
+| --- | --- |
+| 整数 | `BIGINT` |
+| 小数（`numeric`、`real`、`double` など） | `DOUBLE` |
+| 真偽 | `BOOLEAN` |
+| 日付 | `DATE` |
+| 日時（`timestamp`、`timestamptz`） | `TIMESTAMP`（データベースでの時刻のまま） |
+| そのほか（文字、`json` など） | `VARCHAR` |
+
+SQLite は、表の列の宣言（`DATE`、`DATETIME`、`REAL`、`BOOLEAN` など）を見て型を決めます。計算した列は中身から決めます。
+
+### `devbi-serve`
+
+ビルドしたサイト（`dist/`）と API を、1 つのプロセスで出します。社内のサーバーで動かすときの形です。
+
+```sh
+pnpm build                  # dist/ を作る
+npx devbi-serve --dir .     # http://127.0.0.1:8080/
+```
+
+| オプション | 中身 |
+| --- | --- |
+| `--dir` | プロジェクトのフォルダ（`api/` と `.env` のある場所）。既定は今のフォルダ |
+| `--static` | 出すサイトのフォルダ。既定は `<dir>/dist` |
+| `--port` / `--host` | 既定は `8080` / `127.0.0.1`（このコンピューターからだけ） |
+| `--max-rows` | 1 回に返す行の上限。既定は 1,000,000。超えると日本語のエラー |
+| `--timeout` | 1 回の SQL の時間の上限（秒）。既定は 60（PostgreSQL） |
+| `--debug` | データベースのエラーをそのままブラウザに返す。ふつうは「サーバーのログを見てください」とだけ返し、くわしい内容はログに書く |
+
+- 社内の人に見せるときは、IIS などを前に置いて Windows 認証をかけ、`devbi-serve` には IIS から転送します。`devbi-serve` 自身はログインの仕組みを持ちません。
+- API はパスの最後が `/api/schema`、`/api/query` のリクエストに答えます。前に何が付いていてもかまわないので、`/reports/` の下に転送しても動きます。
+- `dist/assets/` のファイルは長くキャッシュさせ、ほかは毎回確かめさせます。Parquet などの部分読み（Range）にも答えます。
+- 開発サーバー（`vite`）と `vite preview` にも、`@devbi/vite` が同じ API を付けます。こちらはデータベースのエラーをそのまま出します。
+
+### API の形
+
+ほかの言語のサーバー（ASP.NET など）で同じ API を作るときの決まりです。
+
+`GET <場所>/api/schema`
+
+```json
+{ "datasets": [{ "name": "orders", "description": "受注の明細…", "params": ["from"], "connection": "DEVBI_DB" }] }
+```
+
+`POST <場所>/api/query`（`Content-Type: application/json`）
+
+```json
+{ "name": "orders", "params": { "from": "2024-04-01" } }
+```
+
+- 成功: `200`、`Content-Type: application/vnd.apache.arrow.stream`（Arrow IPC のストリーム）。`Accept-Encoding: gzip` なら gzip で返す。行数は `X-DevBI-Rows` ヘッダー。
+- 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
+- `Content-Type: application/json` 以外は受け付けません。ほかのサイトのページから、ブラウザに確かめさせずに送ることができないようにするためです。
+
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。`serve(options)` は `devbi-serve` の中身です。
 
 ## @devbi/react
 
@@ -379,7 +501,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
-| `createEngine({ bundle, baseUrl?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
+| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
 | `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない） |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |
@@ -397,6 +519,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `checkQuery(obj, source)` | クエリだけを検証する |
 | `compileQuery(view, query, { filters?, model? })` | クエリを DuckDB の SQL にする。戻り値は `{ sql, fields }`。名前の間違いは `QueryError` |
 | `compileTimeExtent(view)` | 日付の最初と最後を出す SQL |
+| `scanSources(sql)` / `apiParams(source)` | `model` の中の `read_*(...)` と `read_api(...)` を見つける / `read_api` の引数をパラメーターの値にする |
 | `readXlsx(bytes, { sheet?, range?, header?, allVarchar? })` | Excel を型つきの列で読む。戻り値は `{ sheet, rowCount, columns: [{ name, type, values }] }` |
 | `listSheets(bytes)` | シートの名前 |
 | `writeXlsx([{ name, rows }])` | Excel を書く（テストやサンプルデータ用） |
@@ -441,8 +564,10 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | --- | --- |
 | `pnpm example:dev` | パッケージをビルドして、サンプルの開発サーバーを開く（<http://localhost:5173>） |
 | `pnpm example:preview` | サンプルを静的ビルドして開く（<http://localhost:4173>） |
+| `pnpm example:serve` | サンプルをビルドして、`devbi-serve` で開く（<http://localhost:8080>）。「売上ダッシュボード（DB から）」はサンプルの SQLite を API から読む |
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
 | `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |
-| `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式） |
-| `pnpm e2e` | サンプルを静的ビルドして、ブラウザで操作を確かめる |
+| `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式、API）。`DEVBI_TEST_PG` に PostgreSQL の URL を入れると、PostgreSQL のテストも流す |
+| `pnpm e2e` | サンプルをビルドして `devbi-serve` で開き、ブラウザで操作を確かめる |
+| `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
 | `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |

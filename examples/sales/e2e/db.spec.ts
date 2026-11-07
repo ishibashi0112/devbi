@@ -1,0 +1,32 @@
+import { expect, test } from "@playwright/test";
+
+// The same orders as data/sales.xlsx, kept in db/sales.sqlite and read through api/orders.sql (devbi-serve).
+const tile = (page: import("@playwright/test").Page, id: string) => page.locator(`[data-tile="${id}"]`);
+const kpi = (page: import("@playwright/test").Page, id: string) => tile(page, id).getByTestId("kpi-value");
+
+test("a dashboard reads a database through the API and shows the same numbers as the Excel one", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const api: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/")) api.push(`${r.method()} ${new URL(r.url()).pathname} ${r.postData() ?? ""}`);
+  });
+  await page.goto("/#/sales-db");
+  await expect(kpi(page, "kpi-revenue")).toHaveText(/^¥[\d,]+$/);
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  await expect(page.locator(".devbi-error")).toHaveCount(0);
+  await tile(page, "period").getByRole("button", { name: "全期間" }).click();
+  await expect(kpi(page, "kpi-revenue")).toHaveText("¥193,161,410");
+  await expect(tile(page, "region").locator("li")).toHaveCount(6);
+  // One request for the whole dashboard: the browser aggregates the rows itself. The SQL stays on the server.
+  expect(api).toEqual(['POST /api/query {"name":"orders","params":{"from":"2024-04-01"}}']);
+  expect(errors).toEqual([]);
+});
+
+test("the API lists its SQL files and answers in Japanese when something is wrong", async ({ request }) => {
+  const schema = await (await request.get("/api/schema")).json();
+  expect(schema.datasets).toEqual([{ name: "orders", description: expect.stringContaining("受注の明細"), params: ["from"], connection: "DEVBI_DB" }]);
+  const res = await request.post("/api/query", { data: { name: "orders", params: {} } });
+  expect(res.status()).toBe(400);
+  expect((await res.json()).error).toBe("api/orders.sql: パラメーター :from の値がありません。read_api('orders', from = ...) と書きます");
+});

@@ -8,6 +8,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      # For the read-only API's PostgreSQL tests (packages/server/test/postgres.test.ts).
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: devbi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DEVBI_TEST_PG: postgres://postgres:devbi@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

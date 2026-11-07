@@ -25,6 +25,8 @@ export interface ProjectInput {
   components?: Record<string, () => Promise<TileModule>>;
   /** Base URL for data files. */
   baseUrl?: string;
+  /** Where the read-only API is, for `read_api(...)`. Default: `api/` under `baseUrl`. */
+  apiUrl?: string;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
 }
@@ -34,6 +36,7 @@ export interface Project {
   metrics: Record<string, MetricsView>;
   components: Record<string, () => Promise<TileModule>>;
   baseUrl: string;
+  apiUrl?: string;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
 }
@@ -51,6 +54,7 @@ export function loadProject(input: ProjectInput): Project {
     metrics,
     components: input.components ?? {},
     baseUrl: input.baseUrl ?? "./",
+    ...(input.apiUrl ? { apiUrl: input.apiUrl } : {}),
     duckdb: input.duckdb,
     ...(input.extensionRepository ? { extensionRepository: input.extensionRepository } : {}),
   };

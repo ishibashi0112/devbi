@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MetricsError, componentProblem, defineDashboard, parseMetricsYaml, resolveComponent, scanSources } from "../src/index.js";
+import { MetricsError, apiParams, componentProblem, defineDashboard, parseMetricsYaml, resolveComponent, scanSources } from "../src/index.js";
 
 function issues(yaml: string): string[] {
   try {
@@ -107,6 +107,14 @@ describe("scanSources", () => {
       { fn: "read_xlsx", format: "xlsx", path: "data/a.xlsx", args: { sheet: "'明細, 2026'", header: "true" } },
       { fn: "read_csv_auto", format: "csv", path: "data/b's.csv", args: {} },
     ]);
+  });
+  it("finds read_api and reads its parameters as literals", () => {
+    const [s] = scanSources("SELECT * FROM read_api('orders', from = '2024-04-01', n = 10, on = true, x = null, r = '関東')");
+    expect(s).toMatchObject({ fn: "read_api", format: "api", path: "orders" });
+    expect(apiParams(s!)).toEqual({ from: "2024-04-01", n: 10, on: true, x: null, r: "関東" });
+    expect(() => apiParams(scanSources("SELECT * FROM read_api('orders', from = current_date)")[0]!)).toThrow(
+      "read_api('orders') の from には、文字（'…'）か数値か true / false / null を書いてください: current_date",
+    );
   });
 });
 

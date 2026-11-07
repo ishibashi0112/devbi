@@ -8,5 +8,5 @@ export default defineConfig({
   clean: true,
   target: "node22",
   platform: "node",
-  external: ["vite"],
+  external: ["vite", "@devbi/server"],
 });
