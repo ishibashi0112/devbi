@@ -1,0 +1,45 @@
+{
+  "name": "@devbi/vite",
+  "version": "0.0.0",
+  "description": "Vite plugin for DevBI: reads dashboards/ and models/, bundles promoted tiles, copies data files into the build.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ishibashi0112/devbi.git",
+    "directory": "packages/vite"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./client.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "client.d.ts"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "devbi": "workspace:*",
+    "yaml": "^2.9.1"
+  },
+  "peerDependencies": {
+    "@devbi/react": "workspace:*",
+    "vite": ">=7"
+  },
+  "devDependencies": {
+    "@devbi/react": "workspace:*",
+    "tsup": "^9.0.0",
+    "vite": "^8.3.6"
+  }
+}

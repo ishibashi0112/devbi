@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+test-results/
+playwright-report/
+.DS_Store
+
+# 自分の Excel で試すときのファイル（pnpm try-xlsx が作る）。git に入れない
+examples/*/data/local/
+examples/*/models/local_*
+examples/*/dashboards/local_*
