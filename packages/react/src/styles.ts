@@ -90,6 +90,21 @@ export const css = `
 .devbi-table tbody tr { cursor: pointer; }
 .devbi-table tbody tr:hover { background: var(--devbi-accent-soft); }
 .devbi-table tr.devbi-selected { background: var(--devbi-accent-soft); }
+.devbi-tile-table .devbi-tile-body { padding: 4px 0 0; overflow: hidden; }
+.devbi-grid-wrap { height: 100%; }
+.devbi-root .devbi-table-grid {
+  --ssg-cell-bg: var(--devbi-card); --ssg-header-bg: var(--devbi-card); --ssg-readonly-bg: var(--devbi-card);
+  --ssg-cell-text: var(--devbi-text); --ssg-readonly-text: var(--devbi-text); --ssg-header-text: var(--devbi-muted);
+  --ssg-accent: var(--devbi-accent); --ssg-line: var(--devbi-border); --ssg-line-strong: var(--devbi-border); --ssg-divider: var(--devbi-border);
+  border: 0; border-radius: 0; box-shadow: none;
+}
+.devbi-table-grid .ssg-body-cell { cursor: pointer; }
+.devbi-table-grid .devbi-dimmed { opacity: 1; }
+.devbi-table-grid .ssg-body-cell.devbi-dimmed { opacity: 0.45; }
+.devbi-table-grid .ssg-body-cell.devbi-selected { background: var(--devbi-accent-soft); }
+/* Fitting widths measures each text in a hidden copy of a cell, whose width comes out rounded to whole pixels: a value
+   0.4px wider than that showed as "¥10,489,5…". One extra pixel on the hidden copy only (not on the shown cells). */
+.devbi-table-grid .ssg-shell > [aria-hidden="true"] > .ssg-body-cell::after { content: ""; display: inline-block; width: 1px; }
 .devbi-pivot tbody th { font-weight: 500; }
 .devbi-pivot tbody td { cursor: pointer; }
 .devbi-pivot .devbi-total, .devbi-pivot tfoot th { font-weight: 650; }
