@@ -133,7 +133,7 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
             <div className="devbi-error">{error.message}</div>
           ) : Body ? (
             <ErrorBoundary resetKey={data.rows}>
-              <Suspense fallback={null}>
+              <Suspense fallback={<div className="devbi-tile-pending" aria-busy="true" />}>
                 <Body {...props} />
               </Suspense>
             </ErrorBoundary>

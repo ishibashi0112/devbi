@@ -1,3 +1,4 @@
+import { loadChunk } from "./chunk.js";
 import type { Engine, EngineOptions } from "./engine.js";
 
 /**
@@ -5,6 +6,6 @@ import type { Engine, EngineOptions } from "./engine.js";
  * as its own chunk, so the page can draw before it arrives.
  */
 export async function createEngine(options: EngineOptions): Promise<Engine> {
-  const { createEngine: create } = await import("./engine.js");
+  const { createEngine: create } = await loadChunk(() => import("./engine.js"));
   return create(options);
 }

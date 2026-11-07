@@ -1,5 +1,6 @@
 import type { TileProps } from "devbi";
-import { lazy, type ComponentType } from "react";
+import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { loadChunk } from "../chunk.js";
 import { BarList } from "./BarList.js";
 import { DateRange } from "./DateRange.js";
 import { Kpi } from "./Kpi.js";
@@ -9,13 +10,15 @@ import { SelectFilter } from "./SelectFilter.js";
 import { Table } from "./Table.js";
 
 export interface BuiltinTile {
-  component: ComponentType<TileProps>;
+  /** Render it as an element (`<C {...props} />`); the chart tiles are lazy and need a `<Suspense>` above them. */
+  component: ComponentType<TileProps> | LazyExoticComponent<ComponentType<TileProps>>;
   /** The tile reads no rows itself (it may run its own queries). */
   noQuery?: boolean;
 }
 
 // Observable Plot and d3 come with the first chart on the page, as their own chunk.
-const chart = (kind: "bar" | "line" | "area") => lazy(() => import("./PlotChart.js").then((m) => ({ default: m.makeChart(kind) })));
+const chart = (kind: "bar" | "line" | "area") =>
+  lazy(() => loadChunk(() => import("./PlotChart.js")).then((m) => ({ default: m.makeChart(kind) })));
 
 /**
  * Built-in tile types for `"type"` in dash.json. The chart tiles (`bar`, `line`, `area`) are `React.lazy`

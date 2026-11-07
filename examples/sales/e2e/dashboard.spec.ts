@@ -94,15 +94,24 @@ test("chart tooltips use the tile background in dark mode", async ({ page }) => 
   expect(fill).toBe(card);
 });
 
-test("the page's own script stays small; charts and the DuckDB engine load as their own files", async ({ page }) => {
+test("the page's own script stays small; charts and the DuckDB engine load as their own files", async ({ page, request }) => {
+  const html = await (await request.get("/")).text();
+  const entry = /<script type="module"[^>]*src="\.\/assets\/([^"]+\.js)"/.exec(html)?.[1];
+  expect(entry).toBeTruthy();
   const scripts = new Map<string, number>();
   page.on("response", (r) => {
     const name = new URL(r.url()).pathname.split("/").pop() ?? "";
     if (name.endsWith(".js")) r.body().then((b) => scripts.set(name, b.length), () => undefined);
   });
   await ready(page);
-  await expect.poll(() => [...scripts.keys()].filter((n) => /^(engine|PlotChart)-/.test(n)).length).toBe(2);
-  const main = [...scripts].filter(([n]) => n.startsWith("index-"));
-  expect(main).toHaveLength(1);
-  expect(main[0]![1]).toBeLessThan(500_000);
+  await expect.poll(() => [entry!, ...[...scripts.keys()].filter((n) => /^(engine|PlotChart)-/.test(n))].filter((n) => scripts.has(n)).length).toBe(3);
+  expect(scripts.get(entry!)).toBeLessThan(500_000);
+});
+
+test("a chart file that cannot be fetched (the site was rebuilt) asks for a reload, in Japanese", async ({ page }) => {
+  await page.route(/\/assets\/PlotChart-[^/]+\.js$/, (route) => route.fulfill({ status: 404, body: "" }));
+  await page.goto("/#/sales");
+  await expect(tile(page, "monthly").locator(".devbi-error")).toContainText("ページを読み込み直してください");
+  // Tiles that do not need the chart file still work.
+  await expect(kpi(page, "kpi-revenue")).toHaveText(/^¥[\d,]+$/);
 });
