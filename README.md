@@ -14,7 +14,7 @@ pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG があれば PostgreSQL も）
-pnpm e2e              # examples/sales をビルドして devbi-serve で開き、Playwright で確認
+pnpm e2e              # パッケージと examples/sales をビルドして devbi-serve で開き、Playwright で確認
 ```
 
 画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。

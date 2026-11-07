@@ -16,7 +16,7 @@
     "example:serve": "pnpm example:build && pnpm --filter devbi-example-sales serve",
     "try-xlsx": "pnpm build && pnpm --filter devbi-example-sales try-xlsx",
     "gen": "pnpm build && pnpm --filter devbi-example-sales gen",
-    "e2e": "pnpm --filter devbi-example-sales e2e"
+    "e2e": "pnpm build && pnpm --filter devbi-example-sales e2e"
   },
   "devDependencies": {
     "@duckdb/node-api": "2.0.0-r.1",
