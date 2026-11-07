@@ -46,6 +46,8 @@ test("clicking a region cross-filters the other tiles but not itself", async ({ 
   await expect(kpi(page, "kpi-revenue")).toHaveText(kantoValue);
   expect(kantoValue).not.toBe(before);
   await expect(tile(page, "region").locator("li")).toHaveCount(6);
+  // The list itself is not filtered: the other regions are dimmed.
+  await expect(tile(page, "region").getByRole("button", { name: /近畿/ })).toHaveCSS("opacity", "0.45");
   await expect(page.locator(".devbi-filters")).toContainText("地域: 関東");
   // The pivot is filtered too: one row plus totals.
   await expect(tile(page, "region-quarter").locator("tbody tr")).toHaveCount(1);
@@ -95,7 +97,7 @@ test("chart tooltips use the tile background in dark mode", async ({ page }) => 
   expect(fill).toBe(card);
 });
 
-test("the page's own script stays small; charts and the DuckDB engine load as their own files", async ({ page, request }) => {
+test("the page's own script stays small; charts, the table grid and the DuckDB engine load as their own files", async ({ page, request }) => {
   const html = await (await request.get("/")).text();
   const entry = /<script type="module"[^>]*src="\.\/assets\/([^"]+\.js)"/.exec(html)?.[1];
   expect(entry).toBeTruthy();
@@ -105,7 +107,7 @@ test("the page's own script stays small; charts and the DuckDB engine load as th
     if (name.endsWith(".js")) r.body().then((b) => scripts.set(name, b.length), () => undefined);
   });
   await ready(page);
-  await expect.poll(() => [entry!, ...[...scripts.keys()].filter((n) => /^(engine|PlotChart)-/.test(n))].filter((n) => scripts.has(n)).length).toBe(3);
+  await expect.poll(() => [entry!, ...[...scripts.keys()].filter((n) => /^(engine|PlotChart|GridTable)-/.test(n))].filter((n) => scripts.has(n)).length).toBe(4);
   expect(scripts.get(entry!)).toBeLessThan(500_000);
 });
 
@@ -117,7 +119,7 @@ test("a chart file that cannot be fetched (the site was rebuilt) asks for a relo
   await expect(kpi(page, "kpi-revenue")).toHaveText(/^¥[\d,]+$/);
 });
 
-test("the table tile (spreadsheet-grid): clicking a row filters the other tiles, the column menu sorts", async ({ page }) => {
+test("the table tile (spreadsheet-grid): a row click or Enter filters the other tiles, the column menu sorts", async ({ page }) => {
   await ready(page);
   const products = tile(page, "products");
   const before = await kpi(page, "kpi-revenue").innerText();
@@ -128,12 +130,37 @@ test("the table tile (spreadsheet-grid): clicking a row filters the other tiles,
   await expect(products.getByRole("gridcell", { name: "グリス" })).toHaveClass(/devbi-dimmed/);
   await products.getByRole("gridcell", { name: "ノギス" }).click();
   await expect(page.locator(".devbi-chip")).toHaveCount(1); // only the period is left
+  // From the keyboard: Enter on the active cell selects its row; Shift+click only extends the copy range.
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".devbi-filters")).toContainText("商品:");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".devbi-chip")).toHaveCount(1);
+  await products.getByRole("gridcell", { name: "グリス" }).click({ modifiers: ["Shift"] });
+  await expect(page.locator(".devbi-chip")).toHaveCount(1);
+
+  // Fitted widths show every value whole (no "¥10,489,5…").
+  const clipped = await products.getByRole("gridcell").evaluateAll((cells) =>
+    cells
+      .filter((c) => {
+        const range = document.createRange();
+        range.selectNodeContents(c);
+        const box = c.firstElementChild ?? c;
+        return range.getBoundingClientRect().width > box.getBoundingClientRect().width + 0.01;
+      })
+      .map((c) => (c as HTMLElement).innerText),
+  );
+  expect(clipped).toEqual([]);
 
   const header = products.getByRole("columnheader", { name: /数量/ });
   await header.hover();
   await header.getByRole("button", { name: "列メニュー" }).click();
   await page.getByText("昇順で並び替え").click();
-  const quantities = await products.locator('[role=gridcell][data-ssg-col-key="quantity"]').allInnerTexts();
-  const numbers = quantities.map((q) => Number(q.replaceAll(",", "")));
-  expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+  const quantities = async () =>
+    (await products.locator('[role=gridcell][data-ssg-col-key="quantity"]').allInnerTexts()).map((q) => Number(q.replaceAll(",", "")));
+  await expect.poll(async () => (await quantities()).length).toBeGreaterThan(1);
+  await expect.poll(async () => {
+    const n = await quantities();
+    return n.every((v, i) => i === 0 || n[i - 1]! <= v);
+  }).toBe(true);
 });

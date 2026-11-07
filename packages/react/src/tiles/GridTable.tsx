@@ -1,7 +1,7 @@
 import { createSpreadsheetGrid, columnAutosizeFeature, columnMenuFeature, type GridColumn } from "@ishibashi0112/spreadsheet-grid/lite";
 import "@ishibashi0112/spreadsheet-grid/style.css";
 import type { Row, TileProps } from "devbi";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { dimensions, filterFor, isSelected } from "./util.js";
 
 // Built once, at module level: only the features the table tile uses (sorting from the column menu,
@@ -13,26 +13,60 @@ function sameRow(selection: TileProps["selection"], row: Row): boolean | undefin
   return selection.every((f) => isSelected(selection, f.field, row[f.field] ?? null));
 }
 
-/** The grid follows the dashboard's light / dark: an explicit `data-theme` on `.devbi-root`, else the OS. */
-function useTheme(ref: React.RefObject<HTMLElement | null>): "light" | "dark" | "auto" {
-  const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto");
+/**
+ * The grid follows the dashboard's light / dark, like DevBI's CSS: light when `.devbi-root` has
+ * `data-theme="light"`, otherwise the OS setting. Watches the attribute, so switching it later works too.
+ */
+function useTheme(ref: React.RefObject<HTMLElement | null>): "light" | "auto" {
+  const [theme, setTheme] = useState<"light" | "auto">("auto");
   useLayoutEffect(() => {
-    const t = ref.current?.closest(".devbi-root")?.getAttribute("data-theme");
-    setTheme(t === "light" || t === "dark" ? t : "auto");
+    const root = ref.current?.closest(".devbi-root");
+    if (!root) return;
+    const read = () => setTheme(root.getAttribute("data-theme") === "light" ? "light" : "auto");
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
   }, [ref]);
   return theme;
 }
 
+/** A row's identity: its dimension and time values (each row of a grouped result has its own). */
+function keyOf(row: Row, keys: string[]): string {
+  return JSON.stringify(keys.map((k) => (row[k] instanceof Date ? (row[k] as Date).getTime() : row[k])));
+}
+
 /**
  * The `table` tile: every result field in a read-only spreadsheet-grid. Sort and fit widths from the column
- * menu (⋮), select cells and copy them (Ctrl/⌘+C) to paste into Excel. Clicking a row selects its dimension
- * and time values, which filters the other tiles.
+ * menu (⋮), select cells and copy them (Ctrl/⌘+C) to paste into Excel. Clicking a row, or Enter / Space on
+ * a cell, selects its dimension and time values, which filters the other tiles.
  */
 export function GridTable({ rows, fields, format, selection, select, tile }: TileProps) {
   const ref = useRef<HTMLDivElement>(null);
   const theme = useTheme(ref);
   const dims = dimensions(fields);
   const time = fields.find((f) => f.kind === "time");
+  const keys = useMemo(() => fields.filter((f) => f.kind !== "measure").map((f) => f.name), [fields]);
+  const activeRow = useRef<Row | null>(null);
+  // Select a row's dimension and time values (filters the other tiles); the same row again clears it.
+  const toggle = useCallback(
+    (r: Row) => {
+      if (!dims.length && !time) return;
+      if (sameRow(selection, r)) return select(null);
+      select([
+        ...dims.map((d) => filterFor(d, r[d.name] ?? null)),
+        ...(time && r[time.name] instanceof Date ? [filterFor(time, r[time.name] ?? null)] : []),
+      ]);
+    },
+    [dims, time, selection, select],
+  );
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    // Enter / Space on the active cell select its row, as a click does (the grid is read-only, so they are free).
+    if ((e.key === "Enter" || e.key === " ") && activeRow.current && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      toggle(activeRow.current);
+    }
+  };
   const columns = useMemo(
     (): GridColumn<Row>[] =>
       fields.map((f) => ({
@@ -52,10 +86,11 @@ export function GridTable({ rows, fields, format, selection, select, tile }: Til
     [fields, format],
   );
   return (
-    <div ref={ref} className="devbi-grid-wrap">
+    <div ref={ref} className="devbi-grid-wrap" onKeyDown={onKeyDown}>
       <Grid<Row>
-        className="devbi-grid"
+        className="devbi-table-grid"
         rows={rows}
+        rowKeyGetter={keys.length ? (r) => keyOf(r, keys) : undefined}
         columns={columns}
         readOnly
         showTopBar={false}
@@ -63,19 +98,20 @@ export function GridTable({ rows, fields, format, selection, select, tile }: Til
         theme={theme}
         density="compact"
         height="100%"
-        autoSizeColumns="onDataChange"
+        // Fit the widths to the first data; later filters keep them (and keep widths the user changed).
+        autoSizeColumns="onMount"
         ariaLabel={tile.title ?? tile.id}
         getRowClassName={(r) => {
           const sel = sameRow(selection, r);
           return sel === undefined ? undefined : sel ? "devbi-selected" : "devbi-dimmed";
         }}
-        onCellClick={({ row: r }) => {
-          if (!dims.length && !time) return;
-          if (sameRow(selection, r)) return select(null);
-          select([
-            ...dims.map((d) => filterFor(d, r[d.name] ?? null)),
-            ...(time && r[time.name] instanceof Date ? [filterFor(time, r[time.name] ?? null)] : []),
-          ]);
+        onActiveCellChange={(cell) => {
+          activeRow.current = cell?.row ?? null;
+        }}
+        onCellClick={({ row: r, event }) => {
+          // Shift / Ctrl / ⌘ + click extend or add to the selected range for copying; they do not filter.
+          if (event.shiftKey || event.ctrlKey || event.metaKey) return;
+          toggle(r);
         }}
       />
     </div>
