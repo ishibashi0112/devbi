@@ -12,7 +12,7 @@ import {
   type Row,
 } from "devbi";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { Engine } from "./engine.js";
+import type { ApiOptions, Engine } from "./engine.js";
 import { createEngine } from "./load-engine.js";
 import type { Project } from "./project.js";
 import { DashboardSelection } from "./selection.js";
@@ -30,21 +30,33 @@ const Ctx = createContext<DevbiContextValue | null>(null);
 
 const engines = new Map<string, Promise<Engine>>();
 
-/** One engine per page and DuckDB bundle, shared by every dashboard. */
+/**
+ * One engine per page and project (DuckDB bundle and data folder), shared by every dashboard. Each dashboard's
+ * API location and fetch go with its views (`loadView(view, { apiUrl, fetch })`), not with the engine.
+ */
 export function getEngine(project: Project): Promise<Engine> {
-  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.apiUrl ?? ""}|${project.extensionRepository ?? ""}`;
+  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.extensionRepository ?? ""}`;
   let e = engines.get(key);
   if (!e) {
     e = createEngine({
       bundle: project.duckdb,
       baseUrl: project.baseUrl,
-      ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}),
       ...(project.extensionRepository ? { extensionRepository: project.extensionRepository } : {}),
     });
     engines.set(key, e);
     e.catch(() => engines.delete(key));
   }
   return e;
+}
+
+/**
+ * The page's engine as the dashboard sees it: `loadView(view)` reads `read_api` from the dashboard's API with its
+ * fetch (the project's `apiUrl` and `fetch`), also for promoted tiles that call `useDevbi().engine` themselves.
+ */
+function forDashboard(engine: Engine, project: Project): Engine {
+  const api: ApiOptions = { ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}), ...(project.fetch ? { fetch: project.fetch } : {}) };
+  if (!api.apiUrl && !api.fetch) return engine;
+  return { ...engine, loadView: (view, options) => engine.loadView(view, options ?? api) };
 }
 
 export function DevbiProvider({
@@ -65,7 +77,7 @@ export function DevbiProvider({
       if (!v) throw new Error(`指標ファイル models/${n}.metrics.yaml がありません`);
       return v;
     };
-    return { project, dashboard, engine: getEngine(project), selection, view };
+    return { project, dashboard, engine: getEngine(project).then((e) => forDashboard(e, project)), selection, view };
   }, [project, dashboard]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

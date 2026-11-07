@@ -126,6 +126,21 @@ pnpm example:dev
 | 33 | `pnpm example:dev` を動かしたまま <http://localhost:5173/api/orders.sql> と <http://localhost:5173/db/sales.sqlite> を開く | どちらも 403 で、中身は出ない（SQL とデータベースはサーバーだけが使う） |
 | 34 | `pnpm example:serve` を動かしたまま、ターミナルで `curl -i -H "Host: example.com" http://localhost:8080/api/schema` | `403` と「この名前 (example.com) では開けません…」が返る。`Host` を付けなければ 200 |
 
+### ほかのアプリの画面に埋め込む
+
+`examples/sales/public/embed-demo.html` は、DevBI の外の「販売管理システム」のつもりのページです。自分の CSS を持ち、そこに `data-devbi="sales-db"` の div と `devbi-embed.js` の script を 1 本ずつ足しただけです。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 35 | `pnpm example:serve` を実行して <http://localhost:8080/embed-demo.html> を開く | 紺色のヘッダーと左のメニューの中に「売上ダッシュボード（DB から）」が出る。ページの見出し「売上の集計」は赤のまま、ダッシュボードの中の見出しやタイルの見出しは DevBI の見た目のまま（ページの CSS が入り込まない） |
+| 36 | OS（またはブラウザ）をダークモードにして開き直す | ダッシュボードは明るいまま（`data-devbi-theme="light"`）。同じ状態で <http://localhost:8080/#/sales-db> を開くと、こちらはダークになる |
+| 37 | 「レポート」で「売上ダッシュボード」を選ぶ | 同じ場所が Excel 版のダッシュボードに切り替わり、「上位顧客（自作タイル）」も出る（ページの JavaScript が `mount()` を呼んでいる） |
+| 38 | 開発者ツールのコンソールで `DevBI.dashboards` と打つ | `sales` と `sales-db` の 2 つが、タイトルつきで出る |
+| 39 | 開発者ツールの「ネットワーク」で `devbi-embed.js` を見る | 4KB ほど。残りは `assets/` のファイルを読んでいる（`_` で始まるファイルはない） |
+| 40 | ブラウザの窓を 900px くらいまで狭くする | 左のメニューのぶん、ダッシュボードの幅は 720px より狭くなり、タイルが 1 列に並ぶ（窓はスマートフォンより広いまま） |
+| 41 | 「地域別売上」の地域を 1 つクリックしてから、コンソールで `DevBI.mount("#report-area", { theme: "dark" })` | ダッシュボードがダークになり、上の絞り込みのチップは残る |
+| 42 | コンソールで `DevBI.unmount("#report-area")`、続けて `DevBI.mountAll()` | ダッシュボードが消え、`mountAll()` は `0` を返して空のまま。`DevBI.mount("#report-area")` でまた出る（属性のとおり「売上ダッシュボード（DB から）」で明るい） |
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -163,4 +178,6 @@ pnpm e2e         # パッケージとサンプルをビルドして devbi-serve 
 - `dist/` を新しいビルドで置き換えたときは、開いたままのページを読み込み直してください。まだ読んでいなかったグラフなどのファイルが見つからず、タイルに「ページを読み込み直してください」と出ます
 - Parquet は DuckDB の拡張をインターネットから取りに行きます。社内で外に出られないときは xlsx / CSV で試してください
 - データベースは SQLite と PostgreSQL だけです（SQL Server・Oracle・MySQL はこのあと）
+- 埋め込みの `devbi-embed.js` は、ビルドしたときだけできます（開発サーバーの <http://localhost:5173/embed-demo.html> では出ません）。埋め込むページとほかのオリジンから配るときは CORS の設定が要ります（[リファレンス](reference.md#5-サーバーの設定)）
+- 埋め込んだダッシュボードには、ページの CSS のうち要素の名前だけの指定は入りませんが、ID・クラス・疑似クラスの付いた指定（`#main td { … }`、`tr:nth-child(odd) td { … }`）は入ります（Shadow DOM での完全な切り離しはしていません）
 - `read_api` のパラメーターは metrics.yaml に固定で書きます。期間を変えたときにデータベースから読み直す仕組みはまだありません。読む行は 100 万行までで、それより多いときは SQL の WHERE で絞ります

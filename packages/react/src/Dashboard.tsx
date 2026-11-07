@@ -72,15 +72,73 @@ function tileStyle(t: TileSpec, rowHeight: number): CSSProperties {
   };
 }
 
-/** Render one dashboard of a project. */
-export function Dashboard({ project, name, back }: { project: Project; name: string; back?: string }) {
+/** Below this width (of the dashboard, not the window) the tiles go in one column. */
+export const NARROW_WIDTH = 720;
+
+/** A ref that sets `data-devbi-narrow` on the element while it is narrower than NARROW_WIDTH (before paint). */
+function narrowRef(el: HTMLElement | null): (() => void) | undefined {
+  if (!el) return;
+  const update = (width: number) => el.toggleAttribute("data-devbi-narrow", width < NARROW_WIDTH);
+  update(el.getBoundingClientRect().width);
+  if (typeof ResizeObserver === "undefined") return;
+  const observer = new ResizeObserver((entries) => {
+    const entry = entries[entries.length - 1];
+    if (entry) update(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width);
+  });
+  observer.observe(el);
+  return () => observer.disconnect();
+}
+
+/** Light or dark: `auto` follows the OS setting. Inside another app, `light` keeps the dashboard light like the page. */
+export type Theme = "auto" | "light" | "dark";
+
+/** The `data-theme` of `.devbi-root` for a theme (none for auto). */
+export function themeAttribute(theme: Theme | undefined): { "data-theme"?: "light" | "dark" } {
+  return theme === "light" || theme === "dark" ? { "data-theme": theme } : {};
+}
+
+const projectIds = new WeakMap<Project, number>();
+let nextProjectId = 1;
+
+/** Another project object starts the dashboard fresh (selections and tile state), not half updated. */
+function projectKey(project: Project): number {
+  let id = projectIds.get(project);
+  if (id === undefined) projectIds.set(project, (id = nextProjectId++));
+  return id;
+}
+
+/**
+ * Render one dashboard of a project. Pass the same project object each time (it is `loadProject()`'s result).
+ * `isolate`: inside another app's page, keep that page's CSS for plain elements (h1 { … }, td { … }) out.
+ */
+export function Dashboard({
+  project,
+  name,
+  back,
+  theme,
+  isolate,
+}: {
+  project: Project;
+  name: string;
+  back?: string;
+  theme?: Theme;
+  isolate?: boolean;
+}) {
   useInsertionEffect(injectStyles, []);
+  const root = { ...themeAttribute(theme), ...(isolate ? { "data-devbi-isolate": "" } : {}) };
   const dashboard = Object.hasOwn(project.dashboards, name) ? project.dashboards[name] : undefined;
-  if (!dashboard) return <div className="devbi-root devbi-error">ダッシュボード {name} がありません</div>;
+  if (!dashboard) {
+    const names = Object.keys(project.dashboards).sort();
+    return (
+      <div className="devbi-root devbi-error" {...root}>
+        ダッシュボード {name} がありません（{names.length ? `あるのは ${names.join(", ")}` : "dashboards/ に *.dash.json がありません"}）
+      </div>
+    );
+  }
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   return (
-    <DevbiProvider project={project} dashboard={dashboard}>
-      <div className="devbi-root">
+    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard}>
+      <div className="devbi-root" ref={narrowRef} {...root}>
         <div className="devbi-dashboard">
           {back && (
             <a className="devbi-back" href={back}>
@@ -120,7 +178,7 @@ function useHash(): string {
  * A whole static site: a list of dashboards, and each dashboard at `#/<name>`.
  * With one dashboard it is shown directly.
  */
-export function DevbiApp({ project: input }: { project: ProjectInput }) {
+export function DevbiApp({ project: input, theme }: { project: ProjectInput; theme?: Theme }) {
   useInsertionEffect(injectStyles, []);
   const loaded = useMemo(() => {
     try {
@@ -132,7 +190,7 @@ export function DevbiApp({ project: input }: { project: ProjectInput }) {
   const hash = useHash();
   if (loaded.error || !loaded.project) {
     return (
-      <div className="devbi-root">
+      <div className="devbi-root" {...themeAttribute(theme)}>
         <pre className="devbi-error devbi-dashboard">{loaded.error?.message}</pre>
       </div>
     );
@@ -141,11 +199,11 @@ export function DevbiApp({ project: input }: { project: ProjectInput }) {
   const names = Object.keys(project.dashboards).sort();
   const current = decodeURIComponent(hash.replace(/^#\/?/, ""));
   if (current && Object.hasOwn(project.dashboards, current)) {
-    return <Dashboard key={current} project={project} name={current} {...(names.length > 1 ? { back: "#/" } : {})} />;
+    return <Dashboard key={current} project={project} name={current} theme={theme} {...(names.length > 1 ? { back: "#/" } : {})} />;
   }
-  if (names.length === 1) return <Dashboard project={project} name={names[0]!} />;
+  if (names.length === 1) return <Dashboard project={project} name={names[0]!} theme={theme} />;
   return (
-    <div className="devbi-root">
+    <div className="devbi-root" {...themeAttribute(theme)}>
       <div className="devbi-index">
         <h1>ダッシュボード</h1>
         {names.length === 0 ? (

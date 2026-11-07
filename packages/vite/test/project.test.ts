@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readProject } from "../src/index.js";
 
 describe("readProject and read_api", () => {
@@ -51,5 +51,74 @@ describe("the dev server", () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe("embed: true", () => {
+  type Built = { build: { rolldownOptions: { input: Record<string, string>; preserveEntrySignatures?: string; output: { entryFileNames: (c: { name: string }) => string } } } };
+  const configure = async (user: Record<string, unknown>, command: "build" | "serve" = "build") => {
+    const devbi = (await import("../src/index.js")).default;
+    const plugin = devbi({ embed: true });
+    (plugin.config as (u: unknown, e: { mode: string; command: string }) => unknown)(user, { mode: "production", command });
+    return user as unknown as Built;
+  };
+
+  it("adds devbi-embed.js next to the page, keeping its exports and name", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-embed-"));
+    writeFileSync(path.join(dir, "index.html"), "<!doctype html>");
+    const { build } = await configure({ root: dir });
+    expect(build.rolldownOptions.input).toEqual({ index: path.join(dir, "index.html"), "devbi-embed": "virtual:devbi/embed" });
+    expect(build.rolldownOptions.preserveEntrySignatures).toBe("exports-only");
+    expect(build.rolldownOptions.output.entryFileNames({ name: "devbi-embed" })).toBe("devbi-embed.js");
+    expect(build.rolldownOptions.output.entryFileNames({ name: "index" })).toBe("assets/[name]-[hash].js");
+  });
+
+  it("keeps the entries and file names a project gives", async () => {
+    const { build } = await configure({ root: "/p", build: { rollupOptions: { input: ["/p/a.html", "/p/b.html"], output: { entryFileNames: "js/[name].js" } } } });
+    const o = (build as unknown as { rollupOptions: Built["build"]["rolldownOptions"] }).rollupOptions;
+    expect(o.input).toEqual({ a: "/p/a.html", b: "/p/b.html", "devbi-embed": "virtual:devbi/embed" });
+    expect(o.output.entryFileNames({ name: "a" })).toBe("js/[name].js");
+  });
+
+  it("does nothing for the dev server", async () => {
+    expect((await configure({ root: "/p" }, "serve")).build).toBeUndefined();
+  });
+
+  it("names listed entries by their path, so two index.html stay two", async () => {
+    const { build } = await configure({ root: "/p", build: { rolldownOptions: { input: ["/p/index.html", "admin/index.html"] } } });
+    expect(build.rolldownOptions.input).toEqual({ index: "/p/index.html", "admin/index": "admin/index.html", "devbi-embed": "virtual:devbi/embed" });
+  });
+
+  it("refuses an entry of the project's own named devbi-embed", async () => {
+    await expect(configure({ root: "/p", build: { rolldownOptions: { input: { "devbi-embed": "/p/x.html" } } } })).rejects.toThrow(/devbi-embed/);
+  });
+
+  it("names shared chunks without a leading _ (GitHub Pages leaves those files out)", async () => {
+    const { build } = await configure({ root: "/p" });
+    const o = build.rolldownOptions.output as unknown as { chunkFileNames: (c: { name: string }) => string };
+    expect(o.chunkFileNames({ name: "_virtual_devbi" })).toBe("assets/virtual_devbi-[hash].js");
+    expect(o.chunkFileNames({ name: "engine" })).toBe("assets/engine-[hash].js");
+  });
+
+  it("warns about what stops the embed script from working, and leaves base as it is", async () => {
+    const warnings = async (user: Record<string, unknown>) => {
+      const devbi = (await import("../src/index.js")).default;
+      const plugin = devbi({ embed: true });
+      (plugin.config as (u: unknown, e: { mode: string; command: string }) => unknown)(user, { mode: "production", command: "build" });
+      const warn = vi.fn();
+      (plugin.configResolved as (c: unknown) => void)({ root: "/p", command: "build", logger: { warn } });
+      return warn.mock.calls.map((c) => String(c[0])).join("\n");
+    };
+    const user = { root: "/p", base: "/reports/", build: { cssCodeSplit: false, rolldownOptions: { preserveEntrySignatures: false } } };
+    const said = await warnings(user);
+    expect(user.base).toBe("/reports/");
+    expect(user.build.rolldownOptions.preserveEntrySignatures).toBe("exports-only");
+    expect(said).toMatch(/preserveEntrySignatures/);
+    expect(said).toMatch(/cssCodeSplit/);
+    expect(said).toMatch(/base: "\/reports\/"/);
+    const unset: Record<string, unknown> = { root: "/p" };
+    expect(await warnings(unset)).toMatch(/base: "\/"（Vite の既定）/);
+    expect(unset.base).toBeUndefined();
+    expect(await warnings({ root: "/p", base: "./" })).toBe("");
   });
 });

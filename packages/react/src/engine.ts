@@ -40,8 +40,16 @@ export interface Engine {
    * Load a metrics view's data: register or read the files its model SQL reads,
    * materialize the model as a table, and return SQL selecting from it.
    */
-  loadView(view: MetricsView): Promise<string>;
+  loadView(view: MetricsView, api?: ApiOptions): Promise<string>;
   close(): Promise<void>;
+}
+
+/** Where `read_api` reads from, per view (dashboards on one page may use different APIs and share the engine). */
+export interface ApiOptions {
+  /** Default: the engine's `apiUrl`. */
+  apiUrl?: string;
+  /** Default: the engine's `fetch`. */
+  fetch?: typeof fetch;
 }
 
 function workerUrl(url: string): string {
@@ -147,11 +155,12 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
   const conn = await db.connect();
   const base = new URL(options.baseUrl ?? "./", document.baseURI);
   // A folder: "/reports/api" means "/reports/api/" (query is posted to <apiUrl>query).
-  const apiUrl = new URL((options.apiUrl ?? "api/").replace(/([^/])$/, "$1/"), base);
-  const doFetch = options.fetch ?? fetch.bind(globalThis);
+  const apiFolder = (url: string | undefined) => new URL((url ?? "api/").replace(/([^/])$/, "$1/"), base).href;
+  const defaultApi = apiFolder(options.apiUrl);
+  const defaultFetch = options.fetch ?? fetch.bind(globalThis);
 
   // Rows from the read-only API (api/<name>.sql on the server), as a table named `name`.
-  const loadApi = async (s: SourceRef, name: string) => {
+  const loadApi = async (s: SourceRef, name: string, apiUrl: string, doFetch: typeof fetch) => {
     const url = new URL("query", apiUrl).href;
     const res = await doFetch(url, {
       method: "POST",
@@ -176,6 +185,9 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
   const registered = new Set<string>();
   const views = new Map<string, Promise<string>>();
   let sourceSeq = 0;
+  let modelSeq = 0;
+  const fetchIds = new Map<typeof fetch, number>();
+  const fetchId = (f: typeof fetch) => fetchIds.get(f) ?? (fetchIds.set(f, fetchIds.size + 1), fetchIds.size);
 
   // Data does not change while the page is open, so results are cached by SQL text.
   const cache = new Map<string, Promise<QueryResult>>();
@@ -190,14 +202,14 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
     return p;
   };
 
-  const loadView = async (view: MetricsView): Promise<string> => {
+  const loadView = async (view: MetricsView, apiUrl: string, doFetch: typeof fetch, table: string): Promise<string> => {
     let sql = view.model;
     const sources = scanSources(sql);
     // Replace from the end so earlier offsets stay valid.
     for (const s of [...sources].reverse()) {
       if (s.format === "api") {
         const name = `__devbi_src_${++sourceSeq}`;
-        await loadApi(s, name);
+        await loadApi(s, name, apiUrl, doFetch);
         sql = `${sql.slice(0, s.start)}${ident(name)}${sql.slice(s.end)}`;
         continue;
       }
@@ -219,19 +231,26 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
         registered.add(s.path);
       }
     }
-    const table = ident(`__devbi_model_${view.name}`);
     await conn.query(`CREATE OR REPLACE TABLE ${table} AS\n${sql}`);
     return `SELECT * FROM ${table}`;
   };
 
   return {
     query,
-    loadView(view) {
-      let p = views.get(view.name);
+    loadView(view, api = {}) {
+      // Once per view and API (and fetch): a view that reads no API is the same whichever API the dashboard uses.
+      const apiUrl = api.apiUrl ? apiFolder(api.apiUrl) : defaultApi;
+      const doFetch = api.fetch ?? defaultFetch;
+      const readsApi = scanSources(view.model).some((s) => s.format === "api");
+      const own = readsApi && (apiUrl !== defaultApi || doFetch !== defaultFetch);
+      const key = own ? `${view.name}\n${apiUrl}\n${fetchId(doFetch)}` : view.name;
+      let p = views.get(key);
       if (!p) {
-        p = loadView(view);
-        views.set(view.name, p);
-        p.catch(() => views.delete(view.name));
+        // Another prefix for the API-specific copies, so no view's own name can give the same table name.
+        const table = ident(key === view.name ? `__devbi_model_${view.name}` : `__devbi_apimodel_${++modelSeq}_${view.name}`);
+        p = loadView(view, apiUrl, doFetch, table);
+        views.set(key, p);
+        p.catch(() => views.delete(key));
       }
       return p;
     },

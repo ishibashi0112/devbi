@@ -14,15 +14,18 @@ function sameRow(selection: TileProps["selection"], row: Row): boolean | undefin
 }
 
 /**
- * The grid follows the dashboard's light / dark, like DevBI's CSS: light when `.devbi-root` has
- * `data-theme="light"`, otherwise the OS setting. Watches the attribute, so switching it later works too.
+ * The grid follows the dashboard's light / dark, like DevBI's CSS: `data-theme="light"` or `"dark"` on
+ * `.devbi-root`, otherwise the OS setting. Watches the attribute, so switching it later works too.
  */
-function useTheme(ref: React.RefObject<HTMLElement | null>): "light" | "auto" {
-  const [theme, setTheme] = useState<"light" | "auto">("auto");
+function useTheme(ref: React.RefObject<HTMLElement | null>): "light" | "dark" | "auto" {
+  const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto");
   useLayoutEffect(() => {
     const root = ref.current?.closest(".devbi-root");
     if (!root) return;
-    const read = () => setTheme(root.getAttribute("data-theme") === "light" ? "light" : "auto");
+    const read = () => {
+      const t = root.getAttribute("data-theme");
+      setTheme(t === "light" || t === "dark" ? t : "auto");
+    };
     read();
     const observer = new MutationObserver(read);
     observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });

@@ -1,3 +1,16 @@
+/** The dark colors: under the OS's dark mode (unless `data-theme="light"`), or with `data-theme="dark"`. */
+const DARK = `
+    --devbi-bg: #12151b;
+    --devbi-card: #1b1f27;
+    --devbi-text: #e6e8ec;
+    --devbi-muted: #98a2b3;
+    --devbi-border: #2c323d;
+    --devbi-accent: #7c9cf5;
+    --devbi-accent-soft: rgba(124, 156, 245, 0.18);
+    --devbi-up: #4cc38a;
+    --devbi-down: #ff8a65;
+`;
+
 /** Default styles, injected once. Override the custom properties to theme. */
 export const css = `
 .devbi-root {
@@ -16,21 +29,46 @@ export const css = `
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  color-scheme: light;
   min-height: 100%;
   box-sizing: border-box;
 }
 @media (prefers-color-scheme: dark) {
-  .devbi-root:not([data-theme="light"]) {
-    --devbi-bg: #12151b;
-    --devbi-card: #1b1f27;
-    --devbi-text: #e6e8ec;
-    --devbi-muted: #98a2b3;
-    --devbi-border: #2c323d;
-    --devbi-accent: #7c9cf5;
-    --devbi-accent-soft: rgba(124, 156, 245, 0.18);
-    --devbi-up: #4cc38a;
-    --devbi-down: #ff8a65;
+  .devbi-root:not([data-theme="light"]) {${DARK}  color-scheme: dark;
   }
+}
+.devbi-root[data-theme="dark"] {${DARK}  color-scheme: dark;
+}
+.devbi-root[data-theme="light"] { color-scheme: light; }
+/* Inside another app's page (data-devbi-isolate: mountDashboard, devbi-embed.js, <Dashboard isolate>), that page's
+   rules for plain elements (h1 { … }, td { … }, ul { … }, button { … }) stay out: these elements start again from the
+   browser's defaults (all: revert), and what the page passes down (body { letter-spacing: … }) stops at the root.
+   With :where(), only .devbi-root counts, and it comes before DevBI's rules, so those (and the table's) still apply.
+   The page's rules with an id, class, attribute or pseudo-class (#main td, tr:nth-child(odd) td, a:link) are more
+   specific and can still reach in. Not div, span, svg and img: their attributes (width="…") would be reverted too, and
+   pages rarely style bare div and span. Not in DevBI's own app: there the page's CSS is the project's, and rules in an
+   @layer (Tailwind's) would be reverted too, as this rule is outside any layer. */
+.devbi-root:where([data-devbi-isolate]) {
+  font-style: normal;
+  font-weight: 400;
+  font-variant: normal;
+  font-feature-settings: normal;
+  letter-spacing: normal;
+  word-spacing: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-break: auto;
+  text-align: start;
+  text-indent: 0;
+  text-transform: none;
+  text-shadow: none;
+  white-space: normal;
+  list-style: disc outside none;
+}
+.devbi-root:where([data-devbi-isolate]) :where(header, footer, nav, main, section, article, aside, figure, figcaption,
+  form, fieldset, legend, h1, h2, h3, h4, h5, h6, p, ul, ol, li, dl, dt, dd, table, caption, thead, tbody, tfoot, tr, th,
+  td, button, input, select, textarea, label, a, small, strong, b, i, em, code, pre, blockquote, hr) {
+  all: revert;
 }
 .devbi-root *, .devbi-root *::before, .devbi-root *::after { box-sizing: inherit; }
 .devbi-root button { font: inherit; color: inherit; }
@@ -137,11 +175,12 @@ export const css = `
 .devbi-index small { display: block; color: var(--devbi-muted); }
 .devbi-back { color: var(--devbi-accent); text-decoration: none; font-size: 13px; }
 .devbi-root :focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 2px; }
-@media (max-width: 720px) {
-  .devbi-dashboard { padding: 12px 16px 24px; }
-  .devbi-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
-  .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
-}
+/* Narrow: by the dashboard's own width (data-devbi-narrow, set by <Dashboard>), so a dashboard in a narrow part of
+   another app's page is laid out in one column too. Not a container query: that would make a dashboard in a table
+   cell or inline-block of the page 0 wide. */
+.devbi-root[data-devbi-narrow] .devbi-dashboard { padding: 12px 16px 24px; }
+.devbi-root[data-devbi-narrow] .devbi-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+.devbi-root[data-devbi-narrow] .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
 `;
 
 let injected = false;
@@ -150,7 +189,8 @@ export function injectStyles(): void {
   if (injected || typeof document === "undefined") return;
   injected = true;
   const style = document.createElement("style");
-  style.dataset.devbi = "";
+  // Not data-devbi: that marks the elements a dashboard is shown in (embed).
+  style.dataset.devbiStyles = "";
   style.textContent = css;
   document.head.prepend(style);
 }

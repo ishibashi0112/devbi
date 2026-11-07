@@ -27,6 +27,8 @@ export interface ProjectInput {
   baseUrl?: string;
   /** Where the read-only API is, for `read_api(...)`. Default: `api/` under `baseUrl`. */
   apiUrl?: string;
+  /** Used for the API requests instead of the global `fetch` (to add a header, for example). */
+  fetch?: typeof fetch;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
 }
@@ -37,6 +39,7 @@ export interface Project {
   components: Record<string, () => Promise<TileModule>>;
   baseUrl: string;
   apiUrl?: string;
+  fetch?: typeof fetch;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
 }
@@ -55,6 +58,7 @@ export function loadProject(input: ProjectInput): Project {
     components: input.components ?? {},
     baseUrl: input.baseUrl ?? "./",
     ...(input.apiUrl ? { apiUrl: input.apiUrl } : {}),
+    ...(input.fetch ? { fetch: input.fetch } : {}),
     duckdb: input.duckdb,
     ...(input.extensionRepository ? { extensionRepository: input.extensionRepository } : {}),
   };
