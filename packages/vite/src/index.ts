@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -118,6 +118,16 @@ function resolveDuckdb(root: string): { wasm: string; worker: string } {
   };
 }
 
+/** A path with its links resolved, as far as it exists (the rest as written). */
+function realPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = path.dirname(p);
+    return parent === p ? p : path.join(realPath(parent), path.basename(p));
+  }
+}
+
 /** Vite's server.fs.deny when a project sets none (it is replaced, not added to, when one is given). */
 const VITE_DENY = [".env", ".env.*", "*.{crt,pem}", "**/.git/**"];
 /** Files the read-only API reads, which the browser must not get from the dev server. */
@@ -161,9 +171,13 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       // for the server only). Vite's own list stays when the project has none of its own.
       const root = path.resolve(user.root ?? process.cwd());
       const env = { ...process.env, ...loadEnv(mode, user.envDir ? path.resolve(root, user.envDir) : root, "DEVBI_") };
+      // Vite compares the file's real path (macOS's /var is /private/var): deny both that and the path as written.
       const sqliteFiles = Object.entries(env)
         .filter(([k, v]) => /^DEVBI_DB(_|$)/.test(k) && v?.trim().startsWith("sqlite:"))
-        .map(([, v]) => posix(path.resolve(root, options.dir ?? ".", v!.trim().slice("sqlite:".length).replace(/^\/\//, ""))).replace(/[*?{}()[\]!+@]/g, "\\$&"));
+        .flatMap(([, v]) => {
+          const file = path.resolve(root, options.dir ?? ".", v!.trim().slice("sqlite:".length).replace(/^\/\//, ""));
+          return [...new Set([file, realPath(file)])].map((f) => posix(f).replace(/[*?{}()[\]!+@]/g, "\\$&"));
+        });
       const deny = [...(user.server?.fs?.deny ? [] : VITE_DENY), ...SERVER_ONLY, ...sqliteFiles];
       return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"] }, server: { fs: { deny } } };
     },

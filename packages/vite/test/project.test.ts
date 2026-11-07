@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -27,7 +27,10 @@ describe("the dev server", () => {
   it("does not hand out the API's SQL or the SQLite database", async () => {
     const { createServer } = await import("vite");
     const devbi = (await import("../src/index.js")).default;
-    const dir = mkdtempSync(path.join(tmpdir(), "devbi-dev-"));
+    // Through a link, as on macOS (where the temporary folder /var/… is really /private/var/…).
+    const real = mkdtempSync(path.join(tmpdir(), "devbi-dev-"));
+    const dir = `${real}-link`;
+    symlinkSync(real, dir, "junction");
     for (const d of ["api", "db", "data"]) mkdirSync(path.join(dir, d));
     writeFileSync(path.join(dir, "api", "orders.sql"), "SELECT 1 AS one");
     writeFileSync(path.join(dir, "db", "shop.data"), "not for the browser");

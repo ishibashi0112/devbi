@@ -150,8 +150,8 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 ## 5. 自動テスト
 
 ```sh
-pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）
-pnpm e2e         # サンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認
+pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）。パッケージのソースを直接読むので、ビルドは要らない
+pnpm e2e         # パッケージとサンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認
 ```
 
 `pnpm e2e` は初回だけ `pnpm --filter devbi-example-sales exec playwright install chromium` でブラウザを入れます。
