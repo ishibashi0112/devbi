@@ -42,6 +42,8 @@ export interface FieldInfo {
   kind: FieldKind;
   format?: string;
   grain?: Grain;
+  /** For comparison measures: how the value relates to the previous period. */
+  compare?: "value" | "delta" | "ratio" | "change";
 }
 
 /** One row of a query result, keyed by field name. */

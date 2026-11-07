@@ -150,7 +150,13 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
       return { name: d.name, label: def.label, kind: "dimension" as const, ...(def.format ? { format: def.format } : {}) };
     }),
     ...(grain && time ? [{ name: time.name, label: time.label, kind: "time" as const, grain }] : []),
-    ...measures.map((m) => ({ name: m.name, label: m.label, kind: "measure" as const, ...(m.format ? { format: m.format } : {}) })),
+    ...measures.map((m) => ({
+      name: m.name,
+      label: m.label,
+      kind: "measure" as const,
+      ...(m.format ? { format: m.format } : {}),
+      ...(m.kind === "compare" ? { compare: m.as } : {}),
+    })),
   ];
   const order = resolveSort(query.sort, fields);
   const model = options.model ?? view.model;
