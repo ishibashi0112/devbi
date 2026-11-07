@@ -115,6 +115,8 @@ function xlsxToArrow(t: XlsxTable): arrow.Table {
 
 /** DuckDB's type for an Arrow column, to create the table when the API returns no rows. */
 function duckType(type: arrow.DataType): string {
+  // No type to go by (an expression with no rows): DuckDB's NULL type, which SUM(), comparisons and the rest take.
+  if (arrow.DataType.isNull(type)) return '"NULL"';
   if (arrow.DataType.isInt(type)) return "BIGINT";
   if (arrow.DataType.isFloat(type) || arrow.DataType.isDecimal(type)) return "DOUBLE";
   if (arrow.DataType.isBool(type)) return "BOOLEAN";
@@ -144,7 +146,8 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
   });
   const conn = await db.connect();
   const base = new URL(options.baseUrl ?? "./", document.baseURI);
-  const apiUrl = new URL(options.apiUrl ?? "api/", base);
+  // A folder: "/reports/api" means "/reports/api/" (query is posted to <apiUrl>query).
+  const apiUrl = new URL((options.apiUrl ?? "api/").replace(/([^/])$/, "$1/"), base);
   const doFetch = options.fetch ?? fetch.bind(globalThis);
 
   // Rows from the read-only API (api/<name>.sql on the server), as a table named `name`.

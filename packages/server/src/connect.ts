@@ -1,7 +1,10 @@
 import path from "node:path";
 
-/** The kind of values in a result column, as DevBI hands them on in Arrow. */
-export type ColumnType = "string" | "int" | "float" | "bool" | "date" | "timestamp";
+/**
+ * The kind of values in a result column, as DevBI hands them on in Arrow. `null`: nothing tells the type (a SQLite
+ * expression with no rows, or only NULLs); it becomes DuckDB's NULL type, which every function and comparison takes.
+ */
+export type ColumnType = "string" | "int" | "float" | "bool" | "date" | "timestamp" | "null";
 
 export interface ResultColumn {
   name: string;
@@ -80,10 +83,11 @@ export async function connect(connection: string, baseDir = process.cwd()): Prom
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+/** A date and time, with an optional time zone (`Z`, `+09:00`) that DevBI drops: the wall-clock time stays as written. */
+const TIMESTAMP = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?:\s*(?:Z|[+-]\d{2}(?::?\d{2})?))?$/i;
 
-/** A column's type from its values, when the database gives none: numbers, booleans, otherwise text. */
-function typeOfValues(values: unknown[]): ColumnType {
+/** A column's type from its values, when they say: numbers, booleans, otherwise text. Undefined when all are NULL. */
+function typeOfValues(values: unknown[]): ColumnType | undefined {
   let type: ColumnType | undefined;
   for (const v of values) {
     if (v === null || v === undefined) continue;
@@ -96,7 +100,43 @@ function typeOfValues(values: unknown[]): ColumnType {
     else if ((type === "int" && t === "float") || (type === "float" && t === "int")) type = "float";
     else return "string";
   }
-  return type ?? "string";
+  return type;
+}
+
+/**
+ * The type a SQLite table column was declared with (CREATE TABLE … amount REAL), in DevBI's terms, following
+ * SQLite's own rules for reading type names. Undefined for expressions (SUM(…), CAST(…)) and untyped columns.
+ */
+export function sqliteDeclaredType(declared: string | null | undefined): ColumnType | undefined {
+  const d = (declared ?? "").toUpperCase();
+  if (!d) return undefined;
+  if (/BOOL/.test(d)) return "bool";
+  if (/DATETIME|TIMESTAMP/.test(d)) return "timestamp";
+  if (/DATE/.test(d)) return "date";
+  if (/INT/.test(d)) return "int";
+  if (/CHAR|CLOB|TEXT/.test(d)) return "string";
+  if (/BLOB/.test(d)) return undefined;
+  if (/REAL|FLOA|DOUB|NUM|DEC/.test(d)) return "float";
+  return undefined;
+}
+
+/** One SQLite result column's type: from the values, with the declared type deciding what they cannot. */
+function sqliteColumnType(declared: ColumnType | undefined, values: unknown[]): ColumnType {
+  const byValues = typeOfValues(values);
+  // SQLite keeps dates as text: a column declared DATE / DATETIME reads its text as dates when it is all dates.
+  if ((declared === "date" || declared === "timestamp") && (byValues === undefined || byValues === "string")) {
+    const strings = values.filter((v): v is string => typeof v === "string");
+    if (strings.length === values.filter((v) => v !== null && v !== undefined).length) {
+      if (declared === "date" && strings.every((v) => DATE.test(v))) return "date";
+      if (strings.every((v) => DATE.test(v) || TIMESTAMP.test(v))) return "timestamp";
+    }
+  }
+  // No values to go by (no rows, or all NULL): the declared type, so the column keeps its type in DuckDB.
+  if (byValues === undefined) return declared ?? "null";
+  // A declared REAL / NUMERIC column stays a decimal even when this result's values happen to be whole.
+  if (byValues === "int" && declared === "float") return "float";
+  if (byValues === "int" && declared === "bool" && values.every((v) => v === null || v === 0 || v === 1 || v === 0n || v === 1n)) return "bool";
+  return byValues;
 }
 
 async function connectSqlite(file: string): Promise<Connection> {
@@ -111,32 +151,20 @@ async function connectSqlite(file: string): Promise<Connection> {
       stmt.setReadBigInts(true);
       const info = stmt.columns();
       const names = info.map((c) => c.name);
-      const dup = names.find((n, i) => names.indexOf(n) !== i);
-      if (dup !== undefined) throw new Error(`列名が重なっています: ${dup}（AS で別の名前を付けてください）`);
+      // From a subquery (the row limit around the SQL), SQLite names a second `id` "id:1".
+      const dup = names.find((n, i) => names.indexOf(n) !== i || names.includes(/^(.*):\d+$/.exec(n)?.[1] ?? "\0"));
+      if (dup !== undefined) throw new Error(`列名が重なっています: ${dup.replace(/:\d+$/, "")}（AS で別の名前を付けてください）`);
       const objects = stmt.all(...(params as never[])) as Record<string, unknown>[];
       const rows = objects.map((o) => names.map((n) => o[n]));
-      const columns = info.map((c, i): ResultColumn => {
-        const values = rows.map((r) => r[i]);
-        // SQLite keeps dates as text; the declared type of a table column (DATE, DATETIME) says to read them as dates.
-        const declared = (c.type ?? "").toUpperCase();
-        if (/DATE|TIME/.test(declared) && values.every((v) => v === null || typeof v === "string")) {
-          const strings = values.filter((v): v is string => v !== null);
-          if (strings.every((v) => DATE.test(v))) return { name: c.name, type: "date" };
-          if (strings.every((v) => DATE.test(v) || TIMESTAMP.test(v))) return { name: c.name, type: "timestamp" };
-        }
-        const byValues = typeOfValues(values);
-        // A declared REAL / NUMERIC column stays a decimal even when this result's values happen to be whole.
-        if (byValues === "int" && /REAL|FLOA|DOUB|NUM|DEC/.test(declared)) return { name: c.name, type: "float" };
-        if (byValues === "int" && /BOOL/.test(declared) && values.every((v) => v === null || v === 0 || v === 1 || v === 0n || v === 1n)) {
-          for (const r of rows) if (r[i] !== null) r[i] = r[i] === 1 || r[i] === 1n;
-          return { name: c.name, type: "bool" };
-        }
-        return { name: c.name, type: byValues };
-      });
+      const columns = info.map((c, i): ResultColumn => ({ name: c.name, type: sqliteColumnType(sqliteDeclaredType(c.type), rows.map((r) => r[i])) }));
       for (const row of rows) {
         for (let i = 0; i < row.length; i++) {
           const v = row[i];
-          if (typeof v === "bigint" && Number.isSafeInteger(Number(v))) row[i] = Number(v);
+          const type = columns[i]!.type;
+          if (v === null || v === undefined) continue;
+          if (type === "bool") row[i] = v === 1 || v === 1n;
+          else if (type === "timestamp" && typeof v === "string") row[i] = TIMESTAMP.exec(v)?.[1] ?? v;
+          else if (typeof v === "bigint" && Number.isSafeInteger(Number(v))) row[i] = Number(v);
           else if (v instanceof Uint8Array) row[i] = Buffer.from(v).toString("base64");
         }
       }
@@ -202,8 +230,9 @@ async function connectPostgres(url: URL): Promise<Connection> {
       const client = await pool.connect();
       try {
         // A read-only transaction: the server refuses any write, whatever the SQL says.
-        await client.query("BEGIN READ ONLY");
-        if (options?.timeoutMs) await client.query(`SET LOCAL statement_timeout = ${Math.round(options.timeoutMs)}`);
+        // and dates in ISO form whatever the database's or user's DateStyle is (DevBI reads them as text).
+        const timeout = options?.timeoutMs ? `; SET LOCAL statement_timeout = ${Math.round(options.timeoutMs)}` : "";
+        await client.query(`BEGIN READ ONLY; SET LOCAL DateStyle = ISO; SET LOCAL IntervalStyle = postgres${timeout}`);
         const res = await client.query({ text: sql, values: params, rowMode: "array" });
         await client.query("COMMIT");
         const names = res.fields.map((f) => f.name);

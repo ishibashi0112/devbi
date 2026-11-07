@@ -118,6 +118,11 @@ function resolveDuckdb(root: string): { wasm: string; worker: string } {
   };
 }
 
+/** Vite's server.fs.deny when a project sets none (it is replaced, not added to, when one is given). */
+const VITE_DENY = [".env", ".env.*", "*.{crt,pem}", "**/.git/**"];
+/** Files the read-only API reads, which the browser must not get from the dev server. */
+const SERVER_ONLY = ["**/api/**/*.sql", "*.{sqlite,sqlite3,db}", "*.{sqlite,sqlite3,db}-{wal,shm,journal}"];
+
 /**
  * The DevBI Vite plugin. Provides `virtual:devbi` (the project: dashboards, metrics, promoted tiles, DuckDB bundle),
  * reloads the page when dash.json / metrics.yaml / data files change, and copies data files into the build.
@@ -151,8 +156,16 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   return {
     name: "devbi",
     enforce: "pre",
-    config() {
-      return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"] } };
+    config(user, { mode }) {
+      // The dev server serves the project folder: keep the API's SQL and SQLite databases out of it (they are
+      // for the server only). Vite's own list stays when the project has none of its own.
+      const root = path.resolve(user.root ?? process.cwd());
+      const env = { ...process.env, ...loadEnv(mode, user.envDir ? path.resolve(root, user.envDir) : root, "DEVBI_") };
+      const sqliteFiles = Object.entries(env)
+        .filter(([k, v]) => /^DEVBI_DB(_|$)/.test(k) && v?.trim().startsWith("sqlite:"))
+        .map(([, v]) => posix(path.resolve(root, options.dir ?? ".", v!.trim().slice("sqlite:".length).replace(/^\/\//, ""))).replace(/[*?{}()[\]!+@]/g, "\\$&"));
+      const deny = [...(user.server?.fs?.deny ? [] : VITE_DENY), ...SERVER_ONLY, ...sqliteFiles];
+      return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"] }, server: { fs: { deny } } };
     },
     configResolved(c) {
       config = c;

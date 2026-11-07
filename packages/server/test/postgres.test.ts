@@ -32,6 +32,7 @@ describe.skipIf(!url)("PostgreSQL", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "devbi-pg-"));
     mkdirSync(path.join(dir, "api"));
     writeFileSync(path.join(dir, "api", "orders.sql"), "SELECT * FROM devbi_test.orders WHERE order_date >= :from::date AND region <> :skip ORDER BY id");
+    writeFileSync(path.join(dir, "api", "dollar.sql"), "SELECT $$a;b$$ AS s");
     api = createApiHandler({ dir, env: { DEVBI_DB: url }, exposeErrors: true });
     server = createServer((req, res) => void api.handle(req, res));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -55,8 +56,8 @@ describe.skipIf(!url)("PostgreSQL", () => {
     expect(t.schema.fields.map((f) => `${f.name}:${f.type}`)).toEqual([
       "id:Int64",
       "order_date:Date32<DAY>",
-      "created:Timestamp<MILLISECOND>",
-      "created_tz:Timestamp<MILLISECOND>",
+      "created:Timestamp<MICROSECOND>",
+      "created_tz:Timestamp<MICROSECOND>",
       "amount:Float64",
       "rate:Float64",
       "ok:Bool",
@@ -71,6 +72,22 @@ describe.skipIf(!url)("PostgreSQL", () => {
     expect(row.ok).toBe(true);
     expect(row.extra).toBe('{"a": 1}');
     expect(row.big).toBe(9007199254740993n);
+  });
+
+  it("reads $$ … $$ text with PostgreSQL's rules", async () => {
+    const res = await fetch(new URL("api/query", base), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "dollar" }) });
+    expect(res.status).toBe(200);
+    expect(tableFromIPC(new Uint8Array(await res.arrayBuffer())).getChild("s")!.get(0)).toBe("a;b");
+  });
+
+  it("reads dates whatever the DateStyle", async () => {
+    const c = await connect(`${url}${url!.includes("?") ? "&" : "?"}options=${encodeURIComponent("-c DateStyle=SQL,DMY")}`);
+    try {
+      const r = await c.query("SELECT DATE '2026-04-01' AS d, TIMESTAMP '2026-04-01 09:30:00' AS t", []);
+      expect(r.rows).toEqual([["2026-04-01", "2026-04-01 09:30:00"]]);
+    } finally {
+      await c.close();
+    }
   });
 
   it("runs every query in a read-only transaction", async () => {

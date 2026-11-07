@@ -1,6 +1,7 @@
 import { createReadStream, existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { isIP } from "node:net";
 import path from "node:path";
 import { createApiHandler, type ApiOptions } from "./handler.js";
 
@@ -11,6 +12,13 @@ export interface ServeOptions extends ApiOptions {
   port?: number;
   /** Default 127.0.0.1 (this computer only; put IIS or another reverse proxy in front for others). */
   host?: string;
+  /**
+   * Host names the browser may use to reach this server, besides IP addresses and localhost: the name of the
+   * reverse proxy or the computer (`reports.example.local`; `.example.local` for it and all names under it).
+   * `true` allows any. Any other name is refused, so a web page cannot read the API through a name it points
+   * at this computer (DNS rebinding).
+   */
+  allowedHosts?: string[] | true;
 }
 
 export interface RunningServer {
@@ -58,6 +66,25 @@ function fileFor(root: string, pathname: string): string | undefined {
   return file === root || file.startsWith(root + path.sep) ? file : undefined;
 }
 
+/** The host name in a Host header, without the port and brackets, in lower case. */
+function hostname(header: string): string {
+  const h = header.trim().toLowerCase();
+  if (h.startsWith("[")) return h.slice(1, h.indexOf("]") < 0 ? undefined : h.indexOf("]"));
+  return h.replace(/:\d*$/, "").replace(/\.$/, "");
+}
+
+/** Whether a request's Host may reach the server: IP addresses, localhost, the listening host and the allowed names. */
+export function isHostAllowed(header: string | undefined, allowed: string[] | true = [], listening?: string): boolean {
+  if (allowed === true || header === undefined) return true;
+  const name = hostname(header);
+  if (isIP(name) || name === "localhost" || name.endsWith(".localhost")) return true;
+  if (listening && name === hostname(listening)) return true;
+  return allowed.some((a) => {
+    const n = a.trim().toLowerCase();
+    return n.startsWith(".") ? name === n.slice(1) || name.endsWith(n) : name === n;
+  });
+}
+
 /** Serve one file, with HEAD and single byte ranges (DuckDB reads Parquet and CSV in ranges). */
 async function sendFile(req: IncomingMessage, res: ServerResponse, root: string, pathname: string): Promise<void> {
   let file = fileFor(root, pathname);
@@ -85,7 +112,8 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, root: string,
   const range = req.headers.range;
   if (range) {
     const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
-    if (m && (m[1] || m[2])) {
+    // A range that ends before it starts is not a range: the whole file, as HTTP says.
+    if (m && (m[1] || m[2]) && !(m[1] && m[2] && Number(m[2]) < Number(m[1]))) {
       if (m[1]) {
         start = Number(m[1]);
         if (m[2]) end = Math.min(Number(m[2]), info.size - 1);
@@ -120,9 +148,18 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
     throw new Error(`${root} に index.html がありません。先にビルドしてください（pnpm build）`);
   }
   const api = createApiHandler(options);
+  const host = options.host ?? "127.0.0.1";
+  const listening = host === "0.0.0.0" || host === "::" ? undefined : host;
   const server = createServer((req, res) => {
     void (async () => {
       try {
+        if (!isHostAllowed(req.headers.host, options.allowedHosts, listening)) {
+          const name = hostname(req.headers.host ?? "");
+          options.log?.(`Host ${name} からのリクエストを断りました（--allowed-hosts ${name} で許可できます）`);
+          res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end(`この名前 (${name}) では開けません。devbi-serve を --allowed-hosts ${name} を付けて起動してください`);
+          return;
+        }
         if (await api.handle(req, res)) return;
         if (req.method !== "GET" && req.method !== "HEAD") {
           res.writeHead(405, { Allow: "GET, HEAD" });
@@ -137,7 +174,6 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
       }
     })();
   });
-  const host = options.host ?? "127.0.0.1";
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port ?? 8080, host, () => {

@@ -41,12 +41,31 @@ export function connectionVariable(connection?: string): string {
   return connection ? `DEVBI_DB_${connection.toUpperCase().replace(/[^A-Z0-9]/g, "_")}` : "DEVBI_DB";
 }
 
-/** Read and check `<dir>/api/<name>.sql`. Throws DatasetError (404 when there is no such file). */
-export async function readDataset(dir: string, name: string, dialect?: Dialect): Promise<Dataset> {
+/** The text of `<dir>/api/<name>.sql`. Throws DatasetError (404 when there is no such file). */
+export async function readDatasetText(dir: string, name: string): Promise<string> {
   // Only names of files that are there: no paths from the request reach the file system.
   if (!(await listDatasets(dir)).includes(name)) throw new DatasetError(`API の SQL ${name} はありません（api/${name}.sql）`, 404);
-  const text = await readFile(path.join(dir, "api", `${name}.sql`), "utf8");
-  return parseDataset(name, text, dialect);
+  return readFile(path.join(dir, "api", `${name}.sql`), "utf8");
+}
+
+/** Read and check `<dir>/api/<name>.sql` with the database's quoting rules. Throws DatasetError (404 when there is no such file). */
+export async function readDataset(dir: string, name: string, dialect?: Dialect): Promise<Dataset> {
+  return parseDataset(name, await readDatasetText(dir, name), dialect);
+}
+
+const CONNECTION_LINE = /^\s*--\s*connection\s*:\s*(\S+)\s*$/i;
+
+/**
+ * The `-- connection: <name>` line among the comment lines at the top of the file (blank lines between them are
+ * fine), without checking the SQL: which database, and so which quoting rules, the rest is read with.
+ */
+export function connectionOf(text: string): string | undefined {
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const m = CONNECTION_LINE.exec(line);
+    if (m) return m[1];
+    if (line.trim() && !/^\s*--/.test(line)) return undefined;
+  }
+  return undefined;
 }
 
 export function parseDataset(name: string, text: string, dialect?: Dialect): Dataset {
@@ -65,13 +84,8 @@ export function parseDataset(name: string, text: string, dialect?: Dialect): Dat
           : `${problem.word} は使えません。読み取るだけの SELECT にしてください（列名なら引用符で囲みます）`;
     throw new DatasetError(`${rel}: ${why}`, 400);
   }
-  let connection: string | undefined;
-  const description: string[] = [];
-  for (const line of st.title.split("\n")) {
-    const m = /^connection\s*:\s*(\S+)\s*$/i.exec(line.trim());
-    if (m) connection = m[1];
-    else description.push(line);
-  }
+  const connection = connectionOf(text);
+  const description = st.title.split("\n").filter((line) => !/^connection\s*:/i.test(line.trim()));
   const params: string[] = [];
   for (const p of parameters(st.sql, dialect)) {
     if (!params.some((q) => q.toLowerCase() === p.name.toLowerCase())) params.push(p.name);
@@ -123,8 +137,11 @@ export function bindParameters(dataset: Dataset, dialect: Dialect, values: Recor
   out += dataset.sql.slice(last);
   const params = order.map((name) => {
     const v = given.get(name.toLowerCase()) as ParamValue;
-    // SQLite has no booleans: 1 and 0, as its own TRUE and FALSE.
-    return dialect === "sqlite" && typeof v === "boolean" ? (v ? 1 : 0) : v;
+    if (dialect !== "sqlite") return v;
+    // SQLite has no booleans: 1 and 0, as its own TRUE and FALSE. And a whole number goes in as an integer
+    // (a JS number would be a REAL, which does not equal the text '10' in a TEXT column the way 10 does).
+    if (typeof v === "boolean") return v ? 1n : 0n;
+    return typeof v === "number" && Number.isSafeInteger(v) ? BigInt(v) : v;
   });
   return { sql: out, params };
 }

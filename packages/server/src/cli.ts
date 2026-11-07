@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// devbi-serve [--dir <project>] [--static <dir>] [--port 8080] [--host 127.0.0.1] [--max-rows N] [--timeout <seconds>] [--debug]
+// devbi-serve [--dir <project>] [--static <dir>] [--port 8080] [--host 127.0.0.1] [--allowed-hosts a,b] [--max-rows N] [--timeout <seconds>] [--debug]
 // Serves the built site (dist/) and the read-only API (api/*.sql) from one process.
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -11,7 +11,7 @@ const usage = (message?: string): never => {
   console.error(
     [
       "使い方: devbi-serve [--dir <プロジェクトのフォルダ>] [--static <ビルドしたフォルダ>] [--port 8080] [--host 127.0.0.1]",
-      "                    [--max-rows 1000000] [--timeout 60] [--debug]",
+      "                    [--allowed-hosts reports.example.local] [--max-rows 1000000] [--timeout 60] [--debug]",
       "接続先は環境変数 DEVBI_DB（名前つきは DEVBI_DB_<名前>）か、プロジェクトの .env / .env.local に書きます。",
     ].join("\n"),
   );
@@ -26,6 +26,7 @@ try {
       static: { type: "string" },
       port: { type: "string", default: "8080" },
       host: { type: "string", default: "127.0.0.1" },
+      "allowed-hosts": { type: "string" },
       "max-rows": { type: "string" },
       timeout: { type: "string" },
       debug: { type: "boolean", default: false },
@@ -46,12 +47,15 @@ const number = (text: string | undefined, name: string) => {
 const dir = path.resolve(values!.dir!);
 const timeout = number(values!.timeout, "timeout");
 const maxRows = number(values!["max-rows"], "max-rows");
+const hosts = values!["allowed-hosts"];
+const allowedHosts = hosts === undefined ? undefined : hosts.trim() === "all" ? true : hosts.split(",").map((h) => h.trim()).filter(Boolean);
 try {
   const running = await serve({
     dir,
     ...(values!.static ? { staticDir: path.resolve(values!.static) } : {}),
     port: number(values!.port, "port")!,
     host: values!.host!,
+    ...(allowedHosts !== undefined ? { allowedHosts } : {}),
     env: loadEnv(dir),
     ...(maxRows !== undefined ? { maxRows } : {}),
     ...(timeout !== undefined ? { timeoutMs: timeout * 1000 } : {}),

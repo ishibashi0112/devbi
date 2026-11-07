@@ -123,6 +123,8 @@ pnpm example:dev
 | 30 | <http://localhost:8080/api/schema> を開く | `orders` の説明とパラメーター `from` が JSON で出る |
 | 31 | `pnpm example:dev` で開き、`examples/sales/api/orders.sql` の最後の行の下に `AND c.region = '関東'` を足して保存 | ページが読み込み直され、DB 版のダッシュボードが関東だけの数字になる。消すと元に戻る |
 | 32 | 同じファイルの `SELECT` を `DELETE FROM orders` に変えて保存 | タイルに「API の orders を読めません（400）: api/orders.sql: SELECT か WITH で始まる文だけ使えます（DELETE で始まっています）」と出る。戻すと直る |
+| 33 | `pnpm example:dev` を動かしたまま <http://localhost:5173/api/orders.sql> と <http://localhost:5173/db/sales.sqlite> を開く | どちらも 403 で、中身は出ない（SQL とデータベースはサーバーだけが使う） |
+| 34 | `pnpm example:serve` を動かしたまま、ターミナルで `curl -i -H "Host: example.com" http://localhost:8080/api/schema` | `403` と「この名前 (example.com) では開けません…」が返る。`Host` を付けなければ 200 |
 
 ## 4. 自分の Excel で試す
 

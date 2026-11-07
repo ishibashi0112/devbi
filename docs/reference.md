@@ -27,7 +27,7 @@ models/
 data/
   *.xlsx / *.csv / *.arrow / *.parquet / *.json
 api/
-  <名前>.sql              # read_api('<名前>') でデータベースから読む SELECT。サーバーだけが使う（ビルドに入らない）
+  <名前>.sql              # read_api('<名前>') でデータベースから読む SELECT。サーバーだけが使う（ビルドに入らず、開発サーバーもブラウザに渡さない）
 .env                      # API の接続先（DEVBI_DB=...）。パスワードを含む本物の接続先は .env.local に書き、git に入れない
 .devbi/                   # pnpm gen が作る（エディタの補完と TypeScript の型）。git に入れない
 ```
@@ -373,7 +373,8 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
-- `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。接続先は環境変数か、Vite の root の `.env` / `.env.local` の `DEVBI_DB…` から読みます。
+- `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
+- 開発サーバーは、`api/` の SQL と SQLite のファイル（`*.sqlite`、`*.sqlite3`、`*.db` と、`DEVBI_DB…` の `sqlite:` が指すファイル）をブラウザに渡しません（Vite の `server.fs.deny` に足します。`.env` は Vite がもとから渡しません）。
 
 ## データベースから読む（@devbi/server）
 
@@ -401,7 +402,9 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - 1 つのファイルに書けるのは、`SELECT` か `WITH` で始まる文 1 つだけです。最後の `;` はあってもなくてもかまいません。
 - `INSERT`、`UPDATE`、`DELETE`、`SELECT ... INTO`、`FOR UPDATE` など、書き込みやロックにつながる言葉があると実行しません。同じ名前の列は `"update"` のように引用符で囲みます。
 - `:名前` がパラメーターです。値は `read_api` の引数から来ます。同じ名前は何度でも使えます。大文字と小文字は区別しません。PostgreSQL の `::date` はパラメーターになりません。
-- 上のコメントは説明として `api/schema` に出ます。コメントに `-- connection: erp` と書くと、接続先を `DEVBI_DB_ERP` にします。
+- SELECT のすぐ上のコメントは、説明として `api/schema` に出ます。
+- ファイルの先頭の `--` のコメントの中に `-- connection: erp` の行を書くと、接続先を `DEVBI_DB_ERP` にします（SELECT より前に書きます。間に空の行があってもかまいません）。
+- 引用符などの読み方は、接続先のデータベースに合わせます（SQLite と SQL Server の `[列名]`、PostgreSQL の `$$ … $$`）。
 - ファイルを保存すると、開発サーバーではページを読み込み直します。`devbi-serve` は呼ばれるたびにファイルを読むので、止めなくても反映されます。
 
 ### `read_api`
@@ -417,7 +420,7 @@ model: SELECT * FROM read_api('orders', from = '2024-04-01')
 
 ### 接続先
 
-接続先の URL は環境変数に書きます。`devbi-serve` と開発サーバーは、プロジェクトの `.env` と `.env.local` も読みます（`.env.local` が優先、すでにある環境変数がさらに優先）。
+接続先の URL は環境変数に書きます。`devbi-serve` は、プロジェクトのフォルダ（`--dir`）の `.env` と `.env.local` も読みます（`.env.local` が優先、すでにある環境変数がさらに優先）。開発サーバーは Vite のやり方で `.env` ファイルを読みます（[@devbi/vite](#devbivite)）。ふつうはどちらも同じフォルダです。
 
 | 変数 | 使うファイル |
 | --- | --- |
@@ -426,8 +429,8 @@ model: SELECT * FROM read_api('orders', from = '2024-04-01')
 
 | データベース | URL の例 | 補足 |
 | --- | --- | --- |
-| SQLite | `sqlite:db/sales.sqlite` | 相対パスはプロジェクトのフォルダから。読み取り専用で開く。Node 22.16 以上 |
-| PostgreSQL | `postgres://user:pass@host:5432/db` | `pg` を入れる（`npm install pg`）。毎回 `BEGIN READ ONLY` の中で実行し、60 秒で打ち切る |
+| SQLite | `sqlite:db/sales.sqlite` | 相対パスはプロジェクトのフォルダから。読み取り専用で開く。Node 22.16 以上。時間の上限はなく、重い SQL のあいだはほかのリクエストも待つ（手元や小さいデータ向け） |
+| PostgreSQL | `postgres://user:pass@host:5432/db` | `pg` を入れる（`npm install pg`）。毎回 `BEGIN READ ONLY` の中で実行し、60 秒で打ち切る。日付はデータベースの `DateStyle` によらず読める |
 
 - データベースのユーザーは SELECT の権限だけにしてください。上の確認は最初の守りで、最後の守りではありません。
 - パスワードに `@` や `:` が入るときは、`%40`、`%3A` のように書きます。
@@ -441,10 +444,15 @@ model: SELECT * FROM read_api('orders', from = '2024-04-01')
 | 小数（`numeric`、`real`、`double` など） | `DOUBLE` |
 | 真偽 | `BOOLEAN` |
 | 日付 | `DATE` |
-| 日時（`timestamp`、`timestamptz`） | `TIMESTAMP`（データベースでの時刻のまま） |
+| 日時（`timestamp`、`timestamptz`） | `TIMESTAMP`（ミリ秒まで。データベースでの時刻のまま、時差は付けない） |
 | そのほか（文字、`json` など） | `VARCHAR` |
 
-SQLite は、表の列の宣言（`DATE`、`DATETIME`、`REAL`、`BOOLEAN` など）を見て型を決めます。計算した列は中身から決めます。
+SQLite は値と、表の列の宣言（`INTEGER`、`REAL`、`TEXT`、`DATE`、`DATETIME`、`BOOLEAN` など）から型を決めます。
+
+- `DATE` / `DATETIME` の列の文字は、日付・日時として読みます。`Z` や `+09:00` が付いていても、書いてある時刻のままにします。
+- 結果が 0 行のときや、列が全部 NULL のときは、宣言の型になります。
+- `l.qty * l.unit_price` や `SUM(...)` などの計算した列には宣言がないので、中身から決めます。0 行や全部 NULL で決まらないときは DuckDB の `NULL` 型になります。`SUM()` も比較もそのまま通るので、タイルはエラーにならず空になります。
+- パラメーターの整数は整数として渡します（`TEXT` の列に `code = :code` で `10` を渡すと、SQL に `code = 10` と書いたときと同じく `'10'` に当たります）。
 
 ### `devbi-serve`
 
@@ -460,12 +468,14 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 | `--dir` | プロジェクトのフォルダ（`api/` と `.env` のある場所）。既定は今のフォルダ |
 | `--static` | 出すサイトのフォルダ。既定は `<dir>/dist` |
 | `--port` / `--host` | 既定は `8080` / `127.0.0.1`（このコンピューターからだけ） |
+| `--allowed-hosts` | IP アドレスと `localhost` のほかに、ブラウザが使ってよいホスト名（カンマ区切り）。`.corp.local` はその下の名前すべて、`all` はどれでも。IIS などから転送するときは、利用者が開く名前（`reports.corp.local` など）を書く |
 | `--max-rows` | 1 回に返す行の上限。既定は 1,000,000。超えると日本語のエラー |
 | `--timeout` | 1 回の SQL の時間の上限（秒）。既定は 60（PostgreSQL） |
 | `--debug` | データベースのエラーをそのままブラウザに返す。ふつうは「サーバーのログを見てください」とだけ返し、くわしい内容はログに書く |
 
 - 社内の人に見せるときは、IIS などを前に置いて Windows 認証をかけ、`devbi-serve` には IIS から転送します。`devbi-serve` 自身はログインの仕組みを持ちません。
 - API はパスの最後が `/api/schema`、`/api/query` のリクエストに答えます。前に何が付いていてもかまわないので、`/reports/` の下に転送しても動きます。
+- 知らないホスト名で来たリクエストは `403` で断ります。ほかのサイトが自分の名前をこのコンピューターに向けて（DNS リバインディング）、ブラウザから API を読むのを防ぐためです。`--host 0.0.0.0` で社内に出すときも、名前で開くなら `--allowed-hosts` にその名前を書きます。
 - `dist/assets/` のファイルは長くキャッシュさせ、ほかは毎回確かめさせます。Parquet などの部分読み（Range）にも答えます。
 - 開発サーバー（`vite`）と `vite preview` にも、`@devbi/vite` が同じ API を付けます。こちらはデータベースのエラーをそのまま出します。
 
@@ -485,11 +495,11 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 { "name": "orders", "params": { "from": "2024-04-01" } }
 ```
 
-- 成功: `200`、`Content-Type: application/vnd.apache.arrow.stream`（Arrow IPC のストリーム）。`Accept-Encoding: gzip` なら gzip で返す。行数は `X-DevBI-Rows` ヘッダー。
+- 成功: `200`、`Content-Type: application/vnd.apache.arrow.stream`（Arrow IPC のストリーム）。8 KB を超えて `Accept-Encoding: gzip` なら gzip で返す。行数は `X-DevBI-Rows` ヘッダー。
 - 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
 - `Content-Type: application/json` 以外は受け付けません。ほかのサイトのページから、ブラウザに確かめさせずに送ることができないようにするためです。
 
-`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。`serve(options)` は `devbi-serve` の中身です。
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
 ## @devbi/react
 
@@ -501,7 +511,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
-| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
+| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
 | `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない） |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |

@@ -1,9 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { toArrowStream } from "./arrow.js";
 import { connect, dialectOf, type Connection } from "./connect.js";
-import { DatasetError, bindParameters, connectionVariable, listDatasets, parseDataset, readDataset } from "./datasets.js";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { DatasetError, bindParameters, connectionOf, connectionVariable, listDatasets, parseDataset, readDatasetText } from "./datasets.js";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 
@@ -94,10 +92,9 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     const datasets = [];
     for (const name of await listDatasets(options.dir)) {
       try {
-        const text = await readFile(path.join(options.dir, "api", `${name}.sql`), "utf8");
-        const first = parseDataset(name, text);
-        const dialect = dialectOf(env[connectionVariable(first.connection)] ?? "");
-        const d = dialect ? parseDataset(name, text, dialect) : first;
+        const text = await readDatasetText(options.dir, name);
+        // Checked with the quoting rules of its database ([brackets], $$ … $$), or all of them when that is unknown.
+        const d = parseDataset(name, text, dialectOf(env[connectionVariable(connectionOf(text))] ?? ""));
         datasets.push({ name, description: d.description, params: d.params, connection: connectionVariable(d.connection) });
       } catch (e) {
         datasets.push({ name, error: (e as Error).message });
@@ -123,18 +120,19 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     if (typeof params !== "object" || params === null || Array.isArray(params)) throw new HttpError(400, "params はオブジェクトで送ってください");
 
     const started = Date.now();
-    const first = await readDataset(options.dir, name);
-    const url = urlOf(first.connection);
+    const text = await readDatasetText(options.dir, name);
+    const connection = connectionOf(text);
+    const url = urlOf(connection);
     let conn: Connection;
     try {
       conn = await open(url);
     } catch (e) {
       const detail = (e as Error).message;
-      log(`${connectionVariable(first.connection)}: ${detail}`);
+      log(`${connectionVariable(connection)}: ${detail}`);
       throw new HttpError(500, options.exposeErrors ? `データベースにつなげません: ${detail}` : "データベースにつなげません（くわしくはサーバーのログにあります）");
     }
-    // Read again with the database's quoting rules (brackets, $$ … $$), which the checks depend on.
-    const dataset = await readDataset(options.dir, name, conn.dialect);
+    // Checked with the database's quoting rules ([brackets], $$ … $$), which the read-only check depends on.
+    const dataset = parseDataset(name, text, conn.dialect);
     const bound = bindParameters(dataset, conn.dialect, params as Record<string, unknown>);
     // One row past the limit tells whether there were more.
     const limited = `SELECT * FROM (\n${bound.sql}\n) AS devbi_rows LIMIT ${maxRows + 1}`;

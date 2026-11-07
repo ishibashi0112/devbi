@@ -30,3 +30,33 @@ test("the API lists its SQL files and answers in Japanese when something is wron
   expect(res.status()).toBe(400);
   expect((await res.json()).error).toBe("api/orders.sql: パラメーター :from の値がありません。read_api('orders', from = ...) と書きます");
 });
+
+test("no rows, or a computed column with only NULLs: the tiles still work", async ({ page }) => {
+  const { toArrowStream } = await import("@devbi/server");
+  const columns = [
+    { name: "受注日", type: "date" },
+    { name: "受注番号", type: "string" },
+    { name: "顧客", type: "string" },
+    { name: "地域", type: "string" },
+    { name: "商品分類", type: "string" },
+    { name: "商品", type: "string" },
+    { name: "数量", type: "int" },
+    { name: "単価", type: "int" },
+    // SQLite's l.qty * l.unit_price: an expression, with no values to tell its type by.
+    { name: "金額", type: "null" },
+  ] as const;
+  for (const rows of [[], [["2026-05-01", "A-1", "顧客 1", "関東", "文具", "ノート", 2, 300, null]]]) {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    await page.route("**/api/query", (route) =>
+      route.fulfill({ status: 200, contentType: "application/vnd.apache.arrow.stream", body: Buffer.from(toArrowStream({ columns: [...columns], rows })) }),
+    );
+    await page.goto("/");
+    await page.goto("/#/sales-db");
+    await expect(page.locator("[data-tile]").first()).toBeVisible();
+    await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+    await expect(page.locator(".devbi-error")).toHaveCount(0);
+    expect(errors).toEqual([]);
+    await page.unrouteAll();
+  }
+});
