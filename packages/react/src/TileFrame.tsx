@@ -1,5 +1,5 @@
 import { checkQuery, componentProblem, resolveComponent, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
-import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { makeFormatters, useDevbi, useDevbiQuery, useSelectionVersion } from "./context.js";
 import type { TileModule } from "./project.js";
 import { builtinTiles } from "./tiles/index.js";
@@ -133,7 +133,9 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
             <div className="devbi-error">{error.message}</div>
           ) : Body ? (
             <ErrorBoundary resetKey={data.rows}>
-              <Body {...props} />
+              <Suspense fallback={<div className="devbi-tile-pending" aria-busy="true" />}>
+                <Body {...props} />
+              </Suspense>
             </ErrorBoundary>
           ) : null}
         </TileSizeContext.Provider>
