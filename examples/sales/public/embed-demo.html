@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>販売管理システム（DevBI の埋め込みの例）</title>
+    <!--
+      DevBI の外の「既存の業務アプリ」のつもりのページです。このページの CSS（h1、td、ul などへの指定）は、
+      ダッシュボードの中には効きません。ダッシュボードを置くのに要るのは、下の div と script の 2 行だけです。
+    -->
+    <style>
+      body { margin: 0; font-family: Georgia, "Times New Roman", serif; background: #e9edf2; color: #222; }
+      header { background: #1f3a5f; color: #fff; padding: 10px 20px; display: flex; gap: 16px; align-items: center; }
+      header strong { font-size: 18px; }
+      .layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: calc(100vh - 44px); }
+      nav { background: #fff; border-right: 1px solid #c8d0da; padding: 16px; }
+      nav ul { list-style: square; padding-left: 20px; margin: 0; line-height: 2; }
+      main { padding: 20px; }
+      h1 { color: #8a1c1c; text-transform: uppercase; letter-spacing: 0.08em; font-size: 26px; margin: 0 0 12px; }
+      table, td, th { border: 2px solid #8a1c1c; padding: 12px; background: #fff8e8; }
+      .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+      .report { border: 1px solid #c8d0da; background: #fff; min-height: 300px; }
+      .loading { padding: 24px; color: #666; }
+    </style>
+  </head>
+  <body>
+    <header><strong>販売管理システム</strong><span>営業部 / 山田さん</span></header>
+    <div class="layout">
+      <nav>
+        <ul>
+          <li>受注入力</li>
+          <li>出荷</li>
+          <li><b>売上の集計</b></li>
+          <li>マスター</li>
+        </ul>
+      </nav>
+      <main>
+        <h1>売上の集計</h1>
+        <div class="toolbar">
+          <label for="report">レポート</label>
+          <select id="report"></select>
+        </div>
+
+        <!-- ① ダッシュボードを出す場所。data-devbi にダッシュボードの名前（dashboards/<名前>.dash.json）を書く -->
+        <div id="report-area" class="report" data-devbi="sales-db" data-devbi-theme="light">
+          <p class="loading">読み込んでいます…（開発サーバーにはありません。ビルドして pnpm example:serve で開いてください）</p>
+        </div>
+      </main>
+    </div>
+
+    <!-- ② script を 1 本。data-devbi の付いた場所に、ダッシュボードを出す -->
+    <script type="module" src="./devbi-embed.js"></script>
+
+    <!-- （なくてもよい）JavaScript から使う例: レポートの一覧を作り、選んだものに切り替える -->
+    <script type="module">
+      import { dashboards, mount } from "./devbi-embed.js";
+      const select = document.getElementById("report");
+      for (const d of dashboards) select.add(new Option(d.title, d.name));
+      select.value = document.getElementById("report-area").dataset.devbi;
+      select.addEventListener("change", () => mount("#report-area", { dashboard: select.value, theme: "light" }));
+    </script>
+  </body>
+</html>

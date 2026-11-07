@@ -72,15 +72,30 @@ function tileStyle(t: TileSpec, rowHeight: number): CSSProperties {
   };
 }
 
+/** Light or dark: `auto` follows the OS setting. Inside another app, `light` keeps the dashboard light like the page. */
+export type Theme = "auto" | "light" | "dark";
+
+/** The `data-theme` of `.devbi-root` for a theme (none for auto). */
+export function themeAttribute(theme: Theme | undefined): { "data-theme"?: "light" | "dark" } {
+  return theme === "light" || theme === "dark" ? { "data-theme": theme } : {};
+}
+
 /** Render one dashboard of a project. */
-export function Dashboard({ project, name, back }: { project: Project; name: string; back?: string }) {
+export function Dashboard({ project, name, back, theme }: { project: Project; name: string; back?: string; theme?: Theme }) {
   useInsertionEffect(injectStyles, []);
   const dashboard = Object.hasOwn(project.dashboards, name) ? project.dashboards[name] : undefined;
-  if (!dashboard) return <div className="devbi-root devbi-error">ダッシュボード {name} がありません</div>;
+  if (!dashboard) {
+    const names = Object.keys(project.dashboards).sort();
+    return (
+      <div className="devbi-root devbi-error" {...themeAttribute(theme)}>
+        ダッシュボード {name} がありません（{names.length ? `あるのは ${names.join(", ")}` : "dashboards/ に *.dash.json がありません"}）
+      </div>
+    );
+  }
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   return (
     <DevbiProvider project={project} dashboard={dashboard}>
-      <div className="devbi-root">
+      <div className="devbi-root" {...themeAttribute(theme)}>
         <div className="devbi-dashboard">
           {back && (
             <a className="devbi-back" href={back}>
@@ -120,7 +135,7 @@ function useHash(): string {
  * A whole static site: a list of dashboards, and each dashboard at `#/<name>`.
  * With one dashboard it is shown directly.
  */
-export function DevbiApp({ project: input }: { project: ProjectInput }) {
+export function DevbiApp({ project: input, theme }: { project: ProjectInput; theme?: Theme }) {
   useInsertionEffect(injectStyles, []);
   const loaded = useMemo(() => {
     try {
@@ -132,7 +147,7 @@ export function DevbiApp({ project: input }: { project: ProjectInput }) {
   const hash = useHash();
   if (loaded.error || !loaded.project) {
     return (
-      <div className="devbi-root">
+      <div className="devbi-root" {...themeAttribute(theme)}>
         <pre className="devbi-error devbi-dashboard">{loaded.error?.message}</pre>
       </div>
     );
@@ -141,11 +156,11 @@ export function DevbiApp({ project: input }: { project: ProjectInput }) {
   const names = Object.keys(project.dashboards).sort();
   const current = decodeURIComponent(hash.replace(/^#\/?/, ""));
   if (current && Object.hasOwn(project.dashboards, current)) {
-    return <Dashboard key={current} project={project} name={current} {...(names.length > 1 ? { back: "#/" } : {})} />;
+    return <Dashboard key={current} project={project} name={current} theme={theme} {...(names.length > 1 ? { back: "#/" } : {})} />;
   }
-  if (names.length === 1) return <Dashboard project={project} name={names[0]!} />;
+  if (names.length === 1) return <Dashboard project={project} name={names[0]!} theme={theme} />;
   return (
-    <div className="devbi-root">
+    <div className="devbi-root" {...themeAttribute(theme)}>
       <div className="devbi-index">
         <h1>ダッシュボード</h1>
         {names.length === 0 ? (

@@ -7,5 +7,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: "es2023",
-  external: ["react", "react-dom", "react/jsx-runtime"],
+  external: ["react", "react-dom", "react-dom/client", "react/jsx-runtime"],
 });

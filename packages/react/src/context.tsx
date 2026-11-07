@@ -29,16 +29,25 @@ export interface DevbiContextValue {
 const Ctx = createContext<DevbiContextValue | null>(null);
 
 const engines = new Map<string, Promise<Engine>>();
+const fetchIds = new WeakMap<typeof fetch, number>();
+let nextFetchId = 1;
+function fetchId(f: typeof fetch | undefined): number {
+  if (!f) return 0;
+  let id = fetchIds.get(f);
+  if (id === undefined) fetchIds.set(f, (id = nextFetchId++));
+  return id;
+}
 
-/** One engine per page and DuckDB bundle, shared by every dashboard. */
+/** One engine per page and DuckDB bundle (and data, API and fetch), shared by every dashboard. */
 export function getEngine(project: Project): Promise<Engine> {
-  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.apiUrl ?? ""}|${project.extensionRepository ?? ""}`;
+  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.apiUrl ?? ""}|${project.extensionRepository ?? ""}|${fetchId(project.fetch)}`;
   let e = engines.get(key);
   if (!e) {
     e = createEngine({
       bundle: project.duckdb,
       baseUrl: project.baseUrl,
       ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}),
+      ...(project.fetch ? { fetch: project.fetch } : {}),
       ...(project.extensionRepository ? { extensionRepository: project.extensionRepository } : {}),
     });
     engines.set(key, e);

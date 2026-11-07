@@ -1,4 +1,6 @@
-export { Dashboard, DevbiApp } from "./Dashboard.js";
+export { Dashboard, DevbiApp, type Theme } from "./Dashboard.js";
+export { mountDashboard, unmountDashboard, type MountOptions, type MountedDashboard } from "./mount.js";
+export { startEmbed, optionsFromAttributes, type DevbiEmbed } from "./embed.js";
 export { TileFrame } from "./TileFrame.js";
 export { DevbiProvider, useDevbi, useDevbiQuery, useTimeExtent, useSelectionVersion, getEngine, type QueryState } from "./context.js";
 export { createEngine } from "./load-engine.js";

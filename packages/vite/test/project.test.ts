@@ -53,3 +53,34 @@ describe("the dev server", () => {
     }
   });
 });
+
+describe("embed: true", () => {
+  type Built = { build: { rolldownOptions: { input: Record<string, string>; preserveEntrySignatures?: string; output: { entryFileNames: (c: { name: string }) => string } } } };
+  const configure = async (user: Record<string, unknown>, command: "build" | "serve" = "build") => {
+    const devbi = (await import("../src/index.js")).default;
+    const plugin = devbi({ embed: true });
+    (plugin.config as (u: unknown, e: { mode: string; command: string }) => unknown)(user, { mode: "production", command });
+    return user as unknown as Built;
+  };
+
+  it("adds devbi-embed.js next to the page, keeping its exports and name", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-embed-"));
+    writeFileSync(path.join(dir, "index.html"), "<!doctype html>");
+    const { build } = await configure({ root: dir });
+    expect(build.rolldownOptions.input).toEqual({ index: path.join(dir, "index.html"), "devbi-embed": "virtual:devbi/embed" });
+    expect(build.rolldownOptions.preserveEntrySignatures).toBe("exports-only");
+    expect(build.rolldownOptions.output.entryFileNames({ name: "devbi-embed" })).toBe("devbi-embed.js");
+    expect(build.rolldownOptions.output.entryFileNames({ name: "index" })).toBe("assets/[name]-[hash].js");
+  });
+
+  it("keeps the entries and file names a project gives", async () => {
+    const { build } = await configure({ root: "/p", build: { rollupOptions: { input: ["/p/a.html", "/p/b.html"], output: { entryFileNames: "js/[name].js" } } } });
+    const o = (build as unknown as { rollupOptions: Built["build"]["rolldownOptions"] }).rollupOptions;
+    expect(o.input).toEqual({ a: "/p/a.html", b: "/p/b.html", "devbi-embed": "virtual:devbi/embed" });
+    expect(o.output.entryFileNames({ name: "a" })).toBe("js/[name].js");
+  });
+
+  it("does nothing for the dev server", async () => {
+    expect((await configure({ root: "/p" }, "serve")).build).toBeUndefined();
+  });
+});

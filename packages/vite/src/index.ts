@@ -3,7 +3,7 @@ import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources } from "devbi";
-import { loadEnv, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type ViteDevServer } from "vite";
+import { loadEnv, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type UserConfig, type ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
 import { generate } from "./gen.js";
 
@@ -17,10 +17,50 @@ export interface DevbiOptions {
    * CSV, Arrow IPC and xlsx need no extensions.
    */
   extensionRepository?: string;
+  /**
+   * Also build `devbi-embed.js` into the output folder: one script that shows the dashboards in another app's
+   * page (`<div data-devbi="sales">`), with the data, the engine and the API next to it. Default off.
+   */
+  embed?: boolean;
 }
 
 const VIRTUAL = "virtual:devbi";
 const RESOLVED = "\0virtual:devbi";
+const EMBED = "virtual:devbi/embed";
+const RESOLVED_EMBED = "\0virtual:devbi/embed";
+/** The embed script's entry name, and its file in the output folder (always this name, so pages can point at it). */
+const EMBED_NAME = "devbi-embed";
+
+type EntryFileNames = string | ((chunk: { name: string }) => string) | undefined;
+type BuildInputs = { input?: string | string[] | Record<string, string>; preserveEntrySignatures?: unknown; output?: { entryFileNames?: EntryFileNames } | { entryFileNames?: EntryFileNames }[] };
+
+/** Add the embed script to a build's entries, keeping the page (index.html) and any entries already given. */
+function addEmbedEntry(user: UserConfig, root: string): void {
+  const build = (user.build ??= {});
+  const key = build.rolldownOptions || !build.rollupOptions ? "rolldownOptions" : "rollupOptions";
+  const options = ((build as Record<string, unknown>)[key] ??= {}) as BuildInputs;
+  const given = options.input;
+  const html = path.join(root, "index.html");
+  const inputs: Record<string, string> =
+    given === undefined
+      ? existsSync(html)
+        ? { index: html }
+        : {}
+      : typeof given === "string"
+        ? { index: given }
+        : Array.isArray(given)
+          ? Object.fromEntries(given.map((g) => [path.basename(g).replace(/\.[^.]+$/, ""), g]))
+          : { ...given };
+  inputs[EMBED_NAME] = EMBED;
+  options.input = inputs;
+  // Vite drops an app's entry exports; the embed script keeps its own (import { mount } from ".../devbi-embed.js").
+  options.preserveEntrySignatures ??= "exports-only";
+  const assets = build.assetsDir ?? "assets";
+  const named = (orig: EntryFileNames) => (chunk: { name: string }) =>
+    chunk.name === EMBED_NAME ? `${EMBED_NAME}.js` : typeof orig === "function" ? orig(chunk) : (orig ?? `${assets}/[name]-[hash].js`);
+  const outputs = options.output === undefined ? [(options.output = {})] : Array.isArray(options.output) ? options.output : [options.output];
+  for (const o of outputs) o.entryFileNames = named(o.entryFileNames);
+}
 
 interface ProjectFiles {
   dashboards: Record<string, { path: string; spec: unknown }>;
@@ -166,7 +206,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   return {
     name: "devbi",
     enforce: "pre",
-    config(user, { mode }) {
+    config(user, { mode, command }) {
       // The dev server serves the project folder: keep the API's SQL and SQLite databases out of it (they are
       // for the server only). Vite's own list stays when the project has none of its own.
       const root = path.resolve(user.root ?? process.cwd());
@@ -179,6 +219,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
           return [...new Set([file, realPath(file)])].map((f) => posix(f).replace(/[*?{}()[\]!+@]/g, "\\$&"));
         });
       const deny = [...(user.server?.fs?.deny ? [] : VITE_DENY), ...SERVER_ONLY, ...sqliteFiles];
+      if (options.embed && command === "build" && !user.build?.ssr && !user.build?.lib) addEmbedEntry(user, root);
       return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"] }, server: { fs: { deny } } };
     },
     configResolved(c) {
@@ -188,7 +229,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       if (relDir.startsWith("..")) throw new Error(`devbi: dir はVite の root の中にしてください: ${dir}`);
     },
     resolveId(id) {
-      return id === VIRTUAL ? RESOLVED : undefined;
+      return id === VIRTUAL ? RESOLVED : id === EMBED ? RESOLVED_EMBED : undefined;
     },
     async buildStart() {
       // Keep .devbi/ (names for TypeScript and the editors' JSON Schema) in step with models/.
@@ -201,6 +242,20 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       if (config.command === "serve" && /[\\/]@duckdb[\\/]duckdb-wasm[\\/]dist[\\/][^/\\?]+\.worker\.js(\?v=\w+)?$/.test(id)) {
         const code = await readFile(id.split("?")[0]!, "utf8");
         return { code: code.replace(/\n\/\/# sourceMappingURL=\S+\s*$/, "\n"), map: null };
+      }
+      if (id === RESOLVED_EMBED) {
+        const base = relDir ? `${relDir}/` : "./";
+        return [
+          `import project from ${JSON.stringify(VIRTUAL)};`,
+          `import { startEmbed } from "@devbi/react";`,
+          // This script sits in the output folder: the data and the API are next to it, whichever page loads it.
+          // (import.meta.url through a name: Vite would take new URL("…", import.meta.url) for a file to bundle.)
+          `const here = import.meta.url;`,
+          `const baseUrl = import.meta.env.DEV ? project.baseUrl : new URL(${JSON.stringify(base)}, here).href;`,
+          `const devbi = startEmbed({ ...project, baseUrl });`,
+          `export const dashboards = devbi.dashboards, mount = devbi.mount, mountAll = devbi.mountAll, unmount = devbi.unmount;`,
+          `export default devbi;`,
+        ].join("\n");
       }
       if (id !== RESOLVED) return;
       const project = await readProject(dir);

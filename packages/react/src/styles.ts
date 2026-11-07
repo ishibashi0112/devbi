@@ -1,3 +1,16 @@
+/** The dark colors: under the OS's dark mode (unless `data-theme="light"`), or with `data-theme="dark"`. */
+const DARK = `
+    --devbi-bg: #12151b;
+    --devbi-card: #1b1f27;
+    --devbi-text: #e6e8ec;
+    --devbi-muted: #98a2b3;
+    --devbi-border: #2c323d;
+    --devbi-accent: #7c9cf5;
+    --devbi-accent-soft: rgba(124, 156, 245, 0.18);
+    --devbi-up: #4cc38a;
+    --devbi-down: #ff8a65;
+`;
+
 /** Default styles, injected once. Override the custom properties to theme. */
 export const css = `
 .devbi-root {
@@ -20,18 +33,20 @@ export const css = `
   box-sizing: border-box;
 }
 @media (prefers-color-scheme: dark) {
-  .devbi-root:not([data-theme="light"]) {
-    --devbi-bg: #12151b;
-    --devbi-card: #1b1f27;
-    --devbi-text: #e6e8ec;
-    --devbi-muted: #98a2b3;
-    --devbi-border: #2c323d;
-    --devbi-accent: #7c9cf5;
-    --devbi-accent-soft: rgba(124, 156, 245, 0.18);
-    --devbi-up: #4cc38a;
-    --devbi-down: #ff8a65;
-  }
+  .devbi-root:not([data-theme="light"]) {${DARK}  }
 }
+.devbi-root[data-theme="dark"] {${DARK}  color-scheme: dark;
+}
+.devbi-root[data-theme="light"] { color-scheme: light; }
+/* Inside another app's page, its styles for plain elements (header { … }, h1 { … }, td { … }) stay out of the
+   dashboard. Under .devbi-root with :where(), so DevBI's own rules (later, as or more specific) still apply. */
+.devbi-root :where(header, footer, nav, main, section, article, aside, figure, figcaption, form, fieldset, h1, h2, h3, h4, h5, h6,
+  p, ul, ol, li, dl, dt, dd, table, caption, thead, tbody, tfoot, tr, th, td, button, input, select, textarea, label, a, small,
+  strong, b, code, pre, blockquote) {
+  font-family: inherit; color: inherit; letter-spacing: normal; text-transform: none; text-shadow: none;
+  background: none; border: 0; border-radius: 0; box-shadow: none; float: none;
+}
+.devbi-root :where(h1, h2, h3, h4, h5, h6) { line-height: 1.3; font-style: normal; }
 .devbi-root *, .devbi-root *::before, .devbi-root *::after { box-sizing: inherit; }
 .devbi-root button { font: inherit; color: inherit; }
 .devbi-dashboard { padding: 16px 20px 32px; max-width: 1600px; margin: 0 auto; }
@@ -150,7 +165,8 @@ export function injectStyles(): void {
   if (injected || typeof document === "undefined") return;
   injected = true;
   const style = document.createElement("style");
-  style.dataset.devbi = "";
+  // Not data-devbi: that marks the elements a dashboard is shown in (embed).
+  style.dataset.devbiStyles = "";
   style.textContent = css;
   document.head.prepend(style);
 }

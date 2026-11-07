@@ -11,6 +11,7 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [書式](#書式)
 - [@devbi/vite](#devbivite)
 - [データベースから読む（@devbi/server）](#データベースから読むdevbiserver)
+- [ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)
 - [@devbi/react](#devbireact)
 - [devbi（コア）](#devbiコア)
 - [見た目の変更（CSS 変数）](#見た目の変更css-変数)
@@ -367,6 +368,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | --- | --- |
 | `dir` | `dashboards/`、`models/`、`data/` のあるフォルダ。Vite の root からの相対パス。既定は root |
 | `extensionRepository` | DuckDB の拡張（Parquet）を取りに行く URL。社内のサーバーに置いた拡張を使うとき |
+| `embed` | `true` で、ビルドのときに `devbi-embed.js` も作る（[ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)）。既定は `false` |
 
 - `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
 - 開発サーバーでは、dash.json・metrics.yaml・data/ のファイルを保存するとページを読み込み直します。
@@ -501,12 +503,115 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 
 `createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
+## ほかのアプリの画面に埋め込む
+
+ダッシュボードを、社内の既存のアプリ（ASP.NET の WebForms や MVC、ほかの React のアプリなど）の画面の中に出せます。要るのは、ビルドでできる `devbi-embed.js` と、画面に足す 2 行だけです。
+
+### 1. ビルドで `devbi-embed.js` を作る
+
+```ts
+// vite.config.ts
+export default { base: "./", plugins: [react(), devbi({ embed: true })] };
+```
+
+- `pnpm build` で、`dist/` に `devbi-embed.js` ができます。名前は毎回同じです。
+- `dist/` を丸ごと、アプリから配れる場所（例: `/Scripts/devbi/`）に置きます。
+- データ（`data/`）、エンジン（`assets/`）、API は、`devbi-embed.js` のある場所を基準に探します。そのため `base: "./"` にしておきます。
+- 開発サーバー（`pnpm dev`）では作られません。試すときは、ビルドして `devbi-serve` か `vite preview` で開きます。サンプルの `examples/sales/public/embed-demo.html` がその例です。
+
+### 2. 画面に 2 行を足す
+
+```html
+<div data-devbi="sales" data-devbi-theme="light"></div>
+<script type="module" src="/Scripts/devbi/devbi-embed.js"></script>
+```
+
+| 属性 | 中身 |
+| --- | --- |
+| `data-devbi` | ダッシュボードの名前（`dashboards/<名前>.dash.json`）。ダッシュボードが 1 つだけなら空でよい |
+| `data-devbi-theme` | `light`、`dark`、`auto`（既定。OS の設定に合わせる）。明るい画面に置くときは `light` |
+| `data-devbi-api` | 読み取り API の場所（`read_api` を使うとき）。既定は `devbi-embed.js` と同じ場所の `api/`。アプリに API を足したときは、その場所（例: `/MyApp/devbi/api/`） |
+
+- `<script type="module">` は、ページを読み終わってから動きます。`<head>` に書いても、div より前に書いてもかまいません。
+- 1 つのページに、いくつでも置けます。DuckDB のエンジンはページに 1 つで、共有します。
+- 幅は置いた場所いっぱいです。高さはタイルの並びで決まり、スクロールはページのものです。
+- ダッシュボードの中には、ページの CSS のうち要素の名前だけの指定（`h1 { … }`、`td { … }`、`header { … }` など）は効きません。ID やクラスを使った強い指定（`#main h1 { … }`）は、効くことがあります。
+- ページと同じオリジン（同じサーバーとポート）から配ってください。ほかのオリジンに置くと、ブラウザが DuckDB のファイルや API を読ませません。
+
+### 3. JavaScript から使う
+
+```html
+<script type="module">
+  import { dashboards, mount } from "/Scripts/devbi/devbi-embed.js";
+  mount("#report", { dashboard: "sales", theme: "light" });
+</script>
+```
+
+同じものが `window.DevBI` にも入ります。読み込みが終わると、`window` に `devbi:ready` イベントが出ます。
+
+| 名前 | 中身 |
+| --- | --- |
+| `dashboards` | ダッシュボードの一覧（`name`、`title`、`description`）。画面のメニューを作るとき |
+| `mount(要素かセレクタ, { dashboard?, theme?, apiUrl?, fetch? })` | ダッシュボードを出す。同じ要素にもう一度呼ぶと切り替わる。`fetch` は API を呼ぶときに使う関数（ヘッダーを足すとき） |
+| `mountAll(root?)` | `data-devbi` の付いた要素のうち、まだ出していないものに出す。ページから消えた要素のものは片付ける。戻り値は新しく出した数 |
+| `unmount(要素かセレクタ)` | ダッシュボードを消す |
+
+ASP.NET の UpdatePanel のように画面の一部を入れ替えるページでは、入れ替えのあとに `mountAll()` を呼びます。
+
+```js
+Sys.WebForms.PageRequestManager.getInstance().add_endRequest(() => window.DevBI?.mountAll());
+```
+
+### 4. API とログイン
+
+- `read_api` を使うダッシュボードには、読み取り API が要ります。`devbi-serve` を同じサーバーで動かすか、アプリに同じ形の API（[API の形](#api-の形)）を足して、`data-devbi-api` でその場所を指します。
+- アプリのログイン（Cookie、Windows 認証）は、同じオリジンならそのまま API に届きます。
+- CSRF のトークンなど、ヘッダーが要るときは `mount` の `fetch` で足します。
+
+```js
+mount("#report", { dashboard: "sales", fetch: (url, init) => fetch(url, { ...init, headers: { ...init?.headers, "X-CSRF-Token": token } }) });
+```
+
+### React のアプリに置く
+
+DevBI の Vite プラグインを入れた React 19 のアプリでは、部品として置けます。
+
+```tsx
+import { Dashboard, loadProject } from "@devbi/react";
+import input from "virtual:devbi";
+const project = loadProject(input);
+// …
+<Dashboard project={project} name="sales" theme="light" />
+```
+
+ほかの React のアプリ（Vite でない、React 18 など）では、`devbi-embed.js` を使います。DevBI は自分の React で動くので、アプリの React の版は関係ありません。
+
+```tsx
+function DevbiDashboard({ name }: { name: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let alive = true;
+    let unmount = () => {};
+    import(/* @vite-ignore */ /* webpackIgnore: true */ "/Scripts/devbi/devbi-embed.js").then((devbi) => {
+      if (alive && ref.current) unmount = devbi.mount(ref.current, { dashboard: name, theme: "light" }).unmount;
+    });
+    return () => {
+      alive = false;
+      unmount();
+    };
+  }, [name]);
+  return <div ref={ref} />;
+}
+```
+
 ## @devbi/react
 
 | 名前 | 中身 |
 | --- | --- |
-| `<DevbiApp project={…} />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す |
-| `<Dashboard project={…} name="sales" back?="#/" />` | ダッシュボード 1 つ。`project` は `loadProject()` の戻り値 |
+| `<DevbiApp project={…} theme? />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す |
+| `<Dashboard project={…} name="sales" back?="#/" theme? />` | ダッシュボード 1 つ。`project` は `loadProject()` の戻り値。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"` |
+| `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
+| `startEmbed(input)` | `devbi-embed.js` の中身。`data-devbi` の要素に出し、`window.DevBI` を作る。ふつうは `@devbi/vite` の `embed` が使う |
 | `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ |
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
@@ -549,7 +654,10 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 @media (prefers-color-scheme: dark) {
   .devbi-root:not([data-theme="light"]) { --devbi-accent: #4fd1c0; }
 }
+.devbi-root[data-theme="dark"] { --devbi-accent: #4fd1c0; }
 ```
+
+ライト / ダークは、ふつうは OS の設定に合わせます。`.devbi-root` の `data-theme` が `"light"` ならいつもライト、`"dark"` ならいつもダークです（`<Dashboard theme>` や埋め込みの `data-devbi-theme` で付きます）。
 
 | 変数 | 使い道 | ライト / ダークの既定 |
 | --- | --- | --- |
@@ -564,7 +672,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 
 自作タイルでもこの変数を使えば、ダークモードに合わせて色が変わります。
 
-`table` タイルの表（spreadsheet-grid）は、背景・文字・枠線・強調の色をこの変数から取ります。ライト / ダークは `.devbi-root` に合わせます（`data-theme="light"` ならライト、ほかは OS の設定）。表だけを変えるときは、`.devbi-root .devbi-table-grid` に spreadsheet-grid の変数（`--ssg-*`）を書きます。列見出しの ⋮ のメニューはページの最後に出るので、その色は spreadsheet-grid のライト / ダークの既定のままです。
+`table` タイルの表（spreadsheet-grid）は、背景・文字・枠線・強調の色をこの変数から取ります。ライト / ダークは `.devbi-root` に合わせます（`data-theme` が `"light"` か `"dark"` ならそれ、ほかは OS の設定）。表だけを変えるときは、`.devbi-root .devbi-table-grid` に spreadsheet-grid の変数（`--ssg-*`）を書きます。列見出しの ⋮ のメニューはページの最後に出るので、その色は spreadsheet-grid のライト / ダークの既定のままです。
 
 ## コマンド
 
