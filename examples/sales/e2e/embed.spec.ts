@@ -45,6 +45,7 @@ test("one script and a data-devbi element put a dashboard into another app's pag
   await expect(tile(page, "products").locator(".ssg-root")).not.toHaveClass(/ssg-theme-dark/);
 
   // The page's CSS for h1, header and td stays out of the dashboard; its own h1 keeps it.
+  await expect(root).toHaveAttribute("data-devbi-isolate", "");
   await expect(page.locator("main > h1")).toHaveCSS("color", "rgb(138, 28, 28)");
   await expect(root.locator(".devbi-head h1")).toHaveCSS("color", "rgb(29, 35, 48)");
   await expect(root.locator(".devbi-head h1")).toHaveCSS("text-transform", "none");
@@ -144,7 +145,7 @@ test("two DevBI scripts on one page: neither takes the other's elements", async 
 
   // Another project's script (a stand-in with the same page-wide list): it has "other", not "sales".
   const added = await page.evaluate(() => {
-    type Instance = { knows(name: string): boolean; release(el: Element): void };
+    type Instance = { knows(name: string): boolean; release(el: Element): void; scan(root: ParentNode): number };
     type Registry = { instances: Set<Instance>; claims: WeakMap<Element, { instance: Instance; known: boolean }> };
     const reg = (globalThis as unknown as Record<symbol, Registry>)[Symbol.for("devbi.embed.v1")]!;
     const other: Instance = {
@@ -153,9 +154,20 @@ test("two DevBI scripts on one page: neither takes the other's elements", async 
         el.textContent = "";
         if (reg.claims.get(el)?.instance === other) reg.claims.delete(el);
       },
+      scan(root) {
+        let n = 0;
+        for (const el of root.querySelectorAll('[data-devbi="other"]')) {
+          if (reg.claims.has(el)) continue;
+          el.textContent = "the other project's dashboard";
+          reg.claims.set(el, { instance: other, known: true });
+          n++;
+        }
+        return n;
+      },
     };
     reg.instances.add(other);
-    const theirs = Object.assign(document.createElement("div"), { id: "theirs", textContent: "the other project's dashboard" });
+    // Added by a partial update of the page: window.DevBI (this project's) asks the other script to show it.
+    const theirs = Object.assign(document.createElement("div"), { id: "theirs" });
     theirs.dataset.devbi = "other";
     // An element the other script got to first, showing that it has no "sales": the one that has it takes over.
     const taken = Object.assign(document.createElement("div"), { id: "taken", textContent: "ダッシュボード sales がありません" });
@@ -164,7 +176,7 @@ test("two DevBI scripts on one page: neither takes the other's elements", async 
     document.querySelector("main")!.append(theirs, taken);
     return (window as unknown as { DevBI: Devbi }).DevBI.mountAll();
   });
-  expect(added).toBe(1);
+  expect(added).toBe(2);
   await expect(page.locator("#theirs")).toHaveText("the other project's dashboard");
   await expect(page.locator("#taken .devbi-head h1")).toHaveText("売上ダッシュボード");
   await expect(page.locator(".devbi-root")).toHaveCount(2);

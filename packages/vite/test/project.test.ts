@@ -100,19 +100,25 @@ describe("embed: true", () => {
     expect(o.chunkFileNames({ name: "engine" })).toBe("assets/engine-[hash].js");
   });
 
-  it('makes base "./" unless given, and warns about what stops the embed script from working', async () => {
-    expect(((await configure({ root: "/p" })) as unknown as { base: string }).base).toBe("./");
+  it("warns about what stops the embed script from working, and leaves base as it is", async () => {
+    const warnings = async (user: Record<string, unknown>) => {
+      const devbi = (await import("../src/index.js")).default;
+      const plugin = devbi({ embed: true });
+      (plugin.config as (u: unknown, e: { mode: string; command: string }) => unknown)(user, { mode: "production", command: "build" });
+      const warn = vi.fn();
+      (plugin.configResolved as (c: unknown) => void)({ root: "/p", command: "build", logger: { warn } });
+      return warn.mock.calls.map((c) => String(c[0])).join("\n");
+    };
     const user = { root: "/p", base: "/reports/", build: { cssCodeSplit: false, rolldownOptions: { preserveEntrySignatures: false } } };
-    const devbi = (await import("../src/index.js")).default;
-    const plugin = devbi({ embed: true });
-    (plugin.config as (u: unknown, e: { mode: string; command: string }) => unknown)(user, { mode: "production", command: "build" });
-    const warn = vi.fn();
-    (plugin.configResolved as (c: unknown) => void)({ root: "/p", command: "build", logger: { warn } });
-    const said = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    const said = await warnings(user);
     expect(user.base).toBe("/reports/");
     expect(user.build.rolldownOptions.preserveEntrySignatures).toBe("exports-only");
     expect(said).toMatch(/preserveEntrySignatures/);
     expect(said).toMatch(/cssCodeSplit/);
     expect(said).toMatch(/base: "\/reports\/"/);
+    const unset: Record<string, unknown> = { root: "/p" };
+    expect(await warnings(unset)).toMatch(/base: "\/"（Vite の既定）/);
+    expect(unset.base).toBeUndefined();
+    expect(await warnings({ root: "/p", base: "./" })).toBe("");
   });
 });

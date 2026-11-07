@@ -49,9 +49,14 @@ export function getEngine(project: Project): Promise<Engine> {
   return e;
 }
 
-/** The dashboard's API location and fetch, for `engine.loadView`. */
-function apiOf(project: Project): ApiOptions {
-  return { ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}), ...(project.fetch ? { fetch: project.fetch } : {}) };
+/**
+ * The page's engine as the dashboard sees it: `loadView(view)` reads `read_api` from the dashboard's API with its
+ * fetch (the project's `apiUrl` and `fetch`), also for promoted tiles that call `useDevbi().engine` themselves.
+ */
+function forDashboard(engine: Engine, project: Project): Engine {
+  const api: ApiOptions = { ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}), ...(project.fetch ? { fetch: project.fetch } : {}) };
+  if (!api.apiUrl && !api.fetch) return engine;
+  return { ...engine, loadView: (view, options) => engine.loadView(view, options ?? api) };
 }
 
 export function DevbiProvider({
@@ -72,7 +77,7 @@ export function DevbiProvider({
       if (!v) throw new Error(`指標ファイル models/${n}.metrics.yaml がありません`);
       return v;
     };
-    return { project, dashboard, engine: getEngine(project), selection, view };
+    return { project, dashboard, engine: getEngine(project).then((e) => forDashboard(e, project)), selection, view };
   }, [project, dashboard]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -137,7 +142,7 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
     (async () => {
       const view = ctx.view(query.metrics);
       const engine = await ctx.engine;
-      const model = await engine.loadView(view, apiOf(ctx.project));
+      const model = await engine.loadView(view);
       const { sql, fields } = compileQuery(view, query, { filters, model });
       const { rows } = await engine.query(sql);
       if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null });
@@ -158,7 +163,7 @@ export function useTimeExtent(metrics?: string): { min: Date | null; max: Date |
     (async () => {
       const view = ctx.view(metrics);
       const engine = await ctx.engine;
-      const model = await engine.loadView(view, apiOf(ctx.project));
+      const model = await engine.loadView(view);
       const { rows } = await engine.query(compileTimeExtent(view, { model }));
       const r = rows[0] ?? {};
       if (live) setState({ min: (r.min as Date) ?? null, max: (r.max as Date) ?? null, error: null });

@@ -86,12 +86,14 @@ function addEmbedEntry(user: UserConfig, root: string): string[] {
   if (build.cssCodeSplit === false) {
     warnings.push("build.cssCodeSplit: false だと、埋め込んだダッシュボードに表（spreadsheet-grid）の CSS が付きません");
   }
-  // The embed script loads the rest by paths from base: "/reports/" works only from pages on the server where the
-  // site is at /reports/. "./" (the default here) or a full URL work from any page.
-  if (user.base === undefined) user.base = "./";
-  else if (user.base.startsWith("/")) {
+  // The embed script loads the rest (the DuckDB files, the table's CSS) by paths from base: with Vite's "/", or
+  // "/reports/", only from pages on the server where the site is at that path. "./" or a full URL work from any page.
+  // Not changed here: base is also how the project's own pages find their files.
+  const base = user.base ?? "/";
+  if (base.startsWith("/")) {
     warnings.push(
-      `base: ${JSON.stringify(user.base)} だと、devbi-embed.js はサイトを同じサーバーの ${user.base} に置いたページからしか動きません（ほかのサーバーのページに埋め込むなら base: "./" にしてください）`,
+      `base: ${JSON.stringify(base)}${user.base === undefined ? "（Vite の既定）" : ""} だと、devbi-embed.js はサイトを同じサーバーの ${base} に置いたページからしか動きません。` +
+        `ほかのページに埋め込むなら、vite.config に base: "./" と書いてください`,
     );
   }
   return warnings;

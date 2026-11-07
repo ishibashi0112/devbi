@@ -107,14 +107,30 @@ function projectKey(project: Project): number {
   return id;
 }
 
-/** Render one dashboard of a project. Pass the same project object each time (it is `loadProject()`'s result). */
-export function Dashboard({ project, name, back, theme }: { project: Project; name: string; back?: string; theme?: Theme }) {
+/**
+ * Render one dashboard of a project. Pass the same project object each time (it is `loadProject()`'s result).
+ * `isolate`: inside another app's page, keep that page's CSS for plain elements (h1 { … }, td { … }) out.
+ */
+export function Dashboard({
+  project,
+  name,
+  back,
+  theme,
+  isolate,
+}: {
+  project: Project;
+  name: string;
+  back?: string;
+  theme?: Theme;
+  isolate?: boolean;
+}) {
   useInsertionEffect(injectStyles, []);
+  const root = { ...themeAttribute(theme), ...(isolate ? { "data-devbi-isolate": "" } : {}) };
   const dashboard = Object.hasOwn(project.dashboards, name) ? project.dashboards[name] : undefined;
   if (!dashboard) {
     const names = Object.keys(project.dashboards).sort();
     return (
-      <div className="devbi-root devbi-error" {...themeAttribute(theme)}>
+      <div className="devbi-root devbi-error" {...root}>
         ダッシュボード {name} がありません（{names.length ? `あるのは ${names.join(", ")}` : "dashboards/ に *.dash.json がありません"}）
       </div>
     );
@@ -122,7 +138,7 @@ export function Dashboard({ project, name, back, theme }: { project: Project; na
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   return (
     <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard}>
-      <div className="devbi-root" ref={narrowRef} {...themeAttribute(theme)}>
+      <div className="devbi-root" ref={narrowRef} {...root}>
         <div className="devbi-dashboard">
           {back && (
             <a className="devbi-back" href={back}>

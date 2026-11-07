@@ -21,6 +21,8 @@ test("renders every tile from the xlsx without errors", async ({ page }) => {
   await expect(tile(page, "top-customers").locator("li")).toHaveCount(10);
   await expect(tile(page, "region-quarter").locator("tfoot")).toContainText("合計");
   await expect(tile(page, "kpi-revenue")).toContainText("前年比");
+  // DevBI's own page: the project's CSS applies as written (no reset of plain elements, which is for embedding).
+  await expect(page.locator(".devbi-root")).not.toHaveAttribute("data-devbi-isolate");
   expect(errors).toEqual([]);
 });
 

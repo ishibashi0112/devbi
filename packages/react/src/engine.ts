@@ -246,7 +246,8 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
       const key = own ? `${view.name}\n${apiUrl}\n${fetchId(doFetch)}` : view.name;
       let p = views.get(key);
       if (!p) {
-        const table = ident(key === view.name ? `__devbi_model_${view.name}` : `__devbi_model_${view.name}_${++modelSeq}`);
+        // Another prefix for the API-specific copies, so no view's own name can give the same table name.
+        const table = ident(key === view.name ? `__devbi_model_${view.name}` : `__devbi_apimodel_${++modelSeq}_${view.name}`);
         p = loadView(view, apiUrl, doFetch, table);
         views.set(key, p);
         p.catch(() => views.delete(key));

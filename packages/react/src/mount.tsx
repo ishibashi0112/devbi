@@ -11,6 +11,8 @@ export interface MountOptions {
   apiUrl?: string;
   /** Used for the API requests instead of the global `fetch`: to add a header, for example. */
   fetch?: typeof fetch;
+  /** Keep the page's CSS for plain elements (h1 { … }, td { … }) out of the dashboard. Default `true`. */
+  isolate?: boolean;
 }
 
 export interface MountedDashboard {
@@ -58,7 +60,9 @@ export function mountDashboard(element: Element, project: Project, options: Moun
   const mount = {};
   entry.mount = mount;
   const key = `${name}\n${options.apiUrl ?? ""}\n${fetchId(options.fetch)}`;
-  entry.root.render(<Dashboard key={key} project={p} name={name} {...(options.theme ? { theme: options.theme } : {})} />);
+  entry.root.render(
+    <Dashboard key={key} project={p} name={name} isolate={options.isolate ?? true} {...(options.theme ? { theme: options.theme } : {})} />,
+  );
   return {
     unmount: () => {
       if (roots.get(element)?.mount === mount) unmountDashboard(element);

@@ -14,7 +14,8 @@ export interface DevbiEmbed {
   /**
    * Show a dashboard in every `[data-devbi]` element under `root` (default: the page) that has none yet, and
    * remove those whose element has left the page. Call it after the page replaces part of itself (an
-   * ASP.NET UpdatePanel, for example). Skips the elements `unmount` emptied. Returns how many it added.
+   * ASP.NET UpdatePanel, for example). Skips the elements `unmount` emptied. Asks every DevBI script on the page
+   * (other projects' too), so `window.DevBI.mountAll()` is enough. Returns how many it added.
    */
   mountAll(root?: ParentNode): number;
   /** Remove the dashboard from an element (whichever DevBI script on the page showed it). */
@@ -50,6 +51,8 @@ interface Instance {
   knows(name: string): boolean;
   /** Remove its dashboard from the element. */
   release(el: Element): void;
+  /** Its part of `mountAll`: show its dashboards in new elements, let go of those that left the page. */
+  scan(root: ParentNode): number;
 }
 interface Claim {
   instance: Instance;
@@ -87,6 +90,30 @@ export function startEmbed(input: ProjectInput, { auto = true, global = true }: 
       mounted.delete(el);
       if (reg.claims.get(el)?.instance === self) reg.claims.delete(el);
       unmountDashboard(el);
+    },
+    scan(root) {
+      for (const el of mounted) if (!el.isConnected) self.release(el);
+      let added = 0;
+      const selector = "[data-devbi]:not(style, script, link, meta, template)";
+      const found = [...(root instanceof Element && root.matches(selector) ? [root] : []), ...root.querySelectorAll(selector)];
+      for (const el of found) {
+        if (reg.released.has(el)) continue;
+        const name = el.getAttribute("data-devbi") ?? "";
+        const claim = reg.claims.get(el);
+        // Shown already, by this script or by one that has the dashboard. One that only shows "… がありません"
+        // gives way to a script that has it.
+        if (claim && (claim.instance === self || claim.known || !self.knows(name))) continue;
+        // Another DevBI script on the page has it (its scan shows it).
+        if (!claim && !self.knows(name) && [...reg.instances].some((i) => i !== self && i.knows(name))) continue;
+        try {
+          api.mount(el);
+          added++;
+        } catch (e) {
+          console.error(e);
+          el.textContent = (e as Error).message;
+        }
+      }
+      return added;
     },
   };
   reg.instances.add(self);
@@ -130,27 +157,9 @@ export function startEmbed(input: ProjectInput, { auto = true, global = true }: 
       };
     },
     mountAll(root = document) {
-      for (const el of mounted) if (!el.isConnected) self.release(el);
-      let added = 0;
-      const selector = "[data-devbi]:not(style, script, link, meta, template)";
-      const found = [...(root instanceof Element && root.matches(selector) ? [root] : []), ...root.querySelectorAll(selector)];
-      for (const el of found) {
-        if (reg.released.has(el)) continue;
-        const name = el.getAttribute("data-devbi") ?? "";
-        const claim = reg.claims.get(el);
-        // Shown already, by this script or by one that has the dashboard. One that only shows "… がありません"
-        // gives way to a script that has it.
-        if (claim && (claim.instance === self || claim.known || !self.knows(name))) continue;
-        // Another DevBI script on the page has it (it shows it when it starts, or has already).
-        if (!claim && !self.knows(name) && [...reg.instances].some((i) => i !== self && i.knows(name))) continue;
-        try {
-          api.mount(el);
-          added++;
-        } catch (e) {
-          console.error(e);
-          el.textContent = (e as Error).message;
-        }
-      }
+      // Every DevBI script on the page, whichever one's mountAll the page calls (window.DevBI is the last loaded).
+      let added = self.scan(root);
+      for (const other of reg.instances) if (other !== self) added += other.scan(root);
       return added;
     },
     unmount(target) {
@@ -163,8 +172,8 @@ export function startEmbed(input: ProjectInput, { auto = true, global = true }: 
   if (typeof window !== "undefined") {
     if (global) (window as unknown as { DevBI?: DevbiEmbed }).DevBI = api;
     if (auto) {
-      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => api.mountAll(), { once: true });
-      else api.mountAll();
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => self.scan(document), { once: true });
+      else self.scan(document);
     }
     if (global) window.dispatchEvent(new CustomEvent("devbi:ready", { detail: api }));
   }

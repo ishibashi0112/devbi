@@ -29,18 +29,6 @@ export const css = `
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  /* What the page around would pass down (body { text-align: center; letter-spacing: … }), as on a page with no styles. */
-  font-style: normal;
-  font-weight: 400;
-  font-variant: normal;
-  letter-spacing: normal;
-  word-spacing: normal;
-  text-align: start;
-  text-indent: 0;
-  text-transform: none;
-  text-shadow: none;
-  white-space: normal;
-  list-style: disc outside none;
   color-scheme: light;
   min-height: 100%;
   box-sizing: border-box;
@@ -52,14 +40,34 @@ export const css = `
 .devbi-root[data-theme="dark"] {${DARK}  color-scheme: dark;
 }
 .devbi-root[data-theme="light"] { color-scheme: light; }
-/* Inside another app's page, that page's rules for plain elements (h1 { … }, td { … }, ul { … }, button { … }) stay out:
-   these elements start again from the browser's defaults (all: revert). With :where(), only .devbi-root counts, and it
-   comes before DevBI's rules, so those (and the table's) still apply. Rules with a class or id of the page in front
-   (#main td { … }) are more specific and can still reach in. Not div, span, svg and img: their attributes (width="…")
-   would be reverted too, and pages rarely style bare div and span. */
-.devbi-root :where(header, footer, nav, main, section, article, aside, figure, figcaption, form, fieldset, legend,
-  h1, h2, h3, h4, h5, h6, p, ul, ol, li, dl, dt, dd, table, caption, thead, tbody, tfoot, tr, th, td,
-  button, input, select, textarea, label, a, small, strong, b, i, em, code, pre, blockquote, hr) {
+/* Inside another app's page (data-devbi-isolate: mountDashboard, devbi-embed.js, <Dashboard isolate>), that page's
+   rules for plain elements (h1 { … }, td { … }, ul { … }, button { … }) stay out: these elements start again from the
+   browser's defaults (all: revert), and what the page passes down (body { letter-spacing: … }) stops at the root.
+   With :where(), only .devbi-root counts, and it comes before DevBI's rules, so those (and the table's) still apply.
+   The page's rules with an id, class, attribute or pseudo-class (#main td, tr:nth-child(odd) td, a:link) are more
+   specific and can still reach in. Not div, span, svg and img: their attributes (width="…") would be reverted too, and
+   pages rarely style bare div and span. Not in DevBI's own app: there the page's CSS is the project's, and rules in an
+   @layer (Tailwind's) would be reverted too, as this rule is outside any layer. */
+.devbi-root:where([data-devbi-isolate]) {
+  font-style: normal;
+  font-weight: 400;
+  font-variant: normal;
+  font-feature-settings: normal;
+  letter-spacing: normal;
+  word-spacing: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-break: auto;
+  text-align: start;
+  text-indent: 0;
+  text-transform: none;
+  text-shadow: none;
+  white-space: normal;
+  list-style: disc outside none;
+}
+.devbi-root:where([data-devbi-isolate]) :where(header, footer, nav, main, section, article, aside, figure, figcaption,
+  form, fieldset, legend, h1, h2, h3, h4, h5, h6, p, ul, ol, li, dl, dt, dd, table, caption, thead, tbody, tfoot, tr, th,
+  td, button, input, select, textarea, label, a, small, strong, b, i, em, code, pre, blockquote, hr) {
   all: revert;
 }
 .devbi-root *, .devbi-root *::before, .devbi-root *::after { box-sizing: inherit; }
