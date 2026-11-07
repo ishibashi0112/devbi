@@ -80,3 +80,16 @@ test("the category list and the promoted JSX tile filter like built-in tiles", a
   await page.getByRole("button", { name: "すべて解除" }).click();
   await expect(page.locator(".devbi-chip")).toHaveCount(0);
 });
+
+test("chart tooltips use the tile background in dark mode", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await ready(page);
+  const svg = tile(page, "monthly").locator("svg").last();
+  const box = (await svg.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.6);
+  const tip = tile(page, "monthly").locator('g[aria-label="tip"] path').first();
+  await expect(tip).toBeVisible();
+  const fill = await tip.evaluate((el) => getComputedStyle(el).fill);
+  const card = await tile(page, "monthly").evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(fill).toBe(card);
+});

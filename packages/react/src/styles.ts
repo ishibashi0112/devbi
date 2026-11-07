@@ -67,6 +67,8 @@ export const css = `
 .devbi-up { color: var(--devbi-up); }
 .devbi-down { color: var(--devbi-down); }
 .devbi-chart { width: 100%; height: 100%; }
+/* Plot draws tooltips on --plot-background (white by default); follow the tile color so dark mode works. */
+.devbi-chart svg, .devbi-chart figure { --plot-background: var(--devbi-card); }
 .devbi-chart svg { display: block; cursor: pointer; }
 .devbi-chart figure { margin: 0; }
 .devbi-barlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }

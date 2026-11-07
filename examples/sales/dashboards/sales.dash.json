@@ -68,7 +68,7 @@
     {
       "id": "top-customers",
       "x": 0, "y": 11, "w": 4, "h": 5,
-      "title": "上位顧客",
+      "title": "上位顧客（自作タイル）",
       "component": "./sales/TopCustomers.tsx"
     },
     {
