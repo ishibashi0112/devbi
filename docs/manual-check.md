@@ -99,6 +99,8 @@ pnpm example:dev
 
 `examples/sales` を VS Code で開きます（リポジトリのルートを開いてもよい）。補完に使う `examples/sales/.devbi/` は `pnpm example:dev` を動かすと作られます（開発サーバーなしなら `pnpm gen`）。
 
+Ctrl+Space は候補を出すキーです。Mac では control とスペースバーを押します。日本語と英字の切り替えになってしまうとき（Mac ではこのキーが入力ソースの切り替えに割り当てられていることがあります）は、option + esc を押すか、`"` の中で文字を 1 つ打つと候補が出ます。
+
 | # | やること | こうなれば OK |
 | --- | --- | --- |
 | 22 | `dashboards/sales.dash.json` で、どれかのタイルの `"type": "bar"` の `bar` を消して Ctrl+Space | `kpi`、`bar`、`pivot` などの候補が説明つきで出る |
