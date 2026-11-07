@@ -4,8 +4,8 @@
 
 ## 1. 準備（最初の一回だけ）
 
-- Node.js 22 以上（`node -v` で確認）
-- pnpm（`corepack enable` で入ります。版は package.json の `packageManager` に合わせて自動で選ばれます）
+- Node.js 22.12 以上（`node -v` で確認。Vite 8 の条件です）
+- pnpm 10.28（`pnpm -v` で確認）。入っていなければ、Node 24 までは `corepack enable` で入ります。Node 25 以降は corepack が付いてこないので `npm i -g pnpm@10.28.0` で入れます
 
 ```sh
 git clone https://github.com/ishibashi0112/devbi.git
