@@ -1,8 +1,10 @@
-import type { TileProps } from "devbi";
+import { hasUrlScheme, type TileProps } from "devbi";
 import { Fragment, type ReactNode } from "react";
 
 function safeHref(href: string): string | undefined {
-  return /^(https?:|mailto:|#|\.{0,2}\/)/i.test(href) || !/^[a-z][a-z0-9+.-]*:/i.test(href) ? href : undefined;
+  // Browsers drop control characters, so "\u0001javascript:" would become a script URL: refuse those outright.
+  if (/[\u0000-\u001f\u007f]/.test(href)) return undefined;
+  return /^(https?:|mailto:|#|\.{0,2}\/)/i.test(href) || !hasUrlScheme(href) ? href : undefined;
 }
 
 /** Inline markdown: **bold**, *italic*, `code`, [links](url). Text is never parsed as HTML. */

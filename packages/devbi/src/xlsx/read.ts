@@ -1,4 +1,5 @@
 import { readZip, type ZipEntry } from "./zip.js";
+import { isoDate, isoTimestamp } from "../sql.js";
 
 export type XlsxColumnType = "VARCHAR" | "DOUBLE" | "BIGINT" | "BOOLEAN" | "DATE" | "TIMESTAMP";
 export type XlsxValue = string | number | boolean | Date | null;
@@ -183,10 +184,6 @@ function isEmpty(c: Cell | undefined): boolean {
   return !c || (c.kind === "string" && c.value === "");
 }
 
-function pad(n: number, w = 2) {
-  return String(n).padStart(w, "0");
-}
-
 function cellText(c: Cell, date1904: boolean): string {
   switch (c.kind) {
     case "string":
@@ -194,14 +191,23 @@ function cellText(c: Cell, date1904: boolean): string {
     case "bool":
       return c.value ? "TRUE" : "FALSE";
     case "date":
-      return c.value.toISOString();
+      return c.value.getTime() % MS_PER_DAY === 0 ? isoDate(c.value) : isoTimestamp(c.value);
     case "number": {
       if (!c.date) return String(c.value);
       const d = serialToDate(c.value, date1904);
-      const day = `${pad(d.getUTCFullYear(), 4)}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-      return Number.isInteger(c.value) ? day : `${day} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+      return Number.isInteger(c.value) ? isoDate(d) : isoTimestamp(d);
     }
   }
+}
+
+/**
+ * An ISO 8601 cell value (`t="d"`). Excel stores wall-clock time with no offset; JavaScript would read
+ * `2024-04-01T00:00:00` as local time, so a missing offset is taken as UTC like every other date here.
+ */
+function parseIsoCell(text: string): Date {
+  const t = text.trim();
+  const local = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(t);
+  return new Date(local ? `${t}Z` : t);
 }
 
 /**
@@ -256,7 +262,7 @@ export async function readXlsx(data: Uint8Array | ArrayBuffer, options: ReadXlsx
         case "e":
           break;
         case "d": {
-          const d = v === undefined ? undefined : new Date(decodeXml(v));
+          const d = v === undefined ? undefined : parseIsoCell(decodeXml(v));
           if (d && !Number.isNaN(d.getTime())) cell = { kind: "date", value: d };
           break;
         }

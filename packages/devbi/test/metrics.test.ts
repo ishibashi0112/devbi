@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MetricsError, defineDashboard, parseMetricsYaml, scanSources } from "../src/index.js";
+import { MetricsError, componentProblem, defineDashboard, parseMetricsYaml, resolveComponent, scanSources } from "../src/index.js";
 
 function issues(yaml: string): string[] {
   try {
@@ -70,6 +70,32 @@ measures:
     );
     expect(v.measures.b).toMatchObject({ expr: `t.a + (SUM(amount)) + 'a' + "a" + a(1)` });
   });
+
+  it("treats names inside aggregates, FILTER and OVER as columns even when a measure has that name", () => {
+    const v = parseMetricsYaml(
+      `model: x
+measures:
+  amount: SUM(amount)
+  status: COUNT(DISTINCT status)
+  share: "SUM(amount) FILTER (WHERE status = 'done') / amount"
+  per_status: amount / status
+  nested: "SUM(CASE WHEN status = 'a' THEN amount END) + amount"
+  ordered: "STRING_AGG(status, ',' ORDER BY amount) || CAST(amount AS VARCHAR)"
+`,
+      "t",
+    );
+    expect(v.measures.amount).toMatchObject({ expr: "SUM(amount)" });
+    expect(v.measures.share).toMatchObject({ expr: "SUM(amount) FILTER (WHERE status = 'done') / (SUM(amount))" });
+    expect(v.measures.per_status).toMatchObject({ expr: "(SUM(amount)) / (COUNT(DISTINCT status))" });
+    expect(v.measures.nested).toMatchObject({ expr: "SUM(CASE WHEN status = 'a' THEN amount END) + (SUM(amount))" });
+    expect(v.measures.ordered).toMatchObject({ expr: "STRING_AGG(status, ',' ORDER BY amount) || CAST((SUM(amount)) AS VARCHAR)" });
+  });
+
+  it("does not mistake Object.prototype keys for defined names", () => {
+    const v = parseMetricsYaml("model: x\ndimensions:\n  r: region\nmeasures:\n  constructor: COUNT(*)\n  n: constructor + 1\n", "t");
+    expect(v.measures.n).toMatchObject({ expr: "(COUNT(*)) + 1" });
+    expect(issues("model: x\nmeasures:\n  a: { of: toString, compare: previous_year }\n")).toEqual(["measures.a.of: 指標 toString がありません"]);
+  });
 });
 
 describe("scanSources", () => {
@@ -102,5 +128,28 @@ describe("defineDashboard", () => {
     expect(() => defineDashboard({ tiles: [{ id: "a", x: 10, y: 0, w: 4, h: 2, type: "kpi" }] }, "s")).toThrow(
       "列数 12 を超えています",
     );
+  });
+
+  it("reports overlapping tiles", () => {
+    const tiles = [
+      { id: "a", x: 0, y: 0, w: 6, h: 2, type: "kpi" },
+      { id: "b", x: 6, y: 0, w: 6, h: 2, type: "kpi" },
+      { id: "c", x: 0, y: 2, w: 12, h: 1, type: "kpi" },
+    ];
+    expect(() => defineDashboard({ tiles }, "s")).not.toThrow();
+    expect(() => defineDashboard({ tiles: [...tiles, { id: "d", x: 5, y: 1, w: 2, h: 2, type: "kpi" }] }, "s")).toThrow(
+      "タイル d が a と重なっています",
+    );
+  });
+});
+
+describe("resolveComponent", () => {
+  it("resolves against the dashboard file or the project root", () => {
+    expect(resolveComponent("/dashboards/sales.dash.json", "./sales/Top.tsx")).toBe("/dashboards/sales/Top.tsx");
+    expect(resolveComponent("/dashboards/a/b.dash.json", "../c/D.jsx")).toBe("/dashboards/c/D.jsx");
+    expect(resolveComponent("/dashboards/sales.dash.json", "/dashboards/./sales/Top.tsx")).toBe("/dashboards/sales/Top.tsx");
+    expect(componentProblem("/dashboards/sales/Top.tsx")).toBeUndefined();
+    expect(componentProblem(resolveComponent("/dashboards/sales.dash.json", "../tiles/Top.tsx"))).toContain("dashboards/ の中");
+    expect(componentProblem("/dashboards/sales/top.ts")).toContain(".tsx か .jsx");
   });
 });

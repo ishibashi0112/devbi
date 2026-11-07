@@ -206,7 +206,7 @@ export function defineMetricsView(data: unknown, name: string, source = `${name}
   const measures: Record<string, MeasureDef> = {};
   for (const [mname, m] of Object.entries(input.measures)) {
     checkName(`measures.${mname}`, mname);
-    if (mname in dimensions || (time && mname === time.name)) {
+    if (Object.hasOwn(dimensions, mname) || (time && mname === time.name)) {
       issues.push({ path: `measures.${mname}`, message: `軸と同じ名前は使えません: ${mname}` });
     }
     const base = (def: { label?: string; description?: string; format?: string }) => ({
@@ -232,7 +232,7 @@ export function defineMetricsView(data: unknown, name: string, source = `${name}
     m.refs = [
       ...new Set(
         scanIdentifiers(m.sql)
-          .filter((t) => !t.qualified && !t.call && t.name !== m.name && t.name in measures)
+          .filter((t) => !t.qualified && !t.call && !t.inAggregate && t.name !== m.name && Object.hasOwn(measures, t.name))
           .map((t) => t.name),
       ),
     ];
@@ -265,7 +265,7 @@ export function defineMetricsView(data: unknown, name: string, source = `${name}
 
   for (const m of Object.values(measures)) {
     if (m.kind === "sql") continue;
-    const target = measures[m.of];
+    const target = Object.hasOwn(measures, m.of) ? measures[m.of] : undefined;
     if (!target) {
       issues.push({ path: `measures.${m.name}.of`, message: `指標 ${m.of} がありません` });
       continue;
@@ -299,4 +299,14 @@ export function defineMetricsView(data: unknown, name: string, source = `${name}
     dimensions,
     measures,
   };
+}
+
+/** A measure by name (own keys only, so `constructor` or `toString` are not found by accident). */
+export function getMeasure(view: MetricsView, name: string): MeasureDef | undefined {
+  return Object.hasOwn(view.measures, name) ? view.measures[name] : undefined;
+}
+
+/** A dimension by name (own keys only). */
+export function getDimension(view: MetricsView, name: string): DimensionDef | undefined {
+  return Object.hasOwn(view.dimensions, name) ? view.dimensions[name] : undefined;
 }

@@ -1,6 +1,6 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
 import * as arrow from "apache-arrow";
-import { ident, readXlsx, scanSources, unquoteString, type MetricsView, type Row, type XlsxTable } from "devbi";
+import { hasUrlScheme, ident, readXlsx, scanSources, unquoteString, type MetricsView, type Row, type XlsxTable } from "devbi";
 
 export interface DuckDBBundle {
   /** URL of `duckdb-base.wasm`. */
@@ -149,7 +149,7 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
     const sources = scanSources(sql);
     // Replace from the end so earlier offsets stay valid.
     for (const s of [...sources].reverse()) {
-      if (/^[a-z][a-z0-9+.-]*:/i.test(s.path) && !/^https?:/i.test(s.path)) continue;
+      if (hasUrlScheme(s.path) && !/^https?:/i.test(s.path)) continue;
       const url = new URL(s.path, base).href;
       if (s.format === "xlsx") {
         const table = await readXlsx(await fetchBytes(url), {

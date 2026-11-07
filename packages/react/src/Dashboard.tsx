@@ -75,7 +75,7 @@ function tileStyle(t: TileSpec, rowHeight: number): CSSProperties {
 /** Render one dashboard of a project. */
 export function Dashboard({ project, name, back }: { project: Project; name: string; back?: string }) {
   useInsertionEffect(injectStyles, []);
-  const dashboard = project.dashboards[name];
+  const dashboard = Object.hasOwn(project.dashboards, name) ? project.dashboards[name] : undefined;
   if (!dashboard) return <div className="devbi-root devbi-error">ダッシュボード {name} がありません</div>;
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   return (
@@ -140,7 +140,7 @@ export function DevbiApp({ project: input }: { project: ProjectInput }) {
   const project = loaded.project;
   const names = Object.keys(project.dashboards).sort();
   const current = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  if (current && project.dashboards[current]) {
+  if (current && Object.hasOwn(project.dashboards, current)) {
     return <Dashboard key={current} project={project} name={current} {...(names.length > 1 ? { back: "#/" } : {})} />;
   }
   if (names.length === 1) return <Dashboard project={project} name={names[0]!} />;

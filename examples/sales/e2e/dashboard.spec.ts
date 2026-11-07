@@ -4,7 +4,7 @@ const tile = (page: Page, id: string) => page.locator(`[data-tile="${id}"]`);
 const kpi = (page: Page, id: string) => tile(page, id).getByTestId("kpi-value");
 
 async function ready(page: Page) {
-  await page.goto("/");
+  await page.goto("/#/sales"); // by name: local_* dashboards from `pnpm try-xlsx` add an index page at "/"
   await expect(kpi(page, "kpi-revenue")).toHaveText(/^¥[\d,]+$/);
   // The period picker applies its default (the latest fiscal year) on load.
   await expect(page.locator(".devbi-filters")).toContainText("受注日");

@@ -17,7 +17,8 @@ export function isoDate(d: Date): string {
   return `${pad(d.getUTCFullYear(), 4)}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-function isoTimestamp(d: Date): string {
+/** Format a Date as `YYYY-MM-DD HH:MM:SS[.mmm]` using its UTC parts. */
+export function isoTimestamp(d: Date): string {
   const ms = d.getUTCMilliseconds();
   return `${isoDate(d)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}${ms ? `.${pad(ms, 3)}` : ""}`;
 }
@@ -64,7 +65,25 @@ export interface IdentToken {
   qualified: boolean;
   /** Followed by `(` (a function call). */
   call: boolean;
+  /**
+   * Inside the parentheses of an aggregate call such as `SUM(...)`, or of `FILTER (...)` / `OVER (...)` / `WITHIN GROUP (...)`.
+   * A name there refers to a row value (a column), never to a measure, because aggregates cannot nest.
+   */
+  inAggregate: boolean;
 }
+
+/** DuckDB aggregate functions (lower case). Unknown ones are treated like ordinary functions. */
+const AGGREGATES = new Set(
+  (
+    "sum count count_star avg mean min max median mode quantile quantile_cont quantile_disc percentile_cont percentile_disc " +
+    "stddev stddev_pop stddev_samp variance var_pop var_samp any_value arbitrary first last arg_max arg_min argmax argmin " +
+    "arg_max_null arg_min_null max_by min_by list array_agg string_agg group_concat listagg bool_and bool_or every count_if countif " +
+    "fsum sumkahan kahan_sum sum_no_overflow favg product approx_count_distinct approx_quantile reservoir_quantile histogram " +
+    "entropy kurtosis kurtosis_pop skewness corr covar_pop covar_samp regr_avgx regr_avgy regr_count regr_intercept regr_r2 " +
+    "regr_slope regr_sxx regr_sxy regr_syy bit_and bit_or bit_xor bitstring_agg geomean geometric_mean weighted_avg wavg mad " +
+    "filter over within group"
+  ).split(" "),
+);
 
 const IDENT_START = /[\p{L}_]/u;
 const IDENT_PART = /[\p{L}\p{N}_$]/u;
@@ -77,6 +96,10 @@ export function scanIdentifiers(sql: string): IdentToken[] {
   const out: IdentToken[] = [];
   let i = 0;
   let prevSignificant = "";
+  // One entry per open parenthesis: whether it opens an aggregate context. `pendingAggregate` is set by the name before `(`.
+  const parens: boolean[] = [];
+  let aggDepth = 0;
+  let pendingAggregate = false;
   while (i < sql.length) {
     const ch = sql[i]!;
     if (ch === "'" || ch === '"') {
@@ -111,34 +134,47 @@ export function scanIdentifiers(sql: string): IdentToken[] {
       while (i < sql.length && IDENT_PART.test(sql[i]!)) i++;
       let j = i;
       while (j < sql.length && /\s/.test(sql[j]!)) j++;
-      out.push({
-        name: sql.slice(start, i),
-        start,
-        end: i,
-        qualified: prevSignificant === ".",
-        call: sql[j] === "(",
-      });
+      const name = sql.slice(start, i);
+      const qualified = prevSignificant === ".";
+      const call = sql[j] === "(";
+      out.push({ name, start, end: i, qualified, call, inAggregate: aggDepth > 0 });
+      // `WITHIN GROUP (` : `within` marks the context, `group` carries it to the parenthesis.
+      pendingAggregate = call ? !qualified && AGGREGATES.has(name.toLowerCase()) : name.toLowerCase() === "within";
       prevSignificant = "a";
       continue;
     }
-    if (!/\s/.test(ch)) prevSignificant = ch;
+    if (ch === "(") {
+      parens.push(pendingAggregate);
+      if (pendingAggregate) aggDepth++;
+    } else if (ch === ")") {
+      if (parens.pop()) aggDepth--;
+    }
+    if (!/\s/.test(ch)) {
+      pendingAggregate = false;
+      prevSignificant = ch;
+    }
     i++;
   }
   return out;
 }
 
-/** Replace identifier tokens (not qualified, not function calls) for which `replace` returns a string. */
+/** Replace identifier tokens (not qualified, not function calls, not inside an aggregate) for which `replace` returns a string. */
 export function replaceIdentifiers(sql: string, replace: (name: string) => string | undefined): string {
   let out = "";
   let last = 0;
   for (const t of scanIdentifiers(sql)) {
-    if (t.qualified || t.call) continue;
+    if (t.qualified || t.call || t.inAggregate) continue;
     const r = replace(t.name);
     if (r === undefined) continue;
     out += sql.slice(last, t.start) + r;
     last = t.end;
   }
   return out + sql.slice(last);
+}
+
+/** Whether a path starts with a URL scheme such as `https:` or `s3:` (and so is not a project file). */
+export function hasUrlScheme(path: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:/i.test(path);
 }
 
 export type SourceFormat = "parquet" | "csv" | "json" | "arrow" | "xlsx";

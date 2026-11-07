@@ -1,7 +1,7 @@
-import { checkQuery, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
+import { checkQuery, componentProblem, resolveComponent, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { makeFormatters, useDevbi, useDevbiQuery, useSelectionVersion } from "./context.js";
-import { resolveComponent, type TileModule } from "./project.js";
+import type { TileModule } from "./project.js";
 import { builtinTiles } from "./tiles/index.js";
 import { TileSizeContext } from "./tiles/util.js";
 
@@ -41,7 +41,8 @@ function useTileModule(tile: TileSpec, dashboardPath: string) {
     const path = resolveComponent(dashboardPath, tile.component);
     const load = project.components[path];
     if (!load) {
-      setState({ mod: null, error: new Error(`タイルのファイル ${path} がありません`) });
+      const problem = componentProblem(path);
+      setState({ mod: null, error: new Error(problem ? `${tile.component}: ${problem}` : `タイルのファイル ${path} がありません`) });
       return;
     }
     let live = true;
@@ -59,13 +60,18 @@ function useTileModule(tile: TileSpec, dashboardPath: string) {
 /** One grid cell: title, loading state, errors, and the tile component with {@link TileProps}. */
 export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSProperties }) {
   const ctx = useDevbi();
-  const builtin = tile.type ? builtinTiles[tile.type] : undefined;
+  const builtin = tile.type && Object.hasOwn(builtinTiles, tile.type) ? builtinTiles[tile.type] : undefined;
   const mod = useTileModule(tile, ctx.dashboard.path);
-  const query: Query | null = useMemo(() => {
-    if (builtin?.noQuery) return null;
-    if (tile.query) return tile.query;
-    if (mod.mod?.query) return checkQuery(mod.mod.query, tile.component ?? tile.id) as Query;
-    return null;
+  // A promoted tile's `query` export is checked here; a bad one is this tile's error, not the dashboard's.
+  const { query, queryError } = useMemo((): { query: Query | null; queryError: Error | null } => {
+    if (builtin?.noQuery) return { query: null, queryError: null };
+    if (tile.query) return { query: tile.query, queryError: null };
+    if (!mod.mod?.query) return { query: null, queryError: null };
+    try {
+      return { query: checkQuery(mod.mod.query, tile.component ?? tile.id) as Query, queryError: null };
+    } catch (e) {
+      return { query: null, queryError: e instanceof Error ? e : new Error(String(e)) };
+    }
   }, [builtin, tile, mod.mod]);
   const data = useDevbiQuery(query, { tileId: tile.id });
   useSelectionVersion();
@@ -89,6 +95,7 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
   const error =
     (unknownType ? new Error(`タイルの種類 ${tile.type} はありません（使えるのは ${Object.keys(builtinTiles).join(", ")}）`) : null) ??
     mod.error ??
+    queryError ??
     data.error;
   const props: TileProps = {
     rows: data.rows,

@@ -8,11 +8,14 @@
 
 ```sh
 pnpm install
-pnpm build            # packages/* をビルド（Vite の設定が @devbi/vite の dist を読むため）
-pnpm example:dev      # examples/sales を Vite の dev server で開く
+pnpm example:dev      # packages/* をビルドして、examples/sales を Vite の dev server で開く（http://localhost:5173）
+pnpm example:preview  # 静的ビルドしたものを開く（http://localhost:4173）
+pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）
 pnpm e2e              # examples/sales を静的ビルドして Playwright で確認
 ```
+
+画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。
 
 e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on the web に入っている Chromium と同じ版）。別のブラウザで動かすときは `E2E_BROWSER_EXECUTABLE` に実行ファイルのパスを渡します。
 

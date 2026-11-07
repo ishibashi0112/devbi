@@ -10,8 +10,10 @@
     "build": "pnpm --filter \"./packages/*\" -r build",
     "test": "vitest run",
     "typecheck": "pnpm -r typecheck",
-    "example:dev": "pnpm --filter devbi-example-sales dev",
+    "example:dev": "pnpm build && pnpm --filter devbi-example-sales dev",
     "example:build": "pnpm build && pnpm --filter devbi-example-sales build",
+    "example:preview": "pnpm example:build && pnpm --filter devbi-example-sales preview",
+    "try-xlsx": "pnpm build && pnpm --filter devbi-example-sales try-xlsx",
     "e2e": "pnpm --filter devbi-example-sales e2e"
   },
   "devDependencies": {

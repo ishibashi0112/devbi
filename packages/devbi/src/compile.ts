@@ -1,4 +1,4 @@
-import type { CompareMeasure, MeasureDef, MetricsView, RunningMeasure, SqlMeasure } from "./metrics.js";
+import { getDimension, getMeasure, type CompareMeasure, type MeasureDef, type MetricsView, type RunningMeasure, type SqlMeasure } from "./metrics.js";
 import { ident, literal, timeLiteral } from "./sql.js";
 import type { FieldInfo, Filter, Grain, Query, Scalar, SortSpec } from "./types.js";
 
@@ -112,12 +112,12 @@ function orderLimit(order: { field: string; desc: boolean }[], limit: number | u
  */
 export function compileQuery(view: MetricsView, query: Query, options: CompileOptions = {}): CompiledQuery {
   const measures: MeasureDef[] = (query.measures ?? []).map((n) => {
-    const m = view.measures[n];
+    const m = getMeasure(view, n);
     if (!m) throw new QueryError(`指標 ${n} は ${view.name} にありません`);
     return m;
   });
   const dims: Key[] = (query.dimensions ?? []).map((n) => {
-    const d = view.dimensions[n];
+    const d = getDimension(view, n);
     if (!d) throw new QueryError(`軸 ${n} は ${view.name} にありません`);
     return { name: d.name, expr: d.expr };
   });
@@ -128,7 +128,7 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
 
   const fieldOf = (name: string): { expr: string; isTime: boolean } | undefined => {
     if (time && name === time.name) return { expr: time.expr, isTime: true };
-    const d = view.dimensions[name];
+    const d = getDimension(view, name);
     return d ? { expr: d.expr, isTime: false } : undefined;
   };
   for (const f of query.filters ?? []) {
@@ -177,7 +177,7 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
   // Aggregates needed in the current period: requested sql measures and every `of` target.
   const aggs = new Map<string, SqlMeasure>();
   for (const m of measures) {
-    const target = m.kind === "sql" ? m : (view.measures[m.of] as SqlMeasure);
+    const target = m.kind === "sql" ? m : (getMeasure(view, m.of) as SqlMeasure);
     aggs.set(target.name, target);
   }
   const range = timeRange(filters, time?.name);
@@ -203,7 +203,9 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
     );
     const targets = [...new Set(measures.filter((x): x is CompareMeasure => x.kind === "compare" && x.compare === m.compare).map((x) => x.of))];
     const name = `__${m.compare}`;
-    ctes.push(cte(name, prevKeys, aggCols(targets.map((t) => view.measures[t] as SqlMeasure)), preds(shifted)));
+    // `+ INTERVAL 1 YEAR` maps Feb 29 onto Feb 28; by the day that would count two days of last year, and Feb 29 has no match anyway.
+    const leapDay = m.compare === "previous_year" && grain === "day" ? [`NOT (month(${time!.expr}) = 2 AND day(${time!.expr}) = 29)`] : [];
+    ctes.push(cte(name, prevKeys, aggCols(targets.map((t) => view.measures[t] as SqlMeasure)), [...preds(shifted), ...leapDay]));
     const on = keys.length ? keys.map((k) => `c.${ident(k.name)} IS NOT DISTINCT FROM ${alias}.${ident(k.name)}`).join("\n  AND ") : "TRUE";
     joins.push(`LEFT JOIN ${ident(name)} AS ${alias}\n  ON ${on}`);
   }

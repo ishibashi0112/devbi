@@ -56,15 +56,4 @@ export function loadProject(input: ProjectInput): Project {
   };
 }
 
-/** Resolve a tile's `component` path relative to its dashboard file. */
-export function resolveComponent(dashboardPath: string, component: string): string {
-  if (component.startsWith("/")) return component;
-  const dir = dashboardPath.slice(0, dashboardPath.lastIndexOf("/") + 1);
-  const parts = `${dir}${component}`.split("/");
-  const out: string[] = [];
-  for (const p of parts) {
-    if (p === "..") out.pop();
-    else if (p !== "." && p !== "") out.push(p);
-  }
-  return `/${out.join("/")}`;
-}
+export { resolveComponent } from "devbi";

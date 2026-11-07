@@ -1,15 +1,6 @@
-import type { Row, Scalar, TileProps } from "devbi";
+import type { Row, TileProps } from "devbi";
 import { useMemo, useState } from "react";
-import { dimensions, filterFor, isSelected } from "./util.js";
-
-function compare(a: Scalar | undefined, b: Scalar | undefined): number {
-  if (a === b) return 0;
-  if (a === null || a === undefined) return 1;
-  if (b === null || b === undefined) return -1;
-  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b), "ja");
-}
+import { compareValues, dimensions, filterFor, isSelected } from "./util.js";
 
 function sameRow(selection: TileProps["selection"], row: Row): boolean | undefined {
   if (!selection.length) return undefined;
@@ -21,7 +12,7 @@ export function Table({ rows, fields, format, selection, select }: TileProps) {
   const [sort, setSort] = useState<{ field: string; desc: boolean } | null>(null);
   const sorted = useMemo(() => {
     if (!sort) return rows;
-    const s = [...rows].sort((a, b) => compare(a[sort.field], b[sort.field]));
+    const s = [...rows].sort((a, b) => compareValues(a[sort.field], b[sort.field]));
     return sort.desc ? s.reverse() : s;
   }, [rows, sort]);
   const dims = dimensions(fields);

@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "gen:data": "node scripts/generate-data.mjs",
+    "try-xlsx": "node scripts/try-xlsx.mjs",
     "e2e": "vite build && playwright test --trace off"
   },
   "dependencies": {

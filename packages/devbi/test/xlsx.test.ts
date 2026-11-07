@@ -94,6 +94,20 @@ describe("shared strings with furigana", () => {
     expect(t.columns).toEqual([{ name: "顧客", type: "VARCHAR", values: ["東京 本社", "a&b\r"] }]);
   });
 
+  it("reads ISO date cells (t=\"d\") as wall-clock time, whatever the local time zone", async () => {
+    const ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+    const sheet = (rows: string) =>
+      writeZip([
+        { name: "xl/workbook.xml", data: `<workbook ${ns} xmlns:r="r"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+        { name: "xl/_rels/workbook.xml.rels", data: `<Relationships><Relationship Id="rId1" Type="worksheet" Target="worksheets/s.xml"/></Relationships>` },
+        { name: "xl/worksheets/s.xml", data: `<worksheet ${ns}><sheetData><row><c t="str"><v>日付</v></c></row>${rows}</sheetData></worksheet>` },
+      ]);
+    const t = await readXlsx(await sheet(`<row><c t="d"><v>2024-04-01T00:00:00</v></c></row><row><c t="d"><v>2024-04-02</v></c></row>`));
+    expect(t.columns).toEqual([{ name: "日付", type: "DATE", values: [new Date("2024-04-01T00:00:00Z"), new Date("2024-04-02T00:00:00Z")] }]);
+    const ts = await readXlsx(await sheet(`<row><c t="d"><v>2024-04-01T09:30:00</v></c></row>`));
+    expect(ts.columns[0]).toMatchObject({ type: "TIMESTAMP", values: [new Date("2024-04-01T09:30:00Z")] });
+  });
+
   it("reads stored and deflated entries", async () => {
     const z = readZip(await writeZip([{ name: "a.txt", data: "hello" }]));
     expect(await z.get("a.txt")!.text()).toBe("hello");

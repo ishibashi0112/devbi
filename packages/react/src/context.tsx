@@ -2,6 +2,8 @@ import {
   compileQuery,
   compileTimeExtent,
   formatValue,
+  getDimension,
+  getMeasure,
   type Dashboard,
   type FieldInfo,
   type Filter,
@@ -57,7 +59,7 @@ export function DevbiProvider({
     const view = (name?: string) => {
       const n = name ?? dashboard.metrics ?? (Object.keys(project.metrics).length === 1 ? Object.keys(project.metrics)[0] : undefined);
       if (!n) throw new Error(`${dashboard.path}: 使う指標ファイルを "metrics" に書いてください`);
-      const v = project.metrics[n];
+      const v = Object.hasOwn(project.metrics, n) ? project.metrics[n] : undefined;
       if (!v) throw new Error(`指標ファイル models/${n}.metrics.yaml がありません`);
       return v;
     };
@@ -116,11 +118,12 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
   const [state, setState] = useState<QueryState>({ rows: [], fields: [], filters: [], loading: !!query, error: null });
   const seq = useRef(0);
   useEffect(() => {
+    // Bump on every change, including to "no query", so an earlier fetch still in flight cannot write its result.
+    const mine = ++seq.current;
     if (!query) {
       setState({ rows: [], fields: [], filters: [], loading: false, error: null });
       return;
     }
-    const mine = ++seq.current;
     setState((s) => ({ ...s, loading: true }));
     (async () => {
       const view = ctx.view(query.metrics);
@@ -162,9 +165,9 @@ export function useTimeExtent(metrics?: string): { min: Date | null; max: Date |
 export function fieldInfo(view: MetricsView, fields: FieldInfo[], name: string): Partial<FieldInfo> & { label: string } {
   const f = fields.find((x) => x.name === name);
   if (f) return f;
-  const d = view.dimensions[name];
+  const d = getDimension(view, name);
   if (d) return { name, label: d.label, kind: "dimension", ...(d.format ? { format: d.format } : {}) };
-  const m = view.measures[name];
+  const m = getMeasure(view, name);
   if (m) return { name, label: m.label, kind: "measure", ...(m.format ? { format: m.format } : {}) };
   if (view.time?.name === name) return { name, label: view.time.label, kind: "time" };
   return { name, label: name };

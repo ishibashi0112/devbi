@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { DashboardError, MetricsError, defineDashboard, defineMetricsView, scanSources } from "devbi";
+import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources } from "devbi";
 import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
 
@@ -51,7 +51,7 @@ export async function readProject(dir: string): Promise<ProjectFiles> {
       const view = defineMetricsView(spec, name, rel);
       out.metrics[name] = { path: `/${rel}`, spec };
       for (const s of scanSources(view.model)) {
-        if (/^[a-z][a-z0-9+.-]*:/i.test(s.path)) continue;
+        if (hasUrlScheme(s.path)) continue;
         const p = posix(path.normalize(s.path));
         if (p.startsWith("..") || path.isAbsolute(s.path)) {
           problems.push(`${rel}: データのパスはプロジェクトの中を相対パスで書いてください: ${s.path}`);
@@ -80,8 +80,11 @@ export async function readProject(dir: string): Promise<ProjectFiles> {
       }
       for (const t of d.tiles) {
         if (!t.component) continue;
-        const target = path.resolve(dashDir, t.component);
-        if (!existsSync(target)) problems.push(`${rel}: タイル ${t.id} のファイル ${t.component} がありません`);
+        // Same resolution as the runtime, so what passes here is what import.meta.glob below bundles.
+        const resolved = resolveComponent(`/${rel}`, t.component);
+        const problem = componentProblem(resolved);
+        if (problem) problems.push(`${rel}: タイル ${t.id} の ${t.component}: ${problem}`);
+        else if (!existsSync(path.join(dir, resolved))) problems.push(`${rel}: タイル ${t.id} のファイル ${t.component} がありません`);
       }
       out.dashboards[name] = { path: `/${rel}`, spec };
     } catch (e) {

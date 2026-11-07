@@ -92,6 +92,8 @@ export function defineDashboard(data: unknown, name: string, source = `${name}.d
     if (t.x + t.w > columns) {
       issues.push({ path: `tiles.${i}`, message: `x + w が列数 ${columns} を超えています（${t.id}）` });
     }
+    const hit = d.tiles.find((o, j) => j < i && t.x < o.x + o.w && o.x < t.x + t.w && t.y < o.y + o.h && o.y < t.y + t.h);
+    if (hit) issues.push({ path: `tiles.${i}`, message: `タイル ${t.id} が ${hit.id} と重なっています（x, y, w, h を見直してください）` });
   });
   if (issues.length) throw new DashboardError(source, issues);
   return {
@@ -126,4 +128,25 @@ export function checkQuery(data: unknown, source: string) {
     );
   }
   return parsed.data;
+}
+
+/**
+ * Resolve a tile's `component` path against its dashboard file, as a path from the project root such as
+ * `/dashboards/sales/TopCustomers.tsx`. A path starting with `/` is already from the project root.
+ */
+export function resolveComponent(dashboardPath: string, component: string): string {
+  const dir = component.startsWith("/") ? "" : dashboardPath.slice(0, dashboardPath.lastIndexOf("/") + 1);
+  const out: string[] = [];
+  for (const p of `${dir}${component}`.split("/")) {
+    if (p === "..") out.pop();
+    else if (p !== "." && p !== "") out.push(p);
+  }
+  return `/${out.join("/")}`;
+}
+
+/** Promoted tiles are bundled from `dashboards/**\/*.tsx|jsx`; anything else cannot be loaded. */
+export function componentProblem(resolved: string): string | undefined {
+  if (!resolved.startsWith("/dashboards/")) return "昇格したタイルは dashboards/ の中に置いてください";
+  if (!/\.(tsx|jsx)$/.test(resolved)) return "昇格したタイルのファイルは .tsx か .jsx にしてください";
+  return undefined;
 }

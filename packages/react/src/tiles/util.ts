@@ -77,3 +77,13 @@ export function toggleValue(selection: Filter[], field: string, value: Scalar, m
   const next = has ? current.filter((v) => !same(v, value)) : multi ? [...current, value] : [value];
   return next.length ? [{ field, in: next }] : null;
 }
+
+/** Sort order for cell values: dates and numbers by value, text in Japanese order, empty values last. */
+export function compareValues(a: Scalar | undefined, b: Scalar | undefined): number {
+  const an = a === null || a === undefined;
+  const bn = b === null || b === undefined;
+  if (an || bn) return an === bn ? 0 : an ? 1 : -1;
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), "ja");
+}

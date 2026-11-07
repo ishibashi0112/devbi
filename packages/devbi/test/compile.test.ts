@@ -103,6 +103,33 @@ describe("compileQuery", () => {
     expect(r.rows).toEqual([{ total_revenue: 720, revenue_pp: null }]);
   });
 
+  it("does not count Feb 29 into last year's Feb 28 by the day", async () => {
+    const leap = parseMetricsYaml(
+      `model: "SELECT * FROM (VALUES (DATE '2024-02-28', 10), (DATE '2024-02-29', 5), (DATE '2025-02-28', 20), (DATE '2025-03-01', 30)) t(d, amount)"
+time: d
+measures:
+  rev: SUM(amount)
+  ly: { of: rev, compare: previous_year, as: value }
+`,
+      "leap",
+    );
+    const c = compileQuery(leap, { measures: ["rev", "ly"], time: "day" });
+    expect(round(await rows(c.sql))).toEqual([
+      { d: "2024-02-28", rev: 10, ly: null },
+      { d: "2024-02-29", rev: 5, ly: null },
+      { d: "2025-02-28", rev: 20, ly: 10 },
+      { d: "2025-03-01", rev: 30, ly: null },
+    ]);
+    // By the month, Feb 29 still belongs to last February.
+    const m = compileQuery(leap, { measures: ["rev", "ly"], time: "month" });
+    expect(round(await rows(m.sql))).toContainEqual({ d: "2025-02-01", rev: 20, ly: 15 });
+  });
+
+  it("rejects Object.prototype keys as names", () => {
+    expect(() => compileQuery(view, { measures: ["toString"] })).toThrow("指標 toString は sales にありません");
+    expect(() => compileQuery(view, { dimensions: ["constructor"] })).toThrow("軸 constructor は sales にありません");
+  });
+
   it("returns NULL for comparisons when the period is unbounded", async () => {
     const r = await run({ measures: ["total_revenue", "revenue_yoy"] });
     expect(r.rows).toEqual([{ total_revenue: 1370, revenue_yoy: null }]);
