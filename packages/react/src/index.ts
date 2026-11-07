@@ -1,7 +1,8 @@
 export { Dashboard, DevbiApp } from "./Dashboard.js";
 export { TileFrame } from "./TileFrame.js";
 export { DevbiProvider, useDevbi, useDevbiQuery, useTimeExtent, useSelectionVersion, getEngine, type QueryState } from "./context.js";
-export { createEngine, tableToRows, type Engine, type EngineOptions, type DuckDBBundle, type QueryResult } from "./engine.js";
+export { createEngine } from "./load-engine.js";
+export type { Engine, EngineOptions, DuckDBBundle, QueryResult } from "./engine.js";
 export { DashboardSelection } from "./selection.js";
 export { loadProject, resolveComponent, type Project, type ProjectInput, type TileModule } from "./project.js";
 export { builtinTiles, useTileSize, type BuiltinTile } from "./tiles/index.js";

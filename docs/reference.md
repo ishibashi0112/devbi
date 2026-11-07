@@ -379,9 +379,9 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
-| `createEngine({ bundle, baseUrl?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る |
+| `createEngine({ bundle, baseUrl?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
-| `builtinTiles` | 組み込みタイルの一覧（`type` → コンポーネント） |
+| `builtinTiles` | 組み込みタイルの一覧（`type` → コンポーネント）。グラフ（`bar`、`line`、`area`）は `React.lazy` で、Observable Plot をはじめて使うときに読むので、自分で描くときは `<Suspense>` の中に置く |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |
 
 DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを切り替えても使い回します。同じ SQL の結果はページを開いている間キャッシュします。

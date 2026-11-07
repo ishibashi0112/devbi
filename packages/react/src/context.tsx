@@ -12,7 +12,8 @@ import {
   type Row,
 } from "devbi";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { createEngine, type Engine } from "./engine.js";
+import type { Engine } from "./engine.js";
+import { createEngine } from "./load-engine.js";
 import type { Project } from "./project.js";
 import { DashboardSelection } from "./selection.js";
 
