@@ -24,15 +24,74 @@ export type SortSpec = string | { field: string; desc?: boolean };
 export interface Query {
   /** Name of the metrics view (file `models/<name>.metrics.yaml`). Defaults to the dashboard's. */
   metrics?: string;
-  measures?: string[];
-  dimensions?: string[];
+  measures?: readonly string[];
+  dimensions?: readonly string[];
   /** Group by the time column truncated to this grain. The output field is named after the time column. */
   time?: Grain;
   /** Fixed filters for this tile, applied before selections from other tiles. */
-  filters?: Filter[];
-  sort?: SortSpec[];
+  filters?: readonly Filter[];
+  sort?: readonly SortSpec[];
   limit?: number;
 }
+
+/**
+ * Names in the project's metrics files, filled in by the generated `.devbi/env.d.ts`
+ * (`pnpm gen`, or the Vite plugin on start). Empty when not generated: names are then plain strings.
+ *
+ * ```ts
+ * declare module "devbi" {
+ *   interface MetricsRegistry {
+ *     sales: { measures: "revenue" | "orders"; dimensions: "customer"; time: "受注日" };
+ *   }
+ * }
+ * ```
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface MetricsRegistry {}
+
+type Registered = [keyof MetricsRegistry] extends [never] ? false : true;
+type RegistryPart<K extends "measures" | "dimensions" | "time"> = {
+  [V in keyof MetricsRegistry]: MetricsRegistry[V] extends Record<K, infer N extends string> ? N : never;
+}[keyof MetricsRegistry];
+
+/** Names of metrics files (`models/<name>.metrics.yaml`). */
+export type MetricsName = Registered extends true ? keyof MetricsRegistry & string : string;
+/** Measure names across the project's metrics files. */
+export type MeasureName = Registered extends true ? RegistryPart<"measures"> : string;
+/** Dimension names across the project's metrics files. */
+export type DimensionName = Registered extends true ? RegistryPart<"dimensions"> : string;
+/** Time column names across the project's metrics files. */
+export type TimeName = Registered extends true ? RegistryPart<"time"> : string;
+
+/** A {@link Query} whose names are checked against the generated {@link MetricsRegistry}. */
+export interface TypedQuery<M extends MeasureName = MeasureName, D extends DimensionName = DimensionName> extends Query {
+  metrics?: MetricsName;
+  measures?: readonly M[];
+  dimensions?: readonly D[];
+}
+
+/**
+ * Declare a tile's query with name completion and checks (after `pnpm gen`), and keep its literal type
+ * so {@link RowOf} can type the rows.
+ *
+ * ```tsx
+ * export const query = defineQuery({ measures: ["revenue"], dimensions: ["customer"], limit: 10 });
+ * export default function Top({ rows }: TileProps<RowOf<typeof query>>) { rows[0]?.revenue; }
+ * ```
+ */
+export function defineQuery<const M extends MeasureName = never, const D extends DimensionName = never>(
+  query: TypedQuery<M, D>,
+): TypedQuery<M, D> {
+  return query;
+}
+
+/**
+ * The row type of a query declared with {@link defineQuery}: measures are numbers (or null),
+ * dimensions are scalars, and the time column is a Date when the query has a time grain.
+ */
+export type RowOf<Q> = Q extends TypedQuery<infer M, infer D>
+  ? { [K in M]: number | null } & { [K in D]: Scalar } & (Q extends { time: Grain } ? { [K in TimeName]: Date } : unknown)
+  : Row;
 
 export type FieldKind = "dimension" | "time" | "measure";
 

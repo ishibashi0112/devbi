@@ -95,6 +95,7 @@ const rowsKey = key("行数", "rows");
 
 const rel = `data/local/${name}.xlsx`;
 const yaml = [
+  "# yaml-language-server: $schema=../.devbi/metrics.schema.json",
   `# pnpm try-xlsx が ${path.basename(src)} の「${sheet}」シートから作った下書き。自由に直してください。`,
   `label: ${q(path.basename(src, path.extname(src)))}`,
   `model: ${q(`SELECT * FROM read_xlsx('${rel}', sheet = '${sheet.replaceAll("'", "''")}')`)}`,
@@ -161,7 +162,7 @@ if (dims.length) {
     query: { measures: [...new Set([main, rowsKey, ...nums.slice(1, 3).map((m) => m.key)])], dimensions: dims.slice(0, 2).map((d) => d.key), limit: 200 },
   });
 }
-const dash = { title: `${path.basename(src, path.extname(src))}（試し）`, description: `${path.basename(src)} の「${sheet}」シート`, metrics: name, tiles };
+const dash = { $schema: "../.devbi/dash.schema.json", title: `${path.basename(src, path.extname(src))}（試し）`, description: `${path.basename(src)} の「${sheet}」シート`, metrics: name, tiles };
 
 // ---- 書き出し --------------------------------------------------------------
 const out = {

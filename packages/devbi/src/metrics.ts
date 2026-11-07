@@ -5,61 +5,75 @@ import { ident, replaceIdentifiers, scanIdentifiers, trimSql } from "./sql.js";
 const NAME_RE = /^[\p{L}_][\p{L}\p{N}_]*$/u;
 
 const text = z.string().min(1);
+const label = text.describe("表示名。既定は名前");
+const description = z.string().describe("説明");
+const format = z.string().describe('書式。"#,##0"、"¥#,##0"、"0.0%"、"compact" など（Excel の表示形式の一部）');
 
 const dimensionInput = z.union([
-  text,
+  text.describe("列名"),
   z.strictObject({
-    column: text.optional(),
-    sql: text.optional(),
-    label: text.optional(),
-    description: z.string().optional(),
-    format: z.string().optional(),
+    column: text.optional().describe("列名。sql とどちらか一つ"),
+    sql: text.optional().describe('model の列を使った SQL の式。例: "金額 >= 100000"'),
+    label: label.optional(),
+    description: description.optional(),
+    format: format.optional(),
   }),
 ]);
 
 const compareInput = z.strictObject({
-  of: text,
-  compare: z.enum(["previous_year", "previous_period"]),
-  as: z.enum(["value", "delta", "ratio", "change"]).optional(),
-  label: text.optional(),
-  description: z.string().optional(),
-  format: z.string().optional(),
+  of: text.describe("比べる sql の指標の名前"),
+  compare: z
+    .enum(["previous_year", "previous_period"])
+    .describe("previous_year: 1 年前と比べる。previous_period: 直前の同じ長さの期間と比べる"),
+  as: z
+    .enum(["value", "delta", "ratio", "change"])
+    .optional()
+    .describe("value: 比較先の値、delta: 差、ratio: 比（既定）、change: 増減率（比 − 1）"),
+  label: label.optional(),
+  description: description.optional(),
+  format: format.optional(),
 });
 
 const runningInput = z.strictObject({
-  of: text,
-  running: z.union([z.literal(true), z.enum(["all", "year", "fiscal_year"])]),
-  label: text.optional(),
-  description: z.string().optional(),
-  format: z.string().optional(),
+  of: text.describe("足し上げる sql の指標の名前"),
+  running: z
+    .union([z.literal(true), z.enum(["all", "year", "fiscal_year"])])
+    .describe("true / all: 全期間の累計、year: 1 月で戻る、fiscal_year: 年度の始まりで戻る"),
+  label: label.optional(),
+  description: description.optional(),
+  format: format.optional(),
 });
 
 const sqlMeasureInput = z.strictObject({
-  sql: text,
-  label: text.optional(),
-  description: z.string().optional(),
-  format: z.string().optional(),
+  sql: text.describe("集計関数を使った DuckDB の式。ほかの sql の指標を名前で使える。例: SUM(金額)、revenue / orders"),
+  label: label.optional(),
+  description: description.optional(),
+  format: format.optional(),
 });
 
-const measureInput = z.union([text, sqlMeasureInput, compareInput, runningInput]);
+const measureInput = z.union([text.describe("集計の式（sql）"), sqlMeasureInput, compareInput, runningInput]);
 
 const timeInput = z.union([
-  text,
+  text.describe("日付か日時の列名"),
   z.strictObject({
-    column: text,
-    label: text.optional(),
-    fiscal_year_start: z.number().int().min(1).max(12).optional(),
+    column: text.describe("日付か日時の列名"),
+    label: label.optional(),
+    fiscal_year_start: z.number().int().min(1).max(12).optional().describe("年度の始まりの月（1〜12）。既定は 1"),
   }),
 ]);
 
-const metricsInput = z.strictObject({
-  label: text.optional(),
-  description: z.string().optional(),
-  model: text,
-  time: timeInput.optional(),
-  dimensions: z.record(z.string(), dimensionInput).optional(),
-  measures: z.record(z.string(), measureInput),
-});
+export const metricsInput = z
+  .strictObject({
+    label: text.optional().describe("表示名。既定はファイル名"),
+    description: description.optional(),
+    model: text.describe(
+      "元の表を作る DuckDB の SQL。read_xlsx('data/x.xlsx', sheet = '明細') / read_csv / read_parquet / read_arrow / read_json でファイルを読む",
+    ),
+    time: timeInput.optional().describe("日付の列。期間の絞り込み、時間の粒度、前年比・累計に使う"),
+    dimensions: z.record(z.string(), dimensionInput).optional().describe("軸（分けたり絞ったりする値）。名前 → 列名か定義"),
+    measures: z.record(z.string(), measureInput).describe("指標（集計する値）。名前 → 式か定義"),
+  })
+  .meta({ title: "DevBI 指標ファイル（*.metrics.yaml）" });
 
 export type MetricsViewInput = z.input<typeof metricsInput>;
 

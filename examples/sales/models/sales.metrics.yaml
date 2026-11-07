@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../.devbi/metrics.schema.json
 # 指標と軸の定義。model の SQL は DuckDB で動く。read_xlsx / read_csv / read_parquet / read_arrow のファイルは
 # ブラウザが data/ から読み込む（xlsx は DevBI が自前で読む）。
 label: 売上

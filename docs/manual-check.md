@@ -10,7 +10,7 @@
 ```sh
 git clone https://github.com/ishibashi0112/devbi.git
 cd devbi
-git checkout claude/project-thread-ztj0zm   # PR #1 のブランチ。マージ後は main のままでよい
+git checkout main                            # PR を試すときは、その PR のブランチ
 pnpm install
 ```
 
@@ -38,7 +38,7 @@ pnpm example:dev
 
 どのタイルも、同じ `TileProps`（集計済みの行、書式、絞り込みの関数）を受け取る自作タイルに差し替えられます。好きなグラフライブラリで描いてかまいません。
 
-
+## 3. 画面で確かめること
 
 数字はサンプルデータ（`examples/sales/data/sales.xlsx`、2024年4月〜2026年10月の架空の受注 6,044 行）のものです。
 
@@ -95,6 +95,21 @@ pnpm example:dev
 | --- | --- | --- |
 | 21 | `pnpm example:preview` を実行して <http://localhost:4173> を開く | 開発サーバーと同じものが動く。`examples/sales/dist/` をそのまま社内のファイルサーバーや IIS に置けば、この形で見られる |
 
+### エディタでの補完（VS Code）
+
+`examples/sales` を VS Code で開きます（リポジトリのルートを開いてもよい）。補完に使う `examples/sales/.devbi/` は `pnpm example:dev` を動かすと作られます（開発サーバーなしなら `pnpm gen`）。
+
+| # | やること | こうなれば OK |
+| --- | --- | --- |
+| 22 | `dashboards/sales.dash.json` で、どれかのタイルの `"type": "bar"` の `bar` を消して Ctrl+Space | `kpi`、`bar`、`pivot` などの候補が説明つきで出る |
+| 23 | 同じファイルの `"measures": ["revenue"]` の中で Ctrl+Space。次に `"revenue"` を `"revenu"` にする | 候補に `revenue`、`orders`、`revenue_yoy` などが出る。`"revenu"` には波線が出る |
+| 24 | `"pivot"` タイルの `options` の中で Ctrl+Space | `columns` と `totals` が出る。`"totals": "no"` にすると波線 |
+| 25 | `models/sales.metrics.yaml` の項目にマウスを乗せる。`compare:` の値を消して Ctrl+Space | 項目の説明が出る。`previous_year`、`previous_period` が候補に出る（拡張機能「YAML」を入れたとき。開くと右下におすすめが出る） |
+| 26 | `dashboards/sales/TopCustomers.tsx` の `defineQuery` の `"revenue"` を `"revenu"` にする | 赤い波線と「`"revenue"` ではありませんか」の旨のメッセージが出る。`r.` と打つと `revenue`、`orders`、`customer` などが候補に出る |
+| 27 | 開発サーバーを動かしたまま、`sales.metrics.yaml` の `measures:` に `max_price: MAX(単価)` を足して保存 | 22〜26 の候補に `max_price` が加わる（エディタによっては数秒かかる） |
+
+試したあとは `git checkout .` で元に戻せます。
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -106,7 +121,7 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 - Excel を `examples/sales/data/local/` にコピーし、列の型を見て `models/local_〜.metrics.yaml` と `dashboards/local_〜.dash.json` の下書きを作ります。
 - 文字の列は軸、数値の列は合計（単価や率は平均）、日付の列は期間になります。金額・売上らしい列が主役になります。
 - 最後に表示される URL（`http://localhost:5173/#/local_売上一覧` など）を開きます。開発サーバーは別のターミナルで `pnpm example:dev`。
-- 下書きの yaml / json は自由に直してください。保存するとすぐ反映されます。
+- 下書きの yaml / json は自由に直してください。保存するとすぐ反映されます。エディタでの補完（上の 22〜25）も効きます。
 
 ターミナルに出る「シート・行数・列名と型・入っている行数・種類の数」には**値が入っていない**ので、そのまま共有できます。これを貼ってもらえれば、候補 A のサンプルデータを同じ形で作れます。
 

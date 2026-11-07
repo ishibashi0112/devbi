@@ -14,11 +14,13 @@
     "example:build": "pnpm build && pnpm --filter devbi-example-sales build",
     "example:preview": "pnpm example:build && pnpm --filter devbi-example-sales preview",
     "try-xlsx": "pnpm build && pnpm --filter devbi-example-sales try-xlsx",
+    "gen": "pnpm build && pnpm --filter devbi-example-sales gen",
     "e2e": "pnpm --filter devbi-example-sales e2e"
   },
   "devDependencies": {
     "@duckdb/node-api": "2.0.0-r.1",
     "@types/node": "^22.19.0",
+    "ajv": "^8.20.0",
     "typescript": "~6.0.3",
     "vitest": "^5.1.0"
   }

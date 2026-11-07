@@ -1,10 +1,11 @@
 // A tile promoted to JSX. It declares what it needs (no SQL); the runtime runs the query
 // with the other tiles' selections applied, and passes the rows in.
-import type { Query, TileProps } from "devbi";
+// defineQuery checks the names against models/*.metrics.yaml (after `pnpm gen`), and RowOf types the rows.
+import { defineQuery, type RowOf, type TileProps } from "devbi";
 
-export const query: Query = { measures: ["revenue", "orders", "revenue_yoy"], dimensions: ["customer"], limit: 10 };
+export const query = defineQuery({ measures: ["revenue", "orders", "revenue_yoy"], dimensions: ["customer"], limit: 10 });
 
-export default function TopCustomers({ rows, format, select, selection }: TileProps) {
+export default function TopCustomers({ rows, format, select, selection }: TileProps<RowOf<typeof query>>) {
   const own = selection.find((f) => f.field === "customer");
   const chosen = own && "in" in own ? own.in : [];
   const max = Math.max(1, ...rows.map((r) => Number(r.revenue) || 0));

@@ -77,7 +77,7 @@ function where(preds: string[], indent: string): string {
   return `\n${indent}WHERE ${preds.join(`\n${indent}  AND `)}`;
 }
 
-function resolveSort(sort: SortSpec[] | undefined, fields: FieldInfo[]): { field: string; desc: boolean }[] {
+function resolveSort(sort: readonly SortSpec[] | undefined, fields: FieldInfo[]): { field: string; desc: boolean }[] {
   const names = new Set(fields.map((f) => f.name));
   if (sort?.length) {
     return sort.map((s) => {
