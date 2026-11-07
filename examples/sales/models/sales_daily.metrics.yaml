@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../.devbi/metrics.schema.json
+# 日ごとに集計した売上を、毎朝のスナップショットから読む。
+# api/sales_daily.sql に「-- snapshot: 06:00」があるので、read_api('sales_daily') は API ではなく、
+# サーバーが毎朝 6:00 に作るファイル（snapshots/ の下）を読む。開くたびにデータベースへは行かない。
+label: 売上（日次）
+model: SELECT * FROM read_api('sales_daily', from = '2024-04-01')
+time: { column: 受注日, label: 受注日, fiscal_year_start: 4 }
+dimensions:
+  region: { column: 地域, label: 地域 }
+  category: { column: 商品分類, label: 商品分類 }
+measures:
+  revenue: { sql: SUM(金額), label: 売上, format: "¥#,##0" }
+  quantity: { sql: SUM(数量), label: 数量, format: "#,##0" }
+  lines: { sql: SUM(明細数), label: 明細数, format: "#,##0" }
+  revenue_yoy: { of: revenue, compare: previous_year, as: ratio }
+  revenue_ly: { of: revenue, compare: previous_year, as: value }

@@ -1,7 +1,8 @@
 import { formatTime, type Filter, type TileSpec } from "devbi";
 import { useEffect, useInsertionEffect, useMemo, useState, type CSSProperties } from "react";
 import { DevbiProvider, fieldInfo, useDevbi, useSelectionVersion } from "./context.js";
-import { loadProject, type Project, type ProjectInput } from "./project.js";
+import type { SnapshotInfo } from "./engine.js";
+import { formatTimesOfDay, loadProject, snapshotTimesOf, viewsOf, type Project, type ProjectInput } from "./project.js";
 import { injectStyles } from "./styles.js";
 import { TileFrame } from "./TileFrame.js";
 
@@ -61,6 +62,37 @@ function ActiveFilters() {
         </>
       )}
     </div>
+  );
+}
+
+/** `11月8日 6:00` */
+function formatMadeAt(d: Date): string {
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** When the data was taken, for a dashboard that reads snapshots: the oldest of them. Nothing for live data. */
+function SnapshotNote() {
+  const ctx = useDevbi();
+  const [info, setInfo] = useState<SnapshotInfo[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void ctx.engine
+      .then((engine) => Promise.all(viewsOf(ctx.project, ctx.dashboard).map((v) => engine.snapshotsOf(v))))
+      .then(
+        (all) => alive && setInfo(all.flat()),
+        () => undefined, // the tiles show the error
+      );
+    return () => {
+      alive = false;
+    };
+  }, [ctx]);
+  if (info.length === 0) return null;
+  const oldest = info.reduce((a, b) => (a.at <= b.at ? a : b));
+  const times = [...new Set(info.flatMap((i) => i.times))].sort();
+  return (
+    <p className="devbi-snapshot" data-testid="snapshot-note">
+      データは {formatMadeAt(oldest.at)} の時点（毎日 {formatTimesOfDay(times)} に更新）
+    </p>
   );
 }
 
@@ -148,6 +180,7 @@ export function Dashboard({
           <div className="devbi-head">
             <h1>{dashboard.title}</h1>
             {dashboard.description && <p>{dashboard.description}</p>}
+            <SnapshotNote />
           </div>
           <ActiveFilters />
           <div
@@ -210,14 +243,19 @@ export function DevbiApp({ project: input, theme }: { project: ProjectInput; the
           <p className="devbi-hint">dashboards/ に *.dash.json を置くとここに並びます</p>
         ) : (
           <ul>
-            {names.map((n) => (
-              <li key={n}>
-                <a href={`#/${encodeURIComponent(n)}`}>
-                  {project.dashboards[n]!.title}
-                  {project.dashboards[n]!.description && <small>{project.dashboards[n]!.description}</small>}
-                </a>
-              </li>
-            ))}
+            {names.map((n) => {
+              const d = project.dashboards[n]!;
+              const times = snapshotTimesOf(project, d);
+              return (
+                <li key={n}>
+                  <a href={`#/${encodeURIComponent(n)}`}>
+                    {d.title}
+                    {d.description && <small>{d.description}</small>}
+                    {times.length > 0 && <small className="devbi-snapshot">毎日 {formatTimesOfDay(times)} の時点のデータ</small>}
+                  </a>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

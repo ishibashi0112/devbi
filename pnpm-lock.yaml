@@ -119,6 +119,9 @@ importers:
       apache-arrow:
         specifier: ^17.0.0
         version: 17.0.0
+      devbi:
+        specifier: workspace:*
+        version: link:../devbi
     devDependencies:
       '@types/pg':
         specifier: ^8.15.0

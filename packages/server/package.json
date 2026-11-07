@@ -26,14 +26,16 @@
     "bin"
   ],
   "bin": {
-    "devbi-serve": "./bin/devbi-serve.js"
+    "devbi-serve": "./bin/devbi-serve.js",
+    "devbi-snapshot": "./bin/devbi-snapshot.js"
   },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "apache-arrow": "^17.0.0"
+    "apache-arrow": "^17.0.0",
+    "devbi": "workspace:*"
   },
   "peerDependencies": {
     "pg": ">=8"

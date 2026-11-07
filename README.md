@@ -11,6 +11,7 @@ pnpm install
 pnpm example:dev      # packages/* をビルドして、examples/sales を Vite の dev server で開く（http://localhost:5173）
 pnpm example:preview  # 静的ビルドしたものを開く（http://localhost:4173）
 pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost:8080）。DB 版のダッシュボードはサンプルの SQLite を API から読む。
+                      # 「売上の日次集計」は、devbi-serve が毎朝 6:00（と起動したとき）に作るスナップショットを読む
                       # /embed-demo.html は、ほかのアプリの画面に script 1 本で埋め込んだ例
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
@@ -29,7 +30,7 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `packages/devbi` | `devbi` | ファイル形式（metrics.yaml / dash.json の検証）、指標 → DuckDB SQL のコンパイラ、xlsx の読み書き（依存なし）、書式、`TileProps` などの型。ブラウザでも Node でも動く |
 | `packages/react` | `@devbi/react` | DuckDB-wasm のエンジン、Mosaic の Selection でのクロスフィルタ、組み込みタイル、`<Dashboard>` / `<DevbiApp>`、ほかのページへの埋め込み（`mountDashboard`、`startEmbed`） |
 | `packages/vite` | `@devbi/vite` | Vite プラグイン。`virtual:devbi` で dashboards/ と models/ と昇格タイルを渡し、ビルドで data/ をコピー。`embed: true` で埋め込み用の `devbi-embed.js` も作る |
-| `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL）と `devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出す）。DB への接続は ashiato のアダプタの作りを流用 |
+| `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL）、`devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出し、毎朝のスナップショットを作る）、`devbi-snapshot`（スナップショットをいま作る。タスクスケジューラ用）。DB への接続は ashiato のアダプタの作りを流用 |
 | `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ。`db/sales.sqlite` は同じ受注を表に分けて入れたもの（`pnpm gen:db`） |
 
 npm にはまだ公開していません（どのパッケージも `private: true`）。
@@ -46,6 +47,7 @@ data/
   sales.xlsx               # または .csv / .arrow / .parquet
 api/
   orders.sql               # read_api('orders') でデータベースから読む SELECT（サーバーだけが使う）
+  sales_daily.sql          # 先頭に -- snapshot: 06:00 と書くと、毎朝作ったファイルから読む
 .devbi/                    # pnpm gen が作る JSON Schema と型（git に入れない）
 ```
 
@@ -102,7 +104,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 - DuckDB-wasm は `1.33.1-dev114.0`（中身は DuckDB 2.0.0）。`@uwdata/mosaic-core` 0.35 がこの版を固定しているので合わせています。テストの DuckDB Node（`@duckdb/node-api` 2.0.0-r.1）も 2.0.0 で、同じ SQL が両方で動きます。
 - DuckDB-wasm 2.0 は CSV と Arrow IPC（`read_arrow`）は単体で読めますが、Parquet は拡張を extensions.duckdb.org から取りに行きます。社内ネットワークで外に出られない場合は、拡張ファイルを社内に置いて `devbi({ extensionRepository })` で指します。xlsx は DuckDB の excel 拡張を使わず、DevBI が自前で読むので拡張は要りません。
-- DuckDB Node 2.0 は逆に Parquet が組み込みで、Arrow の書き出し（`COPY ... (FORMAT arrow)`）は拡張が要ります。スナップショット（§5 の 2）の出力形式はこの差を踏まえて決めます。
+- DuckDB Node 2.0 は逆に Parquet が組み込みで、Arrow の書き出し（`COPY ... (FORMAT arrow)`）は拡張が要ります。スナップショットは DuckDB を使わず、API の答えと同じ Arrow IPC を `@devbi/server` が書くので、どちらの拡張も要りません。
 
 ## handoff.md からの変更点
 
@@ -110,4 +112,5 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 - 表タイルは [spreadsheet-grid](https://github.com/ishibashi0112/datasheet-grid)（`@ishibashi0112/spreadsheet-grid` の `/lite`）で、読み取り専用にしています。並べ替えは列メニューから、行のクリックでほかのタイルを絞り込みます。
 - ピボットは Perspective を使わず、合計行・合計列つきの自前の表にしました。
 - 読み取り API の名前: handoff の `POST /api/query {model, params}` は `{name, params}` にし、サーバーの SQL は `api/<名前>.sql`、metrics.yaml からは `read_api('<名前>')` で呼びます。`model` は metrics.yaml の `model`（DuckDB の SQL）と紛らわしいため。
+- 朝のスナップショットは、handoff の Parquet ではなく Arrow IPC（`snapshots/<名前>.arrows`。API の答えと同じ中身）にしました。DuckDB-wasm が Parquet を読むには拡張をインターネットから取りに行くためです。ブラウザはこれを静的ファイルとして GET するので、IIS などにそのまま置けます。時刻は `api/<名前>.sql` の先頭の `-- snapshot: 06:00` に書きます。
 - 読み取り API は、`read_api` 1 つにつき 1 回だけ呼び、行をブラウザに渡して DuckDB-wasm で集計します（データベースは絞り込みのたびには呼ばれない）。応答は Arrow IPC（gzip）。SQLite は Node 組み込みの `node:sqlite`（Node 22.16 以上）、PostgreSQL は `pg`（optional peer）。

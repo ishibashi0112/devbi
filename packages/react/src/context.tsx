@@ -41,6 +41,7 @@ export function getEngine(project: Project): Promise<Engine> {
     e = createEngine({
       bundle: project.duckdb,
       baseUrl: project.baseUrl,
+      snapshots: project.snapshots,
       ...(project.extensionRepository ? { extensionRepository: project.extensionRepository } : {}),
     });
     engines.set(key, e);
@@ -56,7 +57,11 @@ export function getEngine(project: Project): Promise<Engine> {
 function forDashboard(engine: Engine, project: Project): Engine {
   const api: ApiOptions = { ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}), ...(project.fetch ? { fetch: project.fetch } : {}) };
   if (!api.apiUrl && !api.fetch) return engine;
-  return { ...engine, loadView: (view, options) => engine.loadView(view, options ?? api) };
+  return {
+    ...engine,
+    loadView: (view, options) => engine.loadView(view, options ?? api),
+    snapshotsOf: (view, options) => engine.snapshotsOf(view, options ?? api),
+  };
 }
 
 export function DevbiProvider({

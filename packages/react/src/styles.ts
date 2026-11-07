@@ -76,6 +76,7 @@ export const css = `
 .devbi-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 12px; }
 .devbi-head h1 { font-size: 20px; margin: 0; font-weight: 650; }
 .devbi-head p { margin: 0; color: var(--devbi-muted); }
+.devbi-head .devbi-snapshot { font-size: 12px; }
 .devbi-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 28px; margin-bottom: 12px; }
 .devbi-filters .devbi-chip { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--devbi-border); background: var(--devbi-card); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13px; }
 .devbi-chip button { border: 0; background: none; cursor: pointer; color: var(--devbi-muted); padding: 0 6px; border-radius: 999px; }

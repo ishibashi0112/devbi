@@ -25,7 +25,14 @@ test("a dashboard reads a database through the API and shows the same numbers as
 
 test("the API lists its SQL files and answers in Japanese when something is wrong", async ({ request }) => {
   const schema = await (await request.get("/api/schema")).json();
-  expect(schema.datasets).toEqual([{ name: "orders", description: expect.stringContaining("受注の明細"), params: ["from"], connection: "DEVBI_DB" }]);
+  expect(schema.datasets).toEqual([
+    { name: "orders", description: expect.stringContaining("受注の明細"), params: ["from"], connection: "DEVBI_DB" },
+    { name: "sales_daily", description: expect.stringContaining("日・地域・商品分類"), params: ["from"], connection: "DEVBI_DB", snapshot: ["06:00"] },
+  ]);
+  // The snapshots, and when each was made (devbi-serve makes a missing one when it starts, or when it is asked for).
+  expect(schema.snapshots).toEqual([expect.objectContaining({ name: "sales_daily", params: { from: "2024-04-01" }, times: ["06:00"], models: ["sales_daily"] })]);
+  expect((await request.get(`/snapshots/${encodeURIComponent(schema.snapshots[0].file)}`)).status()).toBe(200);
+  expect((await (await request.get("/api/schema")).json()).snapshots[0].updatedAt).toEqual(expect.any(String));
   const res = await request.post("/api/query", { data: { name: "orders", params: {} } });
   expect(res.status()).toBe(400);
   expect((await res.json()).error).toBe("api/orders.sql: パラメーター :from の値がありません。read_api('orders', from = ...) と書きます");

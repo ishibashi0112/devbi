@@ -319,3 +319,33 @@ export function apiParams(source: SourceRef): Record<string, string | number | b
   }
   return out;
 }
+
+export type ApiParamValue = string | number | boolean | null;
+
+/** The `read_api(...)` calls in a model SQL: the SQL file's name and the parameters, in order of appearance. */
+export function apiCalls(sql: string): { name: string; params: Record<string, ApiParamValue> }[] {
+  return scanSources(sql)
+    .filter((s) => s.format === "api")
+    .map((s) => ({ name: s.path, params: apiParams(s) }));
+}
+
+/** FNV-1a, 64 bits, as 16 hex digits: short and the same in the browser (no crypto.subtle on plain http) and Node. */
+function fnv1a64(text: string): string {
+  let h = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(text)) {
+    h ^= BigInt(byte);
+    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return h.toString(16).padStart(16, "0");
+}
+
+/**
+ * The file a snapshot of `read_api(name, params)` is saved in, in the `snapshots/` folder of the site:
+ * `orders.arrows` without parameters, `orders~<16 hex digits>.arrows` with them (the same parameters in any order
+ * give the same name). The contents are the API's answer, an Arrow IPC stream.
+ */
+export function snapshotFile(name: string, params: Record<string, ApiParamValue> = {}): string {
+  const keys = Object.keys(params).sort();
+  if (keys.length === 0) return `${name}.arrows`;
+  return `${name}~${fnv1a64(JSON.stringify(keys.map((k) => [k, params[k]])))}.arrows`;
+}

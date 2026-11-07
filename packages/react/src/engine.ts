@@ -1,6 +1,6 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
 import * as arrow from "apache-arrow";
-import { apiParams, hasUrlScheme, ident, readXlsx, scanSources, unquoteString, type MetricsView, type Row, type SourceRef, type XlsxTable } from "devbi";
+import { apiCalls, apiParams, hasUrlScheme, ident, readXlsx, scanSources, snapshotFile, unquoteString, type MetricsView, type Row, type SourceRef, type XlsxTable } from "devbi";
 
 export interface DuckDBBundle {
   /** URL of `duckdb-base.wasm`. */
@@ -25,7 +25,21 @@ export interface EngineOptions {
   apiUrl?: string;
   /** Used for the API requests instead of the global `fetch`: to add a header, for example. */
   fetch?: typeof fetch;
+  /**
+   * The API's SQL files read from a snapshot, with their times of day: `read_api('<name>', …)` reads
+   * `snapshots/<file>.arrows` under `baseUrl` (a static file, made by devbi-serve or devbi-snapshot).
+   */
+  snapshots?: Record<string, string[]>;
   debug?: boolean;
+}
+
+/** A snapshot a view read: which, when it was made, and its times of day. */
+export interface SnapshotInfo {
+  name: string;
+  file: string;
+  /** When the file was made (its Last-Modified). */
+  at: Date;
+  times: string[];
 }
 
 export interface QueryResult {
@@ -41,6 +55,8 @@ export interface Engine {
    * materialize the model as a table, and return SQL selecting from it.
    */
   loadView(view: MetricsView, api?: ApiOptions): Promise<string>;
+  /** The snapshots a view reads (none when it reads the API directly or files), once it has loaded. */
+  snapshotsOf(view: MetricsView, api?: ApiOptions): Promise<SnapshotInfo[]>;
   close(): Promise<void>;
 }
 
@@ -159,20 +175,38 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
   const defaultApi = apiFolder(options.apiUrl);
   const defaultFetch = options.fetch ?? fetch.bind(globalThis);
 
-  // Rows from the read-only API (api/<name>.sql on the server), as a table named `name`.
+  const snapshotTimes = options.snapshots ?? {};
+  const madeAt = new Map<string, Date>();
+
+  // Rows from the read-only API (api/<name>.sql on the server), as a table named `name`. A snapshot is a static
+  // file next to the data instead (the same Arrow as the API's answer).
   const loadApi = async (s: SourceRef, name: string, apiUrl: string, doFetch: typeof fetch) => {
-    const url = new URL("query", apiUrl).href;
-    const res = await doFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/vnd.apache.arrow.stream" },
-      body: JSON.stringify({ name: s.path, params: apiParams(s) }),
-    });
+    const params = apiParams(s);
+    const snapshot = Object.hasOwn(snapshotTimes, s.path) ? snapshotFile(s.path, params) : undefined;
+    const res = snapshot
+      ? await doFetch(new URL(`snapshots/${encodeURIComponent(snapshot)}`, base).href, { headers: { Accept: "application/vnd.apache.arrow.stream" } })
+      : await doFetch(new URL("query", apiUrl).href, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/vnd.apache.arrow.stream" },
+          body: JSON.stringify({ name: s.path, params }),
+        });
     if (!res.ok) {
       const error = await res
         .json()
         .then((b: { error?: string }) => b.error)
         .catch(() => undefined);
+      if (snapshot) {
+        throw new Error(
+          res.status === 404 && !error
+            ? `${s.path} のスナップショット（snapshots/${snapshot}）がまだありません。サーバーで devbi-snapshot を実行するか、devbi-serve が作るのを待ってください`
+            : `${s.path} のスナップショットを読めません（${res.status}）${error ? `: ${error}` : ""}`,
+        );
+      }
       throw new Error(`API の ${s.path} を読めません（${res.status}）${error ? `: ${error}` : ""}`);
+    }
+    if (snapshot) {
+      const modified = Date.parse(res.headers.get("Last-Modified") ?? "");
+      madeAt.set(snapshot, Number.isFinite(modified) ? new Date(modified) : new Date());
     }
     const table = arrow.tableFromIPC(new Uint8Array(await res.arrayBuffer()));
     if (table.numRows === 0) {
@@ -235,8 +269,18 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
     return `SELECT * FROM ${table}`;
   };
 
-  return {
+  const engine: Engine = {
     query,
+    async snapshotsOf(view, api) {
+      const used = apiCalls(view.model).filter((c) => Object.hasOwn(snapshotTimes, c.name));
+      if (used.length === 0) return [];
+      await engine.loadView(view, api);
+      return used.flatMap((c) => {
+        const file = snapshotFile(c.name, c.params);
+        const at = madeAt.get(file);
+        return at ? [{ name: c.name, file, at, times: snapshotTimes[c.name]! }] : [];
+      });
+    },
     loadView(view, api = {}) {
       // Once per view and API (and fetch): a view that reads no API is the same whichever API the dashboard uses.
       const apiUrl = api.apiUrl ? apiFolder(api.apiUrl) : defaultApi;
@@ -260,4 +304,5 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
       worker.terminate();
     },
   };
+  return engine;
 }
