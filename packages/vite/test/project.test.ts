@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readProject } from "../src/index.js";
 
 describe("readProject and read_api", () => {
@@ -82,5 +82,37 @@ describe("embed: true", () => {
 
   it("does nothing for the dev server", async () => {
     expect((await configure({ root: "/p" }, "serve")).build).toBeUndefined();
+  });
+
+  it("names listed entries by their path, so two index.html stay two", async () => {
+    const { build } = await configure({ root: "/p", build: { rolldownOptions: { input: ["/p/index.html", "admin/index.html"] } } });
+    expect(build.rolldownOptions.input).toEqual({ index: "/p/index.html", "admin/index": "admin/index.html", "devbi-embed": "virtual:devbi/embed" });
+  });
+
+  it("refuses an entry of the project's own named devbi-embed", async () => {
+    await expect(configure({ root: "/p", build: { rolldownOptions: { input: { "devbi-embed": "/p/x.html" } } } })).rejects.toThrow(/devbi-embed/);
+  });
+
+  it("names shared chunks without a leading _ (GitHub Pages leaves those files out)", async () => {
+    const { build } = await configure({ root: "/p" });
+    const o = build.rolldownOptions.output as unknown as { chunkFileNames: (c: { name: string }) => string };
+    expect(o.chunkFileNames({ name: "_virtual_devbi" })).toBe("assets/virtual_devbi-[hash].js");
+    expect(o.chunkFileNames({ name: "engine" })).toBe("assets/engine-[hash].js");
+  });
+
+  it('makes base "./" unless given, and warns about what stops the embed script from working', async () => {
+    expect(((await configure({ root: "/p" })) as unknown as { base: string }).base).toBe("./");
+    const user = { root: "/p", base: "/reports/", build: { cssCodeSplit: false, rolldownOptions: { preserveEntrySignatures: false } } };
+    const devbi = (await import("../src/index.js")).default;
+    const plugin = devbi({ embed: true });
+    (plugin.config as (u: unknown, e: { mode: string; command: string }) => unknown)(user, { mode: "production", command: "build" });
+    const warn = vi.fn();
+    (plugin.configResolved as (c: unknown) => void)({ root: "/p", command: "build", logger: { warn } });
+    const said = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(user.base).toBe("/reports/");
+    expect(user.build.rolldownOptions.preserveEntrySignatures).toBe("exports-only");
+    expect(said).toMatch(/preserveEntrySignatures/);
+    expect(said).toMatch(/cssCodeSplit/);
+    expect(said).toMatch(/base: "\/reports\/"/);
   });
 });

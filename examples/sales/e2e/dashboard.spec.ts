@@ -101,6 +101,9 @@ test("the page's own script stays small; charts, the table grid and the DuckDB e
   const html = await (await request.get("/")).text();
   const entry = /<script type="module"[^>]*src="\.\/assets\/([^"]+\.js)"/.exec(html)?.[1];
   expect(entry).toBeTruthy();
+  // What the page loads before anything else: its script and the files it imports (with embed: true, most of the
+  // code sits in a file shared with devbi-embed.js).
+  const first = [entry!, ...[...html.matchAll(/<link rel="modulepreload"[^>]*href="\.\/assets\/([^"]+\.js)"/g)].map((m) => m[1]!)];
   const scripts = new Map<string, number>();
   page.on("response", (r) => {
     const name = new URL(r.url()).pathname.split("/").pop() ?? "";
@@ -108,7 +111,10 @@ test("the page's own script stays small; charts, the table grid and the DuckDB e
   });
   await ready(page);
   await expect.poll(() => [entry!, ...[...scripts.keys()].filter((n) => /^(engine|PlotChart|GridTable)-/.test(n))].filter((n) => scripts.has(n)).length).toBe(4);
-  expect(scripts.get(entry!)).toBeLessThan(500_000);
+  await expect.poll(() => first.filter((n) => scripts.has(n)).length).toBe(first.length);
+  const size = first.reduce((sum, n) => sum + scripts.get(n)!, 0);
+  expect(size).toBeGreaterThan(100_000); // the shared file is in it
+  expect(size).toBeLessThan(500_000);
 });
 
 test("a chart file that cannot be fetched (the site was rebuilt) asks for a reload, in Japanese", async ({ page }) => {

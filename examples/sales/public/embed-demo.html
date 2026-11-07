@@ -6,7 +6,8 @@
     <title>販売管理システム（DevBI の埋め込みの例）</title>
     <!--
       DevBI の外の「既存の業務アプリ」のつもりのページです。このページの CSS（h1、td、ul などへの指定）は、
-      ダッシュボードの中には効きません。ダッシュボードを置くのに要るのは、下の div と script の 2 行だけです。
+      ダッシュボードの中には効きません（ID やクラスを前に付けた指定は届くことがあります）。
+      ダッシュボードを置くのに要るのは、下の div と script の 2 行だけです。
     -->
     <style>
       body { margin: 0; font-family: Georgia, "Times New Roman", serif; background: #e9edf2; color: #222; }
@@ -57,7 +58,7 @@
       const select = document.getElementById("report");
       for (const d of dashboards) select.add(new Option(d.title, d.name));
       select.value = document.getElementById("report-area").dataset.devbi;
-      select.addEventListener("change", () => mount("#report-area", { dashboard: select.value, theme: "light" }));
+      select.addEventListener("change", () => mount("#report-area", { dashboard: select.value }));
     </script>
   </body>
 </html>

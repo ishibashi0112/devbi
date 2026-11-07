@@ -12,7 +12,7 @@ import {
   type Row,
 } from "devbi";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { Engine } from "./engine.js";
+import type { ApiOptions, Engine } from "./engine.js";
 import { createEngine } from "./load-engine.js";
 import type { Project } from "./project.js";
 import { DashboardSelection } from "./selection.js";
@@ -29,31 +29,29 @@ export interface DevbiContextValue {
 const Ctx = createContext<DevbiContextValue | null>(null);
 
 const engines = new Map<string, Promise<Engine>>();
-const fetchIds = new WeakMap<typeof fetch, number>();
-let nextFetchId = 1;
-function fetchId(f: typeof fetch | undefined): number {
-  if (!f) return 0;
-  let id = fetchIds.get(f);
-  if (id === undefined) fetchIds.set(f, (id = nextFetchId++));
-  return id;
-}
 
-/** One engine per page and DuckDB bundle (and data, API and fetch), shared by every dashboard. */
+/**
+ * One engine per page and project (DuckDB bundle and data folder), shared by every dashboard. Each dashboard's
+ * API location and fetch go with its views (`loadView(view, { apiUrl, fetch })`), not with the engine.
+ */
 export function getEngine(project: Project): Promise<Engine> {
-  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.apiUrl ?? ""}|${project.extensionRepository ?? ""}|${fetchId(project.fetch)}`;
+  const key = `${project.duckdb.mainModule}|${project.baseUrl}|${project.extensionRepository ?? ""}`;
   let e = engines.get(key);
   if (!e) {
     e = createEngine({
       bundle: project.duckdb,
       baseUrl: project.baseUrl,
-      ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}),
-      ...(project.fetch ? { fetch: project.fetch } : {}),
       ...(project.extensionRepository ? { extensionRepository: project.extensionRepository } : {}),
     });
     engines.set(key, e);
     e.catch(() => engines.delete(key));
   }
   return e;
+}
+
+/** The dashboard's API location and fetch, for `engine.loadView`. */
+function apiOf(project: Project): ApiOptions {
+  return { ...(project.apiUrl ? { apiUrl: project.apiUrl } : {}), ...(project.fetch ? { fetch: project.fetch } : {}) };
 }
 
 export function DevbiProvider({
@@ -139,7 +137,7 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
     (async () => {
       const view = ctx.view(query.metrics);
       const engine = await ctx.engine;
-      const model = await engine.loadView(view);
+      const model = await engine.loadView(view, apiOf(ctx.project));
       const { sql, fields } = compileQuery(view, query, { filters, model });
       const { rows } = await engine.query(sql);
       if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null });
@@ -160,7 +158,7 @@ export function useTimeExtent(metrics?: string): { min: Date | null; max: Date |
     (async () => {
       const view = ctx.view(metrics);
       const engine = await ctx.engine;
-      const model = await engine.loadView(view);
+      const model = await engine.loadView(view, apiOf(ctx.project));
       const { rows } = await engine.query(compileTimeExtent(view, { model }));
       const r = rows[0] ?? {};
       if (live) setState({ min: (r.min as Date) ?? null, max: (r.max as Date) ?? null, error: null });

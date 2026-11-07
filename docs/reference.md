@@ -368,7 +368,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | --- | --- |
 | `dir` | `dashboards/`、`models/`、`data/` のあるフォルダ。Vite の root からの相対パス。既定は root |
 | `extensionRepository` | DuckDB の拡張（Parquet）を取りに行く URL。社内のサーバーに置いた拡張を使うとき |
-| `embed` | `true` で、ビルドのときに `devbi-embed.js` も作る（[ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)）。既定は `false` |
+| `embed` | `true` で、ビルドのときに `devbi-embed.js` も作る（[ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)）。`base` を書いていなければ `"./"` にする。既定は `false` |
 
 - `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
 - 開発サーバーでは、dash.json・metrics.yaml・data/ のファイルを保存するとページを読み込み直します。
@@ -516,7 +516,9 @@ export default { base: "./", plugins: [react(), devbi({ embed: true })] };
 
 - `pnpm build` で、`dist/` に `devbi-embed.js` ができます。名前は毎回同じです。
 - `dist/` を丸ごと、アプリから配れる場所（例: `/Scripts/devbi/`）に置きます。
-- データ（`data/`）、エンジン（`assets/`）、API は、`devbi-embed.js` のある場所を基準に探します。そのため `base: "./"` にしておきます。
+- データ（`data/`）、エンジン（`assets/`）、API は、`devbi-embed.js` のある場所を基準に探します。
+- `base` は `"./"` にします（`embed: true` で `base` を書いていなければ `"./"` になります）。`base: "/reports/"` のように `/` で始めると、サイトを同じサーバーの `/reports/` に置いたときしか動かないので、ビルドで警告を出します。`https://…` で始まる URL ならどこからでも動きます。
+- ほかに、ビルドで警告を出すもの: `build.cssCodeSplit: false`（表の CSS が埋め込みに付かない）、`preserveEntrySignatures: false`（`"exports-only"` に直す）。入口（`build.rolldownOptions.input`）に `devbi-embed` という名前があるとエラーです。
 - 開発サーバー（`pnpm dev`）では作られません。試すときは、ビルドして `devbi-serve` か `vite preview` で開きます。サンプルの `examples/sales/public/embed-demo.html` がその例です。
 
 ### 2. 画面に 2 行を足す
@@ -530,31 +532,31 @@ export default { base: "./", plugins: [react(), devbi({ embed: true })] };
 | --- | --- |
 | `data-devbi` | ダッシュボードの名前（`dashboards/<名前>.dash.json`）。ダッシュボードが 1 つだけなら空でよい |
 | `data-devbi-theme` | `light`、`dark`、`auto`（既定。OS の設定に合わせる）。明るい画面に置くときは `light` |
-| `data-devbi-api` | 読み取り API の場所（`read_api` を使うとき）。既定は `devbi-embed.js` と同じ場所の `api/`。アプリに API を足したときは、その場所（例: `/MyApp/devbi/api/`） |
+| `data-devbi-api` | 読み取り API の場所（`read_api` を使うとき）。既定は `devbi-embed.js` と同じ場所の `api/`。アプリに API を足したときは、その場所（例: `/MyApp/devbi/api/`）。相対パス（`api2/`）は、ページではなく `devbi-embed.js` のある場所からです。ページとも `devbi-embed.js` とも違うサーバーは使いません（要るときは JavaScript の `mount` に `apiUrl` で渡します） |
 
 - `<script type="module">` は、ページを読み終わってから動きます。`<head>` に書いても、div より前に書いてもかまいません。
-- 1 つのページに、いくつでも置けます。DuckDB のエンジンはページに 1 つで、共有します。
-- 幅は置いた場所いっぱいです。高さはタイルの並びで決まり、スクロールはページのものです。
-- ダッシュボードの中には、ページの CSS のうち要素の名前だけの指定（`h1 { … }`、`td { … }`、`header { … }` など）は効きません。ID やクラスを使った強い指定（`#main h1 { … }`）は、効くことがあります。
-- ページと同じオリジン（同じサーバーとポート）から配ってください。ほかのオリジンに置くと、ブラウザが DuckDB のファイルや API を読ませません。
+- 1 つのページに、いくつでも置けます。DuckDB のエンジンは `devbi-embed.js` 1 本につき 1 つで、API の場所が違うダッシュボードも同じエンジンを使います。
+- 幅は置いた場所いっぱいです。高さはタイルの並びで決まり、スクロールはページのものです。置いた場所の幅が 720px より狭いと、スマートフォンと同じようにタイルを 1 列に並べます（画面の幅ではなく、ダッシュボードの幅で決めます）。
+- ページの CSS のうち、要素の名前だけの指定（`h1 { … }`、`td { … }`、`ul { … }`、`button { … }` など）は、ダッシュボードの中ではブラウザの既定に戻します。文字の揃えや字間など、ページから引き継ぐ指定も戻します。ID やクラスを前に付けた指定（`#main td { … }`、`.content h2 { … }`）はそれより強いので、届くことがあります。そのときはページの CSS の側で、`[data-devbi]` の中を外してください。`div`、`span`、`svg`、`img` への指定は戻しません。
+- 同じページに、ほかのプロジェクトの `devbi-embed.js` があってもかまいません。それぞれ自分の持っているダッシュボードだけを出し、どれも持っていない名前のときだけ「ダッシュボード … がありません」を出します。同じ `devbi-embed.js` を 2 回読み込んでも（URL の `?v=…` 違いなど）、出したものはそのままです。
 
 ### 3. JavaScript から使う
 
 ```html
 <script type="module">
   import { dashboards, mount } from "/Scripts/devbi/devbi-embed.js";
-  mount("#report", { dashboard: "sales", theme: "light" });
+  mount("#report", { dashboard: "sales" });
 </script>
 ```
 
-同じものが `window.DevBI` にも入ります。読み込みが終わると、`window` に `devbi:ready` イベントが出ます。
+同じものが `window.DevBI` にも入ります。`devbi-embed.js` が動き始めると（`window.DevBI` ができると）、`window` に `devbi:ready` イベントが出ます。ダッシュボードのデータを読み終わったという意味ではありません。あとから動くスクリプトでは、先に `window.DevBI` があるかを見てください。
 
 | 名前 | 中身 |
 | --- | --- |
 | `dashboards` | ダッシュボードの一覧（`name`、`title`、`description`）。画面のメニューを作るとき |
-| `mount(要素かセレクタ, { dashboard?, theme?, apiUrl?, fetch? })` | ダッシュボードを出す。同じ要素にもう一度呼ぶと切り替わる。`fetch` は API を呼ぶときに使う関数（ヘッダーを足すとき） |
-| `mountAll(root?)` | `data-devbi` の付いた要素のうち、まだ出していないものに出す。ページから消えた要素のものは片付ける。戻り値は新しく出した数 |
-| `unmount(要素かセレクタ)` | ダッシュボードを消す |
+| `mount(要素かセレクタ, { dashboard?, theme?, apiUrl?, fetch? })` | ダッシュボードを出す。書かなかったものは要素の `data-devbi…` 属性から取る。同じ要素にもう一度呼ぶと切り替わる（ダッシュボード・API・`fetch` が変わると最初から、`theme` だけなら絞り込みはそのまま）。戻り値の `unmount()` は、そのあと同じ要素に `mount` し直していたら何もしない。`fetch` は API を呼ぶときに使う関数（ヘッダーを足すとき） |
+| `mountAll(root?)` | `data-devbi` の付いた要素のうち、まだ出していないものに出す。ページから消えた要素のものは片付ける。`unmount` で消した要素には出さない。戻り値は新しく出した数 |
+| `unmount(要素かセレクタ)` | ダッシュボードを消す（ページのどの `devbi-embed.js` が出したものでも）。もう一度出すときは `mount` |
 
 ASP.NET の UpdatePanel のように画面の一部を入れ替えるページでは、入れ替えのあとに `mountAll()` を呼びます。
 
@@ -572,9 +574,31 @@ Sys.WebForms.PageRequestManager.getInstance().add_endRequest(() => window.DevBI?
 mount("#report", { dashboard: "sales", fetch: (url, init) => fetch(url, { ...init, headers: { ...init?.headers, "X-CSRF-Token": token } }) });
 ```
 
+### 5. サーバーの設定
+
+- `dist/` は、ページと同じオリジン（スキーム・ホスト・ポートが同じ）から配るのがかんたんです。ほかのオリジンから配るときは、そのサーバーがすべてのファイルに CORS のヘッダー（`Access-Control-Allow-Origin`）を付ける必要があります。API がほかのオリジンにあるときは、API にも CORS が要り、Cookie は送られません。
+- IIS は `.wasm` を配らないことがあります。`dist/` に `web.config` を置いて足します。
+
+```xml
+<configuration>
+  <system.webServer>
+    <staticContent>
+      <remove fileExtension=".wasm" />
+      <mimeMap fileExtension=".wasm" mimeType="application/wasm" />
+    </staticContent>
+  </system.webServer>
+</configuration>
+```
+
+- ページに Content Security Policy があるときは、次を許します: `script-src` に DevBI の場所と `'wasm-unsafe-eval'`（DuckDB の WebAssembly）、`style-src` に `'unsafe-inline'`（DevBI とグラフが `<style>` を足す）、`worker-src` に DevBI の場所（ほかのオリジンから配るときは `blob:`）、`connect-src` に DevBI の場所と API の場所。
+
+### 色を変える
+
+[CSS 変数](#見た目の変更css-変数)は、ページの CSS に書きます（`devbi-embed.js` は、DevBI のアプリの `app.css` などを読みません）。DevBI の CSS はページの `<head>` のいちばん前に入るので、同じセレクタで書けばページの CSS が勝ちます。
+
 ### React のアプリに置く
 
-DevBI の Vite プラグインを入れた React 19 のアプリでは、部品として置けます。
+DevBI の Vite プラグインを入れた React 19 のアプリでは、部品として置けます。`project` は 1 回だけ作って、毎回同じものを渡します（別のものを渡すと、ダッシュボードが最初からになります）。
 
 ```tsx
 import { Dashboard, loadProject } from "@devbi/react";
@@ -584,15 +608,17 @@ const project = loadProject(input);
 <Dashboard project={project} name="sales" theme="light" />
 ```
 
-ほかの React のアプリ（Vite でない、React 18 など）では、`devbi-embed.js` を使います。DevBI は自分の React で動くので、アプリの React の版は関係ありません。
+ほかの React のアプリ（Vite でない、React 18 など）では、`devbi-embed.js` を使います。DevBI は自分の React で動くので、アプリの React の版は関係ありません。URL は変数にして `import()` に渡します（文字列をそのまま書くと、TypeScript やバンドラーがそのファイルを探しに行きます）。
 
 ```tsx
+const DEVBI = "/Scripts/devbi/devbi-embed.js";
+
 function DevbiDashboard({ name }: { name: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let alive = true;
     let unmount = () => {};
-    import(/* @vite-ignore */ /* webpackIgnore: true */ "/Scripts/devbi/devbi-embed.js").then((devbi) => {
+    import(/* @vite-ignore */ /* webpackIgnore: true */ DEVBI).then((devbi) => {
       if (alive && ref.current) unmount = devbi.mount(ref.current, { dashboard: name, theme: "light" }).unmount;
     });
     return () => {
@@ -609,19 +635,19 @@ function DevbiDashboard({ name }: { name: string }) {
 | 名前 | 中身 |
 | --- | --- |
 | `<DevbiApp project={…} theme? />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す |
-| `<Dashboard project={…} name="sales" back?="#/" theme? />` | ダッシュボード 1 つ。`project` は `loadProject()` の戻り値。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"` |
+| `<Dashboard project={…} name="sales" back?="#/" theme? />` | ダッシュボード 1 つ。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。幅が 720px より狭いとタイルを 1 列に並べる |
 | `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
-| `startEmbed(input)` | `devbi-embed.js` の中身。`data-devbi` の要素に出し、`window.DevBI` を作る。ふつうは `@devbi/vite` の `embed` が使う |
+| `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
 | `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ |
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
-| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
+| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view, { apiUrl?, fetch? })` を持つ（`loadView` に渡すと、そのビューだけほかの API から読む。同じエンジンで、API ごとに別の表になる）。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
 | `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない） |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |
 
-DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを切り替えても使い回します。同じ SQL の結果はページを開いている間キャッシュします。
+DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを切り替えても、API の場所が違うダッシュボードを並べても使い回します。同じ SQL の結果はページを開いている間キャッシュします。
 
 ## devbi（コア）
 
@@ -657,7 +683,9 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 .devbi-root[data-theme="dark"] { --devbi-accent: #4fd1c0; }
 ```
 
-ライト / ダークは、ふつうは OS の設定に合わせます。`.devbi-root` の `data-theme` が `"light"` ならいつもライト、`"dark"` ならいつもダークです（`<Dashboard theme>` や埋め込みの `data-devbi-theme` で付きます）。
+ライト / ダークは、ふつうは OS の設定に合わせます。`.devbi-root` の `data-theme` が `"light"` ならいつもライト、`"dark"` ならいつもダークです（`<Dashboard theme>` や埋め込みの `data-devbi-theme` で付きます）。日付の入力などのブラウザの部品も、`color-scheme` で同じ側に合わせます。
+
+`.devbi-root` の中の `h1`、`td`、`ul`、`button` などは、ページの CSS の要素の名前だけの指定を受けず、ブラウザの既定から始まります（[埋め込み](#2-画面に-2-行を足す)のため）。自作タイルの CSS も、要素の名前だけでなくクラスを付けて書いてください（`.my-tile td { … }`）。幅が 720px より狭いダッシュボードには `data-devbi-narrow` が付き、タイルが 1 列になります。
 
 | 変数 | 使い道 | ライト / ダークの既定 |
 | --- | --- | --- |

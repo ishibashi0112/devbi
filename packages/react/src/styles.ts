@@ -29,24 +29,39 @@ export const css = `
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  /* What the page around would pass down (body { text-align: center; letter-spacing: … }), as on a page with no styles. */
+  font-style: normal;
+  font-weight: 400;
+  font-variant: normal;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-align: start;
+  text-indent: 0;
+  text-transform: none;
+  text-shadow: none;
+  white-space: normal;
+  list-style: disc outside none;
+  color-scheme: light;
   min-height: 100%;
   box-sizing: border-box;
 }
 @media (prefers-color-scheme: dark) {
-  .devbi-root:not([data-theme="light"]) {${DARK}  }
+  .devbi-root:not([data-theme="light"]) {${DARK}  color-scheme: dark;
+  }
 }
 .devbi-root[data-theme="dark"] {${DARK}  color-scheme: dark;
 }
 .devbi-root[data-theme="light"] { color-scheme: light; }
-/* Inside another app's page, its styles for plain elements (header { … }, h1 { … }, td { … }) stay out of the
-   dashboard. Under .devbi-root with :where(), so DevBI's own rules (later, as or more specific) still apply. */
-.devbi-root :where(header, footer, nav, main, section, article, aside, figure, figcaption, form, fieldset, h1, h2, h3, h4, h5, h6,
-  p, ul, ol, li, dl, dt, dd, table, caption, thead, tbody, tfoot, tr, th, td, button, input, select, textarea, label, a, small,
-  strong, b, code, pre, blockquote) {
-  font-family: inherit; color: inherit; letter-spacing: normal; text-transform: none; text-shadow: none;
-  background: none; border: 0; border-radius: 0; box-shadow: none; float: none;
+/* Inside another app's page, that page's rules for plain elements (h1 { … }, td { … }, ul { … }, button { … }) stay out:
+   these elements start again from the browser's defaults (all: revert). With :where(), only .devbi-root counts, and it
+   comes before DevBI's rules, so those (and the table's) still apply. Rules with a class or id of the page in front
+   (#main td { … }) are more specific and can still reach in. Not div, span, svg and img: their attributes (width="…")
+   would be reverted too, and pages rarely style bare div and span. */
+.devbi-root :where(header, footer, nav, main, section, article, aside, figure, figcaption, form, fieldset, legend,
+  h1, h2, h3, h4, h5, h6, p, ul, ol, li, dl, dt, dd, table, caption, thead, tbody, tfoot, tr, th, td,
+  button, input, select, textarea, label, a, small, strong, b, i, em, code, pre, blockquote, hr) {
+  all: revert;
 }
-.devbi-root :where(h1, h2, h3, h4, h5, h6) { line-height: 1.3; font-style: normal; }
 .devbi-root *, .devbi-root *::before, .devbi-root *::after { box-sizing: inherit; }
 .devbi-root button { font: inherit; color: inherit; }
 .devbi-dashboard { padding: 16px 20px 32px; max-width: 1600px; margin: 0 auto; }
@@ -152,11 +167,12 @@ export const css = `
 .devbi-index small { display: block; color: var(--devbi-muted); }
 .devbi-back { color: var(--devbi-accent); text-decoration: none; font-size: 13px; }
 .devbi-root :focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 2px; }
-@media (max-width: 720px) {
-  .devbi-dashboard { padding: 12px 16px 24px; }
-  .devbi-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
-  .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
-}
+/* Narrow: by the dashboard's own width (data-devbi-narrow, set by <Dashboard>), so a dashboard in a narrow part of
+   another app's page is laid out in one column too. Not a container query: that would make a dashboard in a table
+   cell or inline-block of the page 0 wide. */
+.devbi-root[data-devbi-narrow] .devbi-dashboard { padding: 12px 16px 24px; }
+.devbi-root[data-devbi-narrow] .devbi-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+.devbi-root[data-devbi-narrow] .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
 `;
 
 let injected = false;

@@ -3,7 +3,7 @@ import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources } from "devbi";
-import { loadEnv, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type UserConfig, type ViteDevServer } from "vite";
+import { loadEnv, version as viteVersion, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type UserConfig, type ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
 import { generate } from "./gen.js";
 
@@ -31,16 +31,25 @@ const RESOLVED_EMBED = "\0virtual:devbi/embed";
 /** The embed script's entry name, and its file in the output folder (always this name, so pages can point at it). */
 const EMBED_NAME = "devbi-embed";
 
-type EntryFileNames = string | ((chunk: { name: string }) => string) | undefined;
-type BuildInputs = { input?: string | string[] | Record<string, string>; preserveEntrySignatures?: unknown; output?: { entryFileNames?: EntryFileNames } | { entryFileNames?: EntryFileNames }[] };
+type FileNames = string | ((chunk: { name: string }) => string) | undefined;
+type Output = { entryFileNames?: FileNames; chunkFileNames?: FileNames };
+type BuildInputs = { input?: string | string[] | Record<string, string>; preserveEntrySignatures?: unknown; output?: Output | Output[] };
 
-/** Add the embed script to a build's entries, keeping the page (index.html) and any entries already given. */
-function addEmbedEntry(user: UserConfig, root: string): void {
+/**
+ * Add the embed script to a build's entries, keeping the page (index.html) and any entries already given.
+ * Returns warnings for the log (the config hook has no logger yet).
+ */
+function addEmbedEntry(user: UserConfig, root: string): string[] {
+  const warnings: string[] = [];
   const build = (user.build ??= {});
-  const key = build.rolldownOptions || !build.rollupOptions ? "rolldownOptions" : "rollupOptions";
+  // Vite 8 bundles with Rolldown (build.rollupOptions is its old name); Vite 7 with Rollup.
+  const rolldown = Number(viteVersion.split(".")[0]) >= 8;
+  const key = rolldown && (build.rolldownOptions || !build.rollupOptions) ? "rolldownOptions" : "rollupOptions";
   const options = ((build as Record<string, unknown>)[key] ??= {}) as BuildInputs;
   const given = options.input;
   const html = path.join(root, "index.html");
+  // Entries from a list are named by their path (admin/index.html → admin/index), so two index.html stay two.
+  const nameOf = (file: string) => posix(path.relative(root, path.resolve(root, file))).replace(/\.[^./]+$/, "").replace(/^(\.\.\/)+/, "");
   const inputs: Record<string, string> =
     given === undefined
       ? existsSync(html)
@@ -49,17 +58,43 @@ function addEmbedEntry(user: UserConfig, root: string): void {
       : typeof given === "string"
         ? { index: given }
         : Array.isArray(given)
-          ? Object.fromEntries(given.map((g) => [path.basename(g).replace(/\.[^.]+$/, ""), g]))
+          ? Object.fromEntries(given.map((g) => [nameOf(g), g]))
           : { ...given };
+  if (Object.hasOwn(inputs, EMBED_NAME)) {
+    throw new Error(`devbi: embed: true のときは、build の入口に ${EMBED_NAME} という名前を使えません（埋め込み用のスクリプトの名前です）`);
+  }
   inputs[EMBED_NAME] = EMBED;
   options.input = inputs;
   // Vite drops an app's entry exports; the embed script keeps its own (import { mount } from ".../devbi-embed.js").
+  if (options.preserveEntrySignatures === false) {
+    warnings.push(`build.${key}.preserveEntrySignatures: false は、埋め込み用のスクリプトの export が消えるので "exports-only" にしました`);
+    options.preserveEntrySignatures = "exports-only";
+  }
   options.preserveEntrySignatures ??= "exports-only";
   const assets = build.assetsDir ?? "assets";
-  const named = (orig: EntryFileNames) => (chunk: { name: string }) =>
+  const entryNamed = (orig: FileNames) => (chunk: { name: string }) =>
     chunk.name === EMBED_NAME ? `${EMBED_NAME}.js` : typeof orig === "function" ? orig(chunk) : (orig ?? `${assets}/[name]-[hash].js`);
+  // The code the page and the embed script share is a chunk named after virtual:devbi ("_virtual_devbi"); a file
+  // starting with "_" is left out by GitHub Pages (Jekyll).
+  const chunkNamed = (chunk: { name: string }) => `${assets}/${chunk.name.replace(/^_+/, "") || "chunk"}-[hash].js`;
   const outputs = options.output === undefined ? [(options.output = {})] : Array.isArray(options.output) ? options.output : [options.output];
-  for (const o of outputs) o.entryFileNames = named(o.entryFileNames);
+  for (const o of outputs) {
+    o.entryFileNames = entryNamed(o.entryFileNames);
+    o.chunkFileNames ??= chunkNamed;
+  }
+  // The table's CSS comes with its code; with one CSS file for the whole site, only index.html links it.
+  if (build.cssCodeSplit === false) {
+    warnings.push("build.cssCodeSplit: false だと、埋め込んだダッシュボードに表（spreadsheet-grid）の CSS が付きません");
+  }
+  // The embed script loads the rest by paths from base: "/reports/" works only from pages on the server where the
+  // site is at /reports/. "./" (the default here) or a full URL work from any page.
+  if (user.base === undefined) user.base = "./";
+  else if (user.base.startsWith("/")) {
+    warnings.push(
+      `base: ${JSON.stringify(user.base)} だと、devbi-embed.js はサイトを同じサーバーの ${user.base} に置いたページからしか動きません（ほかのサーバーのページに埋め込むなら base: "./" にしてください）`,
+    );
+  }
+  return warnings;
 }
 
 interface ProjectFiles {
@@ -182,6 +217,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   let dir = "";
   let relDir = "";
   let lastData: string[] = [];
+  let embedWarnings: string[] = [];
 
   /**
    * The read-only API (api/*.sql) for the dev and preview servers, the same one devbi-serve runs. Connection URLs
@@ -219,11 +255,12 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
           return [...new Set([file, realPath(file)])].map((f) => posix(f).replace(/[*?{}()[\]!+@]/g, "\\$&"));
         });
       const deny = [...(user.server?.fs?.deny ? [] : VITE_DENY), ...SERVER_ONLY, ...sqliteFiles];
-      if (options.embed && command === "build" && !user.build?.ssr && !user.build?.lib) addEmbedEntry(user, root);
+      if (options.embed && command === "build" && !user.build?.ssr && !user.build?.lib) embedWarnings = addEmbedEntry(user, root);
       return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"] }, server: { fs: { deny } } };
     },
     configResolved(c) {
       config = c;
+      for (const w of embedWarnings) c.logger.warn(`devbi: ${w}`);
       dir = path.resolve(c.root, options.dir ?? ".");
       relDir = posix(path.relative(c.root, dir));
       if (relDir.startsWith("..")) throw new Error(`devbi: dir はVite の root の中にしてください: ${dir}`);

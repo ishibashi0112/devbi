@@ -72,6 +72,23 @@ function tileStyle(t: TileSpec, rowHeight: number): CSSProperties {
   };
 }
 
+/** Below this width (of the dashboard, not the window) the tiles go in one column. */
+export const NARROW_WIDTH = 720;
+
+/** A ref that sets `data-devbi-narrow` on the element while it is narrower than NARROW_WIDTH (before paint). */
+function narrowRef(el: HTMLElement | null): (() => void) | undefined {
+  if (!el) return;
+  const update = (width: number) => el.toggleAttribute("data-devbi-narrow", width < NARROW_WIDTH);
+  update(el.getBoundingClientRect().width);
+  if (typeof ResizeObserver === "undefined") return;
+  const observer = new ResizeObserver((entries) => {
+    const entry = entries[entries.length - 1];
+    if (entry) update(entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width);
+  });
+  observer.observe(el);
+  return () => observer.disconnect();
+}
+
 /** Light or dark: `auto` follows the OS setting. Inside another app, `light` keeps the dashboard light like the page. */
 export type Theme = "auto" | "light" | "dark";
 
@@ -80,7 +97,17 @@ export function themeAttribute(theme: Theme | undefined): { "data-theme"?: "ligh
   return theme === "light" || theme === "dark" ? { "data-theme": theme } : {};
 }
 
-/** Render one dashboard of a project. */
+const projectIds = new WeakMap<Project, number>();
+let nextProjectId = 1;
+
+/** Another project object starts the dashboard fresh (selections and tile state), not half updated. */
+function projectKey(project: Project): number {
+  let id = projectIds.get(project);
+  if (id === undefined) projectIds.set(project, (id = nextProjectId++));
+  return id;
+}
+
+/** Render one dashboard of a project. Pass the same project object each time (it is `loadProject()`'s result). */
 export function Dashboard({ project, name, back, theme }: { project: Project; name: string; back?: string; theme?: Theme }) {
   useInsertionEffect(injectStyles, []);
   const dashboard = Object.hasOwn(project.dashboards, name) ? project.dashboards[name] : undefined;
@@ -94,8 +121,8 @@ export function Dashboard({ project, name, back, theme }: { project: Project; na
   }
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   return (
-    <DevbiProvider project={project} dashboard={dashboard}>
-      <div className="devbi-root" {...themeAttribute(theme)}>
+    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard}>
+      <div className="devbi-root" ref={narrowRef} {...themeAttribute(theme)}>
         <div className="devbi-dashboard">
           {back && (
             <a className="devbi-back" href={back}>
