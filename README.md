@@ -15,7 +15,7 @@ pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（Duck
 pnpm e2e              # examples/sales を静的ビルドして Playwright で確認
 ```
 
-画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。
+画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。
 
 e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on the web に入っている Chromium と同じ版）。別のブラウザで動かすときは `E2E_BROWSER_EXECUTABLE` に実行ファイルのパスを渡します。
 
