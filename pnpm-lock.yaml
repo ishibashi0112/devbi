@@ -76,6 +76,9 @@ importers:
       '@duckdb/duckdb-wasm':
         specifier: 1.33.1-dev114.0
         version: 1.33.1-dev114.0
+      '@ishibashi0112/spreadsheet-grid':
+        specifier: ^0.61.0
+        version: 0.61.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@observablehq/plot':
         specifier: ^0.6.19
         version: 0.6.19
@@ -334,6 +337,17 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@ishibashi0112/spreadsheet-grid-core@0.61.0':
+    resolution: {integrity: sha512-lcoXf2dPUheh7dKoQvMXPuKBw4keOhEQF7xEAST7djJSwd70qrwz4C0xRq1CFr8klo5dOQQJN7pIFCrlAC680A==}
+    engines: {node: '>=18'}
+
+  '@ishibashi0112/spreadsheet-grid@0.61.0':
+    resolution: {integrity: sha512-IOOLETuEmtJb2wlUV5L8YRt6meXYjq8RzI/KZj0cQU+rBVonGLmjPlyspVlHLvY0MQ47Y/6KgKSSRU15HceQag==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: ^18.3.0 || ^19.0.0
+      react-dom: ^18.3.0 || ^19.0.0
+
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
 
@@ -584,6 +598,9 @@ packages:
 
   '@swc/helpers@0.5.24':
     resolution: {integrity: sha512-6tcXo4kA8HgGO7AVmawB57RYi/piBPYVHVcO6dXjX+SZw8GoHmi262sp4v2Ha2kNP9Cx84qei27yT+fjS1lxgg==}
+
+  '@tanstack/virtual-core@3.19.11':
+    resolution: {integrity: sha512-/5iHb0RHBvj8Di59FDs4ESNm45jls33aZAi4zccVXZjc/6ZvwQP6nzEYeT6weXjTf9E6/vrp2JhYWRyO+ZP13A==}
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -1552,6 +1569,15 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
+  '@ishibashi0112/spreadsheet-grid-core@0.61.0': {}
+
+  '@ishibashi0112/spreadsheet-grid@0.61.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+    dependencies:
+      '@ishibashi0112/spreadsheet-grid-core': 0.61.0
+      '@tanstack/virtual-core': 3.19.11
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
@@ -1704,6 +1730,8 @@ snapshots:
     optional: true
 
   '@swc/helpers@0.5.24': {}
+
+  '@tanstack/virtual-core@3.19.11': {}
 
   '@types/chai@5.2.3':
     dependencies:

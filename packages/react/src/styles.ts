@@ -90,6 +90,18 @@ export const css = `
 .devbi-table tbody tr { cursor: pointer; }
 .devbi-table tbody tr:hover { background: var(--devbi-accent-soft); }
 .devbi-table tr.devbi-selected { background: var(--devbi-accent-soft); }
+.devbi-tile-table .devbi-tile-body { padding: 4px 0 0; overflow: hidden; }
+.devbi-grid-wrap { height: 100%; }
+.devbi-root .devbi-grid {
+  --ssg-cell-bg: var(--devbi-card); --ssg-header-bg: var(--devbi-card); --ssg-readonly-bg: var(--devbi-card);
+  --ssg-cell-text: var(--devbi-text); --ssg-readonly-text: var(--devbi-text); --ssg-header-text: var(--devbi-muted);
+  --ssg-accent: var(--devbi-accent); --ssg-line: var(--devbi-border); --ssg-line-strong: var(--devbi-border); --ssg-divider: var(--devbi-border);
+  font-variant-numeric: tabular-nums;
+}
+.devbi-grid .ssg-body-cell { cursor: pointer; }
+.devbi-grid .devbi-dimmed { opacity: 1; }
+.devbi-grid .ssg-body-cell.devbi-dimmed { opacity: 0.45; }
+.devbi-grid .ssg-body-cell.devbi-selected { background: var(--devbi-accent-soft); }
 .devbi-pivot tbody th { font-weight: 500; }
 .devbi-pivot tbody td { cursor: pointer; }
 .devbi-pivot .devbi-total, .devbi-pivot tfoot th { font-weight: 650; }

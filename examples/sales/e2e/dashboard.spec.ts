@@ -70,8 +70,9 @@ test("clicking a month bar selects that month", async ({ page }) => {
 test("the category list and the promoted JSX tile filter like built-in tiles", async ({ page }) => {
   await ready(page);
   await tile(page, "category").getByLabel("保守").check();
-  await expect(tile(page, "products").locator("tbody tr")).toHaveCount(2);
-  await expect(tile(page, "products").locator("tbody")).not.toContainText("部品");
+  const productRows = tile(page, "products").getByRole("row").filter({ has: page.getByRole("gridcell") });
+  await expect(productRows).toHaveCount(2);
+  await expect(tile(page, "products").getByRole("grid")).not.toContainText("部品");
 
   const first = tile(page, "top-customers").locator("ol button").first();
   await first.click();
@@ -114,4 +115,25 @@ test("a chart file that cannot be fetched (the site was rebuilt) asks for a relo
   await expect(tile(page, "monthly").locator(".devbi-error")).toContainText("ページを読み込み直してください");
   // Tiles that do not need the chart file still work.
   await expect(kpi(page, "kpi-revenue")).toHaveText(/^¥[\d,]+$/);
+});
+
+test("the table tile (spreadsheet-grid): clicking a row filters the other tiles, the column menu sorts", async ({ page }) => {
+  await ready(page);
+  const products = tile(page, "products");
+  const before = await kpi(page, "kpi-revenue").innerText();
+  await products.getByRole("gridcell", { name: "ノギス" }).click();
+  await expect(page.locator(".devbi-filters")).toContainText("商品: ノギス");
+  await expect(kpi(page, "kpi-revenue")).not.toHaveText(before);
+  // The table itself is not filtered: the other rows stay, dimmed.
+  await expect(products.getByRole("gridcell", { name: "グリス" })).toHaveClass(/devbi-dimmed/);
+  await products.getByRole("gridcell", { name: "ノギス" }).click();
+  await expect(page.locator(".devbi-chip")).toHaveCount(1); // only the period is left
+
+  const header = products.getByRole("columnheader", { name: /数量/ });
+  await header.hover();
+  await header.getByRole("button", { name: "列メニュー" }).click();
+  await page.getByText("昇順で並び替え").click();
+  const quantities = await products.locator('[role=gridcell][data-ssg-col-key="quantity"]').allInnerTexts();
+  const numbers = quantities.map((q) => Number(q.replaceAll(",", "")));
+  expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
 });

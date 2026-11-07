@@ -102,5 +102,5 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 ## handoff.md からの変更点
 
 - 指標 → SQL は mosaic-sql ではなく自前の文字列組み立てにしました。モデルと指標の SQL が利用者の書いた生の SQL で、比較指標では期間をずらした集計を結合するため。mosaic-core は選択（クロスフィルタ）の管理に使っています。
-- 表タイルは spreadsheet-grid ではなく簡単な HTML の表です（このセッションから spreadsheet-grid のリポジトリを読めなかったため）。差し替えは後で。
+- 表タイルは [spreadsheet-grid](https://github.com/ishibashi0112/datasheet-grid)（`@ishibashi0112/spreadsheet-grid` の `/lite`）で、読み取り専用にしています。並べ替えは列メニューから、行のクリックでほかのタイルを絞り込みます。
 - ピボットは Perspective を使わず、合計行・合計列つきの自前の表にしました。

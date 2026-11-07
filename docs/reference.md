@@ -223,7 +223,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `line` | 折れ線 | `bar` と同じ | | 点でその値を選ぶ |
 | `area` | 積み上げ面グラフ | `bar` と同じ（系列は大きい順に積む） | | その値を選ぶ |
 | `barlist` | 横棒のランキング | 最初の軸を最初の指標で | | 行でその値を選ぶ |
-| `table` | 表 | すべての列。見出しで並べ替え | | 行でその行の軸の値を選ぶ |
+| `table` | 表（[spreadsheet-grid](https://github.com/ishibashi0112/datasheet-grid)、読み取り専用） | すべての列。列の見出しの ⋮ で並べ替えと列幅の調整。セルを選んで Ctrl+C（Mac は ⌘+C）で、表示どおりの文字でコピーし、Excel に貼れる | | 行のクリックでその行の軸と時間の値を選ぶ。もう一度で解除 |
 | `pivot` | クロス集計 | 1 つの項目を列に、残りの軸を行に、最初の指標をセルに。合計の行と列つき | `columns`: 列にする項目（既定は最後の軸か時間）。`totals: false` で合計を消す | 列見出し・行で選ぶ |
 | `select` | 値の一覧から選ぶ | 最初の軸の値（指標があれば値も表示）。9 件以上で検索欄が出る | `multiple: false` で 1 つだけ選ぶ | チェックで選ぶ |
 | `date-range` | 期間の選択 | `query` は書かない。`time` の列が対象 | `default`: 最初の期間（下記）。`metrics`: 指標ファイル | 期間で全タイルを絞る |
@@ -381,7 +381,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
 | `createEngine({ bundle, baseUrl?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`query(sql)` と `loadView(view)` を持つ。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
-| `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`）。グラフ（`bar`、`line`、`area`）は `React.lazy` で、Observable Plot をはじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない） |
+| `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない） |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |
 
 DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを切り替えても使い回します。同じ SQL の結果はページを開いている間キャッシュします。
@@ -430,6 +430,8 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `--devbi-radius` | タイルの角の丸み | `10px` |
 
 自作タイルでもこの変数を使えば、ダークモードに合わせて色が変わります。
+
+`table` タイルの表（spreadsheet-grid）は、背景・文字・枠線・強調の色をこの変数から取ります。表だけを変えるときは、`.devbi-root .devbi-grid` に spreadsheet-grid の変数（`--ssg-*`）を書きます。
 
 ## コマンド
 
