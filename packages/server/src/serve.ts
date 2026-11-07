@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { createApiHandler, type ApiOptions } from "./handler.js";
 
 export interface ServeOptions extends ApiOptions {
@@ -140,7 +141,8 @@ async function sendFile(req: IncomingMessage, res: ServerResponse, root: string,
     res.end();
     return;
   }
-  createReadStream(file, { start, end }).on("error", () => res.destroy()).pipe(res);
+  // pipeline closes the file when the browser goes away, too.
+  await pipeline(createReadStream(file, { start, end }), res).catch(() => undefined);
 }
 
 /**
@@ -195,7 +197,7 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
       options.log?.(`スナップショット: ${names.join("、")}`);
     }
     api.snapshots.schedule();
-    void api.snapshots.catchUp();
+    void api.snapshots.catchUp().catch((e: Error) => options.log?.(`スナップショット: ${e.message}`));
   }
   return {
     server,

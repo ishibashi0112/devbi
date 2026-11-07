@@ -36,3 +36,24 @@ test("the dashboards that ask the API each time say nothing about a time", async
   await expect(kpi(page, "kpi-revenue")).toHaveText(/^¥[\d,]+$/);
   await expect(page.getByTestId("snapshot-note")).toHaveCount(0);
 });
+
+test("without the file (a static site before devbi-snapshot ran, or the SQL changed since the build) it reads the API", async ({ page }) => {
+  await page.route(/\/snapshots\/[^/]+\.arrows$/, (route) => route.fulfill({ status: 404, contentType: "text/plain", body: "見つかりません" }));
+  const posts: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST") posts.push(new URL(r.url()).pathname);
+  });
+  await page.goto("/#/sales-daily");
+  await tile(page, "period").getByRole("button", { name: "全期間" }).click();
+  await expect(kpi(page, "kpi-revenue")).toHaveText("¥193,161,410");
+  expect(posts).toEqual(["/api/query"]);
+  // Read as it is now: not "as of" a morning.
+  await expect(page.getByTestId("snapshot-note")).toHaveCount(0);
+});
+
+test("without the file and without an API, the tiles say what to run", async ({ page }) => {
+  await page.route(/\/snapshots\/[^/]+\.arrows$/, (route) => route.fulfill({ status: 404, body: "" }));
+  await page.route(/\/api\/query$/, (route) => route.fulfill({ status: 405, body: "" }));
+  await page.goto("/#/sales-daily");
+  await expect(tile(page, "kpi-revenue")).toContainText(/sales_daily のスナップショット（snapshots\/sales_daily~[0-9a-f]{16}\.arrows）がありません。サーバーで devbi-snapshot を実行するか/);
+});

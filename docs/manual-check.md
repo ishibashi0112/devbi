@@ -193,6 +193,7 @@ pnpm e2e         # パッケージとサンプルをビルドして devbi-serve 
 - Parquet は DuckDB の拡張をインターネットから取りに行きます。社内で外に出られないときは xlsx / CSV で試してください
 - データベースは SQLite と PostgreSQL だけです（SQL Server・Oracle・MySQL はこのあと）
 - スナップショットは Arrow の形で保存します（handoff では Parquet でしたが、DuckDB-wasm が Parquet の拡張をインターネットから取りに行くため）。時刻はサーバーの時計で、`devbi-serve` が止まっていた間の分は、次に起動したときに作ります
+- どの SQL をスナップショットから読むかは、ビルドしたときに決まります。`-- snapshot:` の行を足したり消したりしたら、ビルドし直してください（ファイルが見つからないときは、API から読みます）
 - `pnpm build` は `dist/` を作り直すので、スナップショットも消えます。`devbi-serve` は次に開かれたときに作り直しますが、IIS などに静的に置くときは、ビルドのあとに `devbi-snapshot` を動かしてください
 - 埋め込みの `devbi-embed.js` は、ビルドしたときだけできます（開発サーバーの <http://localhost:5173/embed-demo.html> では出ません）。埋め込むページとほかのオリジンから配るときは CORS の設定が要ります（[リファレンス](reference.md#5-サーバーの設定)）
 - 埋め込んだダッシュボードには、ページの CSS のうち要素の名前だけの指定は入りませんが、ID・クラス・疑似クラスの付いた指定（`#main td { … }`、`tr:nth-child(odd) td { … }`）は入ります（Shadow DOM での完全な切り離しはしていません）

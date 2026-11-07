@@ -6,7 +6,7 @@ export { DevbiProvider, useDevbi, useDevbiQuery, useTimeExtent, useSelectionVers
 export { createEngine } from "./load-engine.js";
 export type { Engine, EngineOptions, ApiOptions, DuckDBBundle, QueryResult, SnapshotInfo } from "./engine.js";
 export { DashboardSelection } from "./selection.js";
-export { loadProject, resolveComponent, type Project, type ProjectInput, type TileModule } from "./project.js";
+export { loadProject, resolveComponent, snapshotTimesOf, type Project, type ProjectInput, type TileModule } from "./project.js";
 export { builtinTiles, useTileSize, type BuiltinTile } from "./tiles/index.js";
 export { renderMarkdown } from "./tiles/Markdown.js";
 export type { TileProps, Query, Filter, Row, FieldInfo, TileSpec } from "devbi";

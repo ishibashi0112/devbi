@@ -84,9 +84,16 @@ export function viewsOf(project: Project, dashboard: Dashboard): MetricsView[] {
 
 /** The times of day of the snapshots a dashboard reads (sorted). Empty: it reads the API as it is, or files. */
 export function snapshotTimesOf(project: Project, dashboard: Dashboard): string[] {
+  if (Object.keys(project.snapshots).length === 0) return [];
   const times = new Set<string>();
   for (const view of viewsOf(project, dashboard)) {
-    for (const call of apiCalls(view.model)) {
+    let calls: ReturnType<typeof apiCalls>;
+    try {
+      calls = apiCalls(view.model);
+    } catch {
+      continue; // a read_api the dashboard itself reports (its tiles show the error); the list stays
+    }
+    for (const call of calls) {
       if (Object.hasOwn(project.snapshots, call.name)) for (const t of project.snapshots[call.name]!) times.add(t);
     }
   }

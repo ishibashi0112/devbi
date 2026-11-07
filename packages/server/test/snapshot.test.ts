@@ -1,10 +1,10 @@
-import { existsSync, mkdtempSync, mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC } from "apache-arrow";
 import { snapshotFile } from "devbi";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApiHandler, lastDue, nextDue, parseDataset, serve, snapshotJobs, snapshotOf, type RunningServer } from "../src/index.js";
 
 describe("the -- snapshot: line", () => {
@@ -57,7 +57,8 @@ describe("snapshots (SQLite)", () => {
     writeFileSync(path.join(dir, "models", "a.metrics.yaml"), model("SELECT * FROM read_api('daily', from = '2026-04-01')"));
     writeFileSync(path.join(dir, "models", "b.metrics.yaml"), model("SELECT * FROM read_api('daily', from = '2026-04-01') JOIN read_api('live') USING (region)"));
     writeFileSync(path.join(dir, "dist", "index.html"), "<!doctype html><title>t</title>");
-    running = await serve({ dir, port: 0, env, log: (l) => logs.push(l) });
+    // Not on a schedule here: the first GET is what makes the file (the start's catch-up is tested below).
+    running = await serve({ dir, port: 0, env, log: (l) => logs.push(l), schedule: false });
   });
   afterAll(async () => {
     await running?.close();
@@ -70,6 +71,7 @@ describe("snapshots (SQLite)", () => {
   });
 
   it("devbi-serve makes a missing one when asked for it, and sends it with its time", async () => {
+    expect(existsSync(path.join(dir, "dist", "snapshots", daily))).toBe(false);
     const res = await fetch(new URL(`reports/snapshots/${encodeURIComponent(daily)}`, running.url));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/vnd.apache.arrow.stream");
@@ -83,6 +85,7 @@ describe("snapshots (SQLite)", () => {
       ]),
     );
     expect(existsSync(path.join(dir, "dist", "snapshots", daily))).toBe(true);
+    expect(logs).toContainEqual(expect.stringMatching(new RegExp(`^スナップショット ${daily.replace(".", "\\.")}（api/daily\\.sql）: 2 行、\\d+ ms$`)));
     // Not changed since: 304, no body.
     const again = await fetch(new URL(`snapshots/${encodeURIComponent(daily)}`, running.url), { headers: { "If-Modified-Since": modified } });
     expect(again.status).toBe(304);
@@ -107,6 +110,16 @@ describe("snapshots (SQLite)", () => {
     expect(body.snapshots).toEqual([expect.objectContaining({ file: daily, models: ["a", "b"], updatedAt: expect.any(String) })]);
   });
 
+  it("devbi-serve makes them when it starts", async () => {
+    const out = mkdtempSync(path.join(tmpdir(), "devbi-site-"));
+    const started = await serve({ dir, port: 0, env, snapshotDir: out });
+    try {
+      await vi.waitFor(() => expect(existsSync(path.join(out, daily))).toBe(true), { timeout: 5000 });
+    } finally {
+      await started.close();
+    }
+  });
+
   it("devbi-snapshot's work: make them all now; catch up makes those older than their last time", async () => {
     const out = mkdtempSync(path.join(tmpdir(), "devbi-site-"));
     const api = createApiHandler({ dir, env, snapshotDir: path.join(out, "snapshots") });
@@ -115,8 +128,8 @@ describe("snapshots (SQLite)", () => {
       const [made] = await api.snapshots.make();
       expect(made).toMatchObject({ file: daily, ok: true, rows: 2 });
       const file = path.join(out, "snapshots", daily);
-      const today6 = new Date();
-      today6.setHours(6, 0, 0, 0);
+      // A day in the past, so that "made again" (now) is later whatever the time of day the test runs at.
+      const today6 = new Date(2020, 0, 15, 6, 0, 0, 0);
       const after = new Date(today6.getTime() + 60 * 60_000);
       // Made after today's 06:00: nothing to do.
       utimesSync(file, after, after);
@@ -144,12 +157,54 @@ describe("snapshots (SQLite)", () => {
 
   it("a failure is logged and shown, and the old file stays", async () => {
     const out = mkdtempSync(path.join(tmpdir(), "devbi-site-"));
-    const api = createApiHandler({ dir, env: { DEVBI_DB: "sqlite:db/missing.sqlite" }, snapshotDir: path.join(out, "snapshots") });
+    mkdirSync(path.join(out, "snapshots"));
+    const file = path.join(out, "snapshots", daily);
+    writeFileSync(file, "yesterday");
+    const lines: string[] = [];
+    const api = createApiHandler({ dir, env: { DEVBI_DB: "sqlite:db/missing.sqlite" }, snapshotDir: path.join(out, "snapshots"), log: (l) => lines.push(l) });
     try {
       const [r] = await api.snapshots.make();
-      expect(r).toMatchObject({ file: daily, ok: false });
-      expect(existsSync(path.join(out, "snapshots", daily))).toBe(false);
-      expect((await api.snapshots.status())[0]).toMatchObject({ file: daily, updatedAt: null, error: expect.stringMatching(/つなげません/) });
+      expect(r).toMatchObject({ file: daily, ok: false, status: 500 });
+      expect(readFileSync(file, "utf8")).toBe("yesterday");
+      expect(lines).toContainEqual(expect.stringMatching(/を作れませんでした: データベースにつなげません/));
+      expect((await api.snapshots.status())[0]).toMatchObject({ file: daily, updatedAt: expect.any(String), error: expect.stringMatching(/つなげません/) });
+    } finally {
+      await api.close();
+    }
+  });
+
+  it("keeps the SQL's status (422: too many rows), and keeps server folders out of what the browser sees", async () => {
+    const out = mkdtempSync(path.join(tmpdir(), "devbi-site-"));
+    const few = createApiHandler({ dir, env, maxRows: 1, snapshotDir: path.join(out, "few") });
+    // A file where the folder should be: the save fails with an error that names the path.
+    writeFileSync(path.join(out, "blocked"), "");
+    const lines: string[] = [];
+    const blocked = createApiHandler({ dir, env, snapshotDir: path.join(out, "blocked", "snapshots"), log: (l) => lines.push(l) });
+    try {
+      await expect(few.snapshots.get(daily)).rejects.toMatchObject({ status: 422 });
+      await expect(blocked.snapshots.get(daily)).rejects.toMatchObject({
+        status: 500,
+        message: `スナップショット ${daily} を作れませんでした: スナップショットを保存できませんでした（くわしくはサーバーのログにあります）`,
+      });
+      expect(JSON.stringify(await blocked.snapshots.status())).not.toContain(out);
+      expect(lines.join("\n")).toContain(path.join(out, "blocked"));
+    } finally {
+      await few.close();
+      await blocked.close();
+    }
+  });
+
+  it("folders it cannot read are a logged problem, not a crash", async () => {
+    const broken = mkdtempSync(path.join(tmpdir(), "devbi-broken-"));
+    mkdirSync(path.join(broken, "api"));
+    writeFileSync(path.join(broken, "api", "daily.sql"), "-- snapshot: 06:00\nSELECT 1 AS one\n");
+    writeFileSync(path.join(broken, "models"), "not a folder");
+    const lines: string[] = [];
+    const api = createApiHandler({ dir: broken, env, snapshotDir: path.join(broken, "out"), log: (l) => lines.push(l) });
+    try {
+      expect((await snapshotJobs(broken)).problems).toEqual([expect.stringMatching(/^models\/ を読めません/)]);
+      expect(await api.snapshots.catchUp()).toEqual([]);
+      expect(lines).toContainEqual(expect.stringMatching(/^スナップショット: models\/ を読めません/));
     } finally {
       await api.close();
     }

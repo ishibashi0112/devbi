@@ -23,7 +23,10 @@ export interface SnapshotResult {
   ok: boolean;
   rows?: number;
   ms?: number;
+  /** Why it failed, as the browser may see it (details of file system errors only go to the log). */
   error?: string;
+  /** The HTTP status of the failure, when the SQL failed (422: too many rows; 400: the SQL breaks a rule). */
+  status?: number;
 }
 
 export interface SnapshotStatus {
@@ -38,7 +41,8 @@ export interface SnapshotStatus {
   error?: string;
 }
 
-export type SnapshotFound = { at: Date; rows?: number } & ({ path: string; size: number } | { bytes: Uint8Array });
+/** A saved file (open it before reading its time and size: it may be replaced meanwhile), or the rows as they are now. */
+export type SnapshotFound = { path: string; rows?: number } | { at: Date; rows: number; bytes: Uint8Array };
 
 export interface Snapshots {
   /** The snapshots to make, read again from models/ and api/ each time (a git pull takes effect without a restart). */
@@ -96,7 +100,14 @@ export function nextDue(times: string[], now: Date): Date | undefined {
 export async function snapshotJobs(dir: string): Promise<{ jobs: SnapshotJob[]; problems: string[] }> {
   const problems: string[] = [];
   const times = new Map<string, string[]>();
-  for (const name of await listDatasets(dir)) {
+  let names: string[];
+  try {
+    names = await listDatasets(dir);
+  } catch (e) {
+    // The folder is away for a moment (a network drive, a deploy): no snapshots this time, not a crash.
+    return { jobs: [], problems: [`api/ を読めません: ${(e as Error).message}`] };
+  }
+  for (const name of names) {
     try {
       const t = snapshotOf(await readDatasetText(dir, name), name);
       if (t) times.set(name, t);
@@ -107,7 +118,13 @@ export async function snapshotJobs(dir: string): Promise<{ jobs: SnapshotJob[]; 
   const jobs = new Map<string, SnapshotJob>();
   const modelsDir = path.join(dir, "models");
   if (times.size === 0 || !existsSync(modelsDir)) return { jobs: [], problems };
-  for (const f of (await readdir(modelsDir)).filter((f) => f.endsWith(".metrics.yaml")).sort()) {
+  let files: string[];
+  try {
+    files = (await readdir(modelsDir)).filter((f) => f.endsWith(".metrics.yaml")).sort();
+  } catch (e) {
+    return { jobs: [], problems: [...problems, `models/ を読めません: ${(e as Error).message}`] };
+  }
+  for (const f of files) {
     const model = f.slice(0, -".metrics.yaml".length);
     try {
       const view = parseMetricsYaml(await readFile(path.join(modelsDir, f), "utf8"), model, `models/${f}`);
@@ -149,6 +166,8 @@ export function createSnapshots(options: {
   /** Where the files are saved. Without it, nothing is saved: `get` runs the SQL each time. */
   outDir?: string;
   log?: (line: string) => void;
+  /** Show file system errors (which name server paths) in `status()` and to the browser. Default off. */
+  exposeErrors?: boolean;
 }): Snapshots {
   const { dir, run, outDir } = options;
   const log = options.log ?? (() => undefined);
@@ -189,10 +208,14 @@ export function createSnapshots(options: {
         return { file: job.file, name: job.name, ok: true, rows: result.rows, ms };
       } catch (e) {
         await rm(tmp, { force: true }).catch(() => undefined);
-        const error = (e as Error).message;
+        const detail = (e as Error).message;
+        // The API's errors are written for the browser (and keep their status: 422 for too many rows); file
+        // system errors name folders on the server, so those go to the log only.
+        const status = typeof (e as { status?: unknown }).status === "number" ? (e as { status: number }).status : undefined;
+        const error = status !== undefined || options.exposeErrors ? detail : "スナップショットを保存できませんでした（くわしくはサーバーのログにあります）";
         errors.set(job.file, error);
-        log(`スナップショット ${job.file}（api/${job.name}.sql）を作れませんでした: ${error}`);
-        return { file: job.file, name: job.name, ok: false, error };
+        log(`スナップショット ${job.file}（api/${job.name}.sql）を作れませんでした: ${detail}`);
+        return { file: job.file, name: job.name, ok: false, error, ...(status !== undefined ? { status } : {}) };
       }
     })).finally(() => making.delete(job.file)) as Promise<SnapshotResult>;
     making.set(job.file, p);
@@ -231,7 +254,9 @@ export function createSnapshots(options: {
     // At least once an hour: a time added later (a git pull) is picked up without a restart.
     const wait = Math.min(next ? next.getTime() - now.getTime() : Infinity, 3_600_000);
     timer = setTimeout(() => {
-      void catchUp().finally(() => void arm());
+      void catchUp()
+        .catch((e: Error) => log(`スナップショット: ${e.message}`))
+        .finally(() => void arm());
     }, Math.max(wait, 1000));
     timer.unref?.();
   };
@@ -245,15 +270,11 @@ export function createSnapshots(options: {
         const result = await run(job.name, job.params);
         return { at: new Date(), rows: result.rows, bytes: result.bytes };
       }
-      let made = await mtime(file);
-      if (!made) {
+      if (!(await mtime(file))) {
         const result = await save(job);
-        if (!result.ok) throw new DatasetError(`スナップショット ${file} を作れませんでした: ${result.error}`, 500);
-        made = await mtime(file);
-        if (!made) throw new DatasetError(`スナップショット ${file} が見つかりません`, 500);
+        if (!result.ok) throw new DatasetError(`スナップショット ${file} を作れませんでした: ${result.error}`, result.status ?? 500);
       }
-      const p = path.join(outDir, file);
-      return { at: made, path: p, size: (await stat(p)).size, ...(rows.has(file) ? { rows: rows.get(file)! } : {}) };
+      return { path: path.join(outDir, file), ...(rows.has(file) ? { rows: rows.get(file)! } : {}) };
     },
     async make(names) {
       if (!outDir) throw new Error("スナップショットを置くフォルダがありません");

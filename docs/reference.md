@@ -477,8 +477,10 @@ SELECT o.order_date AS 受注日, c.region AS 地域, SUM(l.qty * l.unit_price) 
 - `api/<名前>.sql` の先頭のコメントに `-- snapshot: 06:00` と書きます。時刻はサーバーの時計で、`-- snapshot: 06:00, 12:00` のように何回でも書けます。
 - metrics.yaml の書き方は変わりません（`read_api('sales_daily', from = '2024-04-01')`）。
 - 作るのは、`models/` の `read_api` で使っているものだけです。パラメーターは `read_api` に書いた値で、値の組ごとに 1 つ作ります。
-- 中身は API の答えと同じ Arrow で、サイトの `snapshots/` に `<名前>.arrows`（パラメーターがあれば `<名前>~<16 桁>.arrows`）として置きます。
+- 中身は API の答えと同じ Arrow で、サイトの `snapshots/` に `<名前>.arrows`（パラメーターがあれば `<名前>~<16 桁>.arrows`。[ファイル名の決め方](#api-の形)）として置きます。
 - ブラウザは API ではなくこのファイルを読みます。ダッシュボードの見出しの下に「データは 11月8日 6:00 の時点（毎日 6:00 に更新）」と出し、一覧には「毎日 6:00 の時点のデータ」と出します。
+- どの SQL をファイルから読むかは、ビルドしたときに決まります。`-- snapshot:` の行を足したり消したり、`read_api` のパラメーターを変えたりしたら、ビルドし直します。
+- ファイルがないとき（`404`）は、API から読みます（そのときは「…の時点」は出しません）。API もないときは、タイルに「スナップショット（snapshots/…）がありません。サーバーで devbi-snapshot を実行するか…」と出ます。
 
 作るのは次のどれかです。
 
@@ -493,11 +495,11 @@ npx devbi-snapshot --dir C:\reports\sales --out C:\inetpub\wwwroot\sales
 | オプション | 中身 |
 | --- | --- |
 | `--dir` | プロジェクトのフォルダ（`api/`、`models/`、`.env` のある場所）。既定は今のフォルダ |
-| `--out` | サイトのフォルダ。`<out>/snapshots/` に置く。既定は `<dir>/dist` |
+| `--out` | サイトのフォルダ。`<out>/snapshots/` に置く。既定は `<dir>/dist`（`@devbi/vite` の `dir` を変えたときは、ビルドの中のそのフォルダ） |
 | `--max-rows` / `--timeout` / `--debug` | `devbi-serve` と同じ |
 | `<名前>…` | その SQL のものだけ作る（`devbi-snapshot sales_daily`）。書かなければ全部 |
 
-- 作れなかったものがあると、終了コードが 1 になります。前のファイルはそのまま残ります（新しいファイルは、書き終わってから置き換えます）。
+- 作れなかったものがあると、終了コードが 1 になります。前のファイルはそのまま残ります（新しいファイルは、書き終わってから置き換えます）。くわしい理由はログに出ます。
 - IIS では `.arrows` も配れるように、`web.config` の `<staticContent>` に `<mimeMap fileExtension=".arrows" mimeType="application/vnd.apache.arrow.stream" />` を足します（[サーバーの設定](#5-サーバーの設定)）。
 - `pnpm build` は `dist/` を作り直すので、`snapshots/` も消えます。`devbi-serve` は次に聞かれたときに作り直します。静的に置くときは、ビルドしたあとに `devbi-snapshot` を動かします。
 
@@ -561,7 +563,10 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 `GET <サイト>/snapshots/<ファイル>.arrows`
 
 - スナップショットのファイルです。ふつうの静的ファイルとして置けば足ります（API のサーバーでなくてよい）。ブラウザは `Last-Modified` を「何時点のデータか」として出します。
-- `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。
+- ブラウザは毎回確かめに来ます（`Cache-Control: no-cache` と同じ。変わっていなければ `304` で足ります）。
+- `404` のときは、ブラウザは `POST …/api/query` で読みます。
+- `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。
+- ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
 
 `createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。`run(name, params)` で SQL を 1 つ実行し、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 

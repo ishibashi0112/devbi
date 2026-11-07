@@ -128,6 +128,8 @@ describe("scanSources", () => {
     expect(snapshotFile("orders", { from: "2024-04-02", n: 10 })).not.toBe(one);
     // The same in the browser and on the server: a fixed value, not one that depends on the platform.
     expect(snapshotFile("orders", { from: "2024-04-01" })).toBe("orders~9e979dd94c517434.arrows");
+    // For other servers (docs/reference.md): FNV-1a 64 over the UTF-8 of [["all",true],["n",1.5],["none",null],["地域","関東"]].
+    expect(snapshotFile("売上", { 地域: "関東", n: 1.5, all: true, none: null })).toBe("売上~ada27a0b5a13b1c4.arrows");
   });
 });
 

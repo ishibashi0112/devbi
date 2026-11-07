@@ -1,5 +1,6 @@
-import { createReadStream } from "node:fs";
+import { open as openFile, type FileHandle } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { pipeline } from "node:stream/promises";
 import { toArrowStream } from "./arrow.js";
 import { connect, dialectOf, type Connection } from "./connect.js";
 import { DatasetError, bindParameters, connectionOf, connectionVariable, listDatasets, parseDataset, readDatasetText } from "./datasets.js";
@@ -183,47 +184,72 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     log(`api/${name}.sql: ${result.rows.toLocaleString("en-US")} 行、${Date.now() - started} ms`);
   };
 
-  const snapshots = createSnapshots({ dir: options.dir, run, log, ...(options.snapshotDir ? { outDir: options.snapshotDir } : {}) });
+  const snapshots = createSnapshots({
+    dir: options.dir,
+    run,
+    log,
+    exposeErrors: options.exposeErrors ?? false,
+    ...(options.snapshotDir ? { outDir: options.snapshotDir } : {}),
+  });
 
   // GET …/snapshots/<file>: the saved file (made first when missing), or in the dev server the rows as they are now.
   const snapshot = async (req: IncomingMessage, res: ServerResponse, file: string) => {
     const found = await snapshots.get(file);
-    const head = req.method === "HEAD";
-    const gz = /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
-    const headers: Record<string, string | number> = {
-      "Content-Type": ARROW_STREAM,
-      // Checked each time: the file changes every morning under the same name.
-      "Cache-Control": "no-cache",
-      "Last-Modified": found.at.toUTCString(),
-      ...(found.rows !== undefined ? { "X-DevBI-Rows": String(found.rows) } : {}),
-      Vary: "Accept-Encoding",
-    };
-    const since = Date.parse(String(req.headers["if-modified-since"] ?? ""));
-    if (Number.isFinite(since) && Math.floor(found.at.getTime() / 1000) <= Math.floor(since / 1000)) {
-      res.writeHead(304, headers);
-      res.end();
-      return;
-    }
-    if ("bytes" in found) {
-      let bytes = found.bytes;
-      if (gz && bytes.byteLength > 8192) {
-        bytes = await gzipAsync(bytes, { level: 4 });
-        headers["Content-Encoding"] = "gzip";
+    let handle: FileHandle | undefined;
+    try {
+      let at: Date;
+      let size: number | undefined;
+      if ("path" in found) {
+        // Opened first, then its time and size: tomorrow's file renamed over it meanwhile does not mix with it.
+        handle = await openFile(found.path, "r");
+        const info = await handle.stat();
+        at = info.mtime;
+        size = info.size;
+      } else {
+        at = found.at;
       }
-      headers["Content-Length"] = bytes.byteLength;
+      const head = req.method === "HEAD";
+      const gz = /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+      const headers: Record<string, string | number> = {
+        "Content-Type": ARROW_STREAM,
+        // Checked each time: the file changes every morning under the same name.
+        "Cache-Control": "no-cache",
+        "Last-Modified": at.toUTCString(),
+        ...(found.rows !== undefined ? { "X-DevBI-Rows": String(found.rows) } : {}),
+        Vary: "Accept-Encoding",
+      };
+      const since = Date.parse(String(req.headers["if-modified-since"] ?? ""));
+      if (Number.isFinite(since) && Math.floor(at.getTime() / 1000) <= Math.floor(since / 1000)) {
+        res.writeHead(304, headers);
+        res.end();
+        return;
+      }
+      if ("bytes" in found) {
+        let bytes = found.bytes;
+        if (gz && bytes.byteLength > 8192) {
+          bytes = await gzipAsync(bytes, { level: 4 });
+          headers["Content-Encoding"] = "gzip";
+        }
+        headers["Content-Length"] = bytes.byteLength;
+        res.writeHead(200, headers);
+        res.end(head ? undefined : bytes);
+        return;
+      }
+      const zip = gz && size! > 8192;
+      if (zip) headers["Content-Encoding"] = "gzip";
+      else headers["Content-Length"] = size!;
       res.writeHead(200, headers);
-      res.end(head ? undefined : bytes);
-      return;
+      if (head) {
+        res.end();
+        return;
+      }
+      // The stream closes the file when it ends or the browser goes away (on Windows an open file cannot be replaced).
+      const stream = handle!.createReadStream();
+      handle = undefined;
+      await (zip ? pipeline(stream, createGzip({ level: 4 }), res) : pipeline(stream, res)).catch(() => undefined);
+    } finally {
+      await handle?.close();
     }
-    if (gz && found.size > 8192) headers["Content-Encoding"] = "gzip";
-    else headers["Content-Length"] = found.size;
-    res.writeHead(200, headers);
-    if (head) {
-      res.end();
-      return;
-    }
-    const stream = createReadStream(found.path).on("error", () => res.destroy());
-    (gz && found.size > 8192 ? stream.pipe(createGzip({ level: 4 })) : stream).pipe(res);
   };
 
   return {
