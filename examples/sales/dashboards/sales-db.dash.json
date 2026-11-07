@@ -1,0 +1,68 @@
+{
+  "$schema": "../.devbi/dash.schema.json",
+  "title": "売上ダッシュボード（DB から）",
+  "description": "サンプルの SQLite（db/sales.sqlite）を、API（api/orders.sql）から読む",
+  "metrics": "sales_db",
+  "tiles": [
+    {
+      "id": "period",
+      "x": 0, "y": 0, "w": 12, "h": 1,
+      "type": "date-range",
+      "options": { "default": "latest_fiscal_year" }
+    },
+    {
+      "id": "kpi-revenue",
+      "x": 0, "y": 1, "w": 4, "h": 2,
+      "type": "kpi",
+      "title": "売上",
+      "query": { "measures": ["revenue", "revenue_ly", "revenue_yoy"] }
+    },
+    {
+      "id": "kpi-orders",
+      "x": 4, "y": 1, "w": 4, "h": 2,
+      "type": "kpi",
+      "title": "受注件数",
+      "query": { "measures": ["orders"] }
+    },
+    {
+      "id": "kpi-avg",
+      "x": 8, "y": 1, "w": 4, "h": 2,
+      "type": "kpi",
+      "title": "平均受注額",
+      "query": { "measures": ["avg_order"] }
+    },
+    {
+      "id": "monthly",
+      "x": 0, "y": 3, "w": 8, "h": 4,
+      "type": "bar",
+      "title": "月別売上",
+      "query": { "measures": ["revenue"], "time": "month" }
+    },
+    {
+      "id": "region",
+      "x": 8, "y": 3, "w": 4, "h": 4,
+      "type": "barlist",
+      "title": "地域別売上",
+      "query": { "measures": ["revenue"], "dimensions": ["region"] }
+    },
+    {
+      "id": "products",
+      "x": 0, "y": 7, "w": 12, "h": 5,
+      "type": "table",
+      "title": "商品別",
+      "query": {
+        "measures": ["revenue", "revenue_yoy", "quantity", "orders"],
+        "dimensions": ["category", "product"],
+        "limit": 100
+      }
+    },
+    {
+      "id": "about",
+      "x": 0, "y": 12, "w": 12, "h": 1,
+      "type": "markdown",
+      "options": {
+        "text": "**このダッシュボードについて** 中身は「売上ダッシュボード」と同じ数字です。データは Excel ではなく、サーバーの `api/orders.sql` がデータベース（サンプルは SQLite）から読み、ブラウザが受け取って集計します。"
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 開発者がいる会社が自社アプリの中に置く BI。ダッシュボードは git のファイル、タイルは JSX に「昇格」でき、集計はブラウザ内の DuckDB-wasm。MIT。
 
-構想と決定事項は [docs/handoff.md](docs/handoff.md)。いまは §5 の 1（ランタイム）を作っているところで、GUI エディタはまだありません。
+構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）ができて、いまは §5 の 2（埋め込みと読み取り API）を作っているところです。GUI エディタはまだありません。
 
 ## 動かす
 
@@ -10,10 +10,11 @@
 pnpm install
 pnpm example:dev      # packages/* をビルドして、examples/sales を Vite の dev server で開く（http://localhost:5173）
 pnpm example:preview  # 静的ビルドしたものを開く（http://localhost:4173）
+pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost:8080）。DB 版のダッシュボードはサンプルの SQLite を API から読む
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
-pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）
-pnpm e2e              # examples/sales を静的ビルドして Playwright で確認
+pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG があれば PostgreSQL も）
+pnpm e2e              # examples/sales をビルドして devbi-serve で開き、Playwright で確認
 ```
 
 画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。
@@ -27,7 +28,8 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `packages/devbi` | `devbi` | ファイル形式（metrics.yaml / dash.json の検証）、指標 → DuckDB SQL のコンパイラ、xlsx の読み書き（依存なし）、書式、`TileProps` などの型。ブラウザでも Node でも動く |
 | `packages/react` | `@devbi/react` | DuckDB-wasm のエンジン、Mosaic の Selection でのクロスフィルタ、組み込みタイル、`<Dashboard>` / `<DevbiApp>` |
 | `packages/vite` | `@devbi/vite` | Vite プラグイン。`virtual:devbi` で dashboards/ と models/ と昇格タイルを渡し、ビルドで data/ をコピー |
-| `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ |
+| `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL）と `devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出す）。DB への接続は ashiato のアダプタの作りを流用 |
+| `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ。`db/sales.sqlite` は同じ受注を表に分けて入れたもの（`pnpm gen:db`） |
 
 npm にはまだ公開していません（どのパッケージも `private: true`）。
 
@@ -41,6 +43,8 @@ models/
   sales.metrics.yaml       # 指標と軸
 data/
   sales.xlsx               # または .csv / .arrow / .parquet
+api/
+  orders.sql               # read_api('orders') でデータベースから読む SELECT（サーバーだけが使う）
 .devbi/                    # pnpm gen が作る JSON Schema と型（git に入れない）
 ```
 
@@ -104,3 +108,5 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 - 指標 → SQL は mosaic-sql ではなく自前の文字列組み立てにしました。モデルと指標の SQL が利用者の書いた生の SQL で、比較指標では期間をずらした集計を結合するため。mosaic-core は選択（クロスフィルタ）の管理に使っています。
 - 表タイルは [spreadsheet-grid](https://github.com/ishibashi0112/datasheet-grid)（`@ishibashi0112/spreadsheet-grid` の `/lite`）で、読み取り専用にしています。並べ替えは列メニューから、行のクリックでほかのタイルを絞り込みます。
 - ピボットは Perspective を使わず、合計行・合計列つきの自前の表にしました。
+- 読み取り API の名前: handoff の `POST /api/query {model, params}` は `{name, params}` にし、サーバーの SQL は `api/<名前>.sql`、metrics.yaml からは `read_api('<名前>')` で呼びます。`model` は metrics.yaml の `model`（DuckDB の SQL）と紛らわしいため。
+- 読み取り API は、`read_api` 1 つにつき 1 回だけ呼び、行をブラウザに渡して DuckDB-wasm で集計します（データベースは絞り込みのたびには呼ばれない）。応答は Arrow IPC（gzip）。SQLite は Node 組み込みの `node:sqlite`（Node 22.16 以上）、PostgreSQL は `pg`（optional peer）。

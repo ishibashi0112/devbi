@@ -3,7 +3,7 @@ import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources } from "devbi";
-import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
+import { loadEnv, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
 import { generate } from "./gen.js";
 
@@ -54,6 +54,11 @@ export async function readProject(dir: string): Promise<ProjectFiles> {
       const view = defineMetricsView(spec, name, rel);
       out.metrics[name] = { path: `/${rel}`, spec };
       for (const s of scanSources(view.model)) {
+        if (s.format === "api") {
+          // Rows from the read-only API: the SQL file stays on the server (never copied into the build).
+          if (!existsSync(path.join(dir, "api", `${s.path}.sql`))) problems.push(`${rel}: API の SQL ファイル api/${s.path}.sql がありません`);
+          continue;
+        }
         if (hasUrlScheme(s.path)) continue;
         const p = posix(path.normalize(s.path));
         if (p.startsWith("..") || path.isAbsolute(s.path)) {
@@ -113,6 +118,11 @@ function resolveDuckdb(root: string): { wasm: string; worker: string } {
   };
 }
 
+/** Vite's server.fs.deny when a project sets none (it is replaced, not added to, when one is given). */
+const VITE_DENY = [".env", ".env.*", "*.{crt,pem}", "**/.git/**"];
+/** Files the read-only API reads, which the browser must not get from the dev server. */
+const SERVER_ONLY = ["**/api/**/*.sql", "*.{sqlite,sqlite3,db}", "*.{sqlite,sqlite3,db}-{wal,shm,journal}"];
+
 /**
  * The DevBI Vite plugin. Provides `virtual:devbi` (the project: dashboards, metrics, promoted tiles, DuckDB bundle),
  * reloads the page when dash.json / metrics.yaml / data files change, and copies data files into the build.
@@ -123,11 +133,39 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   let relDir = "";
   let lastData: string[] = [];
 
+  /**
+   * The read-only API (api/*.sql) for the dev and preview servers, the same one devbi-serve runs. Connection URLs
+   * come from DEVBI_DB… in the environment or Vite's .env files. Database errors are shown as they are (local use).
+   */
+  const mountApi = (middlewares: Connect.Server, httpServer: { once(event: "close", fn: () => void): unknown } | null) => {
+    if (!existsSync(path.join(dir, "api"))) return;
+    const env = { ...process.env, ...loadEnv(config.mode, config.envDir || config.root, "DEVBI_") };
+    const handler = import("@devbi/server").then((m) =>
+      m.createApiHandler({ dir, env, exposeErrors: true, log: (line) => config.logger.info(`devbi: ${line}`, { timestamp: true }) }),
+    );
+    httpServer?.once("close", () => void handler.then((h) => h.close()));
+    middlewares.use((req, res, next) => {
+      handler
+        .then(async (h) => {
+          if (!(await h.handle(req, res))) next();
+        })
+        .catch(next);
+    });
+  };
+
   return {
     name: "devbi",
     enforce: "pre",
-    config() {
-      return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"] } };
+    config(user, { mode }) {
+      // The dev server serves the project folder: keep the API's SQL and SQLite databases out of it (they are
+      // for the server only). Vite's own list stays when the project has none of its own.
+      const root = path.resolve(user.root ?? process.cwd());
+      const env = { ...process.env, ...loadEnv(mode, user.envDir ? path.resolve(root, user.envDir) : root, "DEVBI_") };
+      const sqliteFiles = Object.entries(env)
+        .filter(([k, v]) => /^DEVBI_DB(_|$)/.test(k) && v?.trim().startsWith("sqlite:"))
+        .map(([, v]) => posix(path.resolve(root, options.dir ?? ".", v!.trim().slice("sqlite:".length).replace(/^\/\//, ""))).replace(/[*?{}()[\]!+@]/g, "\\$&"));
+      const deny = [...(user.server?.fs?.deny ? [] : VITE_DENY), ...SERVER_ONLY, ...sqliteFiles];
+      return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"] }, server: { fs: { deny } } };
     },
     configResolved(c) {
       config = c;
@@ -172,11 +210,12 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       ].join("\n");
     },
     configureServer(server: ViteDevServer) {
-      const watchDirs = ["dashboards", "models", "data"].map((d) => path.join(dir, d));
+      mountApi(server.middlewares, server.httpServer);
+      const watchDirs = ["dashboards", "models", "data", "api"].map((d) => path.join(dir, d));
       server.watcher.add(watchDirs);
       const reload = (file: string) => {
         const isProjectFile = /\.(dash\.json|metrics\.yaml)$/.test(file);
-        const isData = file.startsWith(path.join(dir, "data") + path.sep);
+        const isData = file.startsWith(path.join(dir, "data") + path.sep) || file.startsWith(path.join(dir, "api") + path.sep);
         if (!isProjectFile && !isData) return;
         if (file.endsWith(".metrics.yaml")) void generate(dir).catch(() => undefined);
         const graph = server.environments?.client?.moduleGraph ?? server.moduleGraph;
@@ -187,6 +226,9 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       server.watcher.on("change", reload);
       server.watcher.on("add", reload);
       server.watcher.on("unlink", reload);
+    },
+    configurePreviewServer(server: PreviewServer) {
+      mountApi(server.middlewares, server.httpServer);
     },
     async writeBundle(output) {
       const outDir = output.dir ?? config.build.outDir;

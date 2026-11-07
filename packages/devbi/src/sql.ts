@@ -177,13 +177,14 @@ export function hasUrlScheme(path: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(path);
 }
 
-export type SourceFormat = "parquet" | "csv" | "json" | "arrow" | "xlsx";
+/** `api` is DevBI's `read_api('<name>')`: rows from the read-only API (`api/<name>.sql` on the server). */
+export type SourceFormat = "parquet" | "csv" | "json" | "arrow" | "xlsx" | "api";
 
 export interface SourceRef {
   /** The table function name as written, such as `read_csv_auto`. */
   fn: string;
   format: SourceFormat;
-  /** The file path as written in the first argument. */
+  /** The file path as written in the first argument (for `api`, the name of the SQL file on the server). */
   path: string;
   /** Named arguments after the path, such as `sheet = '明細'`, as raw SQL text. */
   args: Record<string, string>;
@@ -192,7 +193,7 @@ export interface SourceRef {
   end: number;
 }
 
-const SOURCE_FN = /\bread_(parquet|csv_auto|csv|json_auto|json|ndjson|arrow|xlsx)\s*\(/gi;
+const SOURCE_FN = /\bread_(parquet|csv_auto|csv|json_auto|json|ndjson|arrow|xlsx|api)\s*\(/gi;
 
 function formatOf(fn: string): SourceFormat {
   const f = fn.toLowerCase();
@@ -275,9 +276,9 @@ export function unquoteString(text: string): string | undefined {
 }
 
 /**
- * Find file reads such as `read_parquet('data/sales.parquet')` in model SQL.
- * The browser runtime registers these files with DuckDB-wasm (or loads xlsx itself),
- * and the Vite plugin copies them into the build.
+ * Find file reads such as `read_parquet('data/sales.parquet')` in model SQL, and `read_api('orders')`.
+ * The browser runtime registers these files with DuckDB-wasm (or loads xlsx and API rows itself),
+ * and the Vite plugin copies the files into the build.
  */
 export function scanSources(sql: string): SourceRef[] {
   const out: SourceRef[] = [];
@@ -297,6 +298,24 @@ export function scanSources(sql: string): SourceRef[] {
     }
     const fn = m[0].slice(0, m[0].indexOf("(")).trim();
     out.push({ fn, format: formatOf(m[1]!), path, args, start, end: close + 1 });
+  }
+  return out;
+}
+
+/**
+ * The parameters of `read_api('orders', from = '2025-04-01', limit = 100)`: the named arguments, each a string,
+ * number, `true` / `false` or `null` literal. Throws for anything else (an expression or a column).
+ */
+export function apiParams(source: SourceRef): Record<string, string | number | boolean | null> {
+  const out: Record<string, string | number | boolean | null> = {};
+  for (const [key, text] of Object.entries(source.args)) {
+    const t = text.trim();
+    const str = unquoteString(t);
+    if (str !== undefined) out[key] = str;
+    else if (/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(t)) out[key] = Number(t);
+    else if (/^(true|false)$/i.test(t)) out[key] = t.toLowerCase() === "true";
+    else if (/^null$/i.test(t)) out[key] = null;
+    else throw new Error(`read_api('${source.path}') の ${key} には、文字（'…'）か数値か true / false / null を書いてください: ${t}`);
   }
   return out;
 }

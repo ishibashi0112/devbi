@@ -4,7 +4,7 @@
 
 ## 1. 準備（最初の一回だけ）
 
-- Node.js 22.12 以上（`node -v` で確認。Vite 8 の条件です）
+- Node.js 22.16 以上（`node -v` で確認。Vite 8 は 22.12 以上、サンプルの SQLite を読むには 22.16 以上が要ります）
 - pnpm 10.28（`pnpm -v` で確認）。入っていなければ、Node 24 までは `corepack enable` で入ります。Node 25 以降は corepack が付いてこないので `npm i -g pnpm@10.28.0` で入れます
 
 ```sh
@@ -93,7 +93,7 @@ pnpm example:dev
 
 | # | やること | こうなれば OK |
 | --- | --- | --- |
-| 21 | `pnpm example:preview` を実行して <http://localhost:4173> を開く | 開発サーバーと同じものが動く。`examples/sales/dist/` をそのまま社内のファイルサーバーや IIS に置けば、この形で見られる |
+| 21 | `pnpm example:preview` を実行して <http://localhost:4173> を開く | 開発サーバーと同じものが動く。`examples/sales/dist/` をそのまま社内のファイルサーバーや IIS に置けば、この形で見られる（ただし「DB から」のダッシュボードは API が要るので、下の 28 の形で動かす） |
 
 ### エディタでの補完（VS Code）
 
@@ -111,6 +111,20 @@ pnpm example:dev
 | 27 | 開発サーバーを動かしたまま、`sales.metrics.yaml` の `measures:` に `max_price: MAX(単価)` を足して保存 | 23 と 26 の候補に `max_price` が加わる（エディタによっては数秒かかる） |
 
 試したあとは `git checkout .` で元に戻せます。
+
+### データベースから読む（API）
+
+サンプルには、Excel と同じ受注を SQLite（`examples/sales/db/sales.sqlite`）に入れたデータベースがあります。「売上ダッシュボード（DB から）」は、それをサーバーの SQL（`examples/sales/api/orders.sql`）から読みます。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 28 | `pnpm example:serve` を実行して <http://localhost:8080> を開き、「売上ダッシュボード（DB から）」を開く。期間の「全期間」を押す | 売上が ¥193,161,410 で、Excel の「売上ダッシュボード」の全期間と同じ。ターミナルに `api/orders.sql: 6,044 行` のような行が出る |
+| 29 | ブラウザの開発者ツールの「ネットワーク」で `query` を見る | 送っているのは `{"name":"orders","params":{"from":"2024-04-01"}}` だけで、SQL はブラウザに出てこない。絞り込みをしても `query` は増えない（ブラウザの中で集計し直している） |
+| 30 | <http://localhost:8080/api/schema> を開く | `orders` の説明とパラメーター `from` が JSON で出る |
+| 31 | `pnpm example:dev` で開き、`examples/sales/api/orders.sql` の最後の行の下に `AND c.region = '関東'` を足して保存 | ページが読み込み直され、DB 版のダッシュボードが関東だけの数字になる。消すと元に戻る |
+| 32 | 同じファイルの `SELECT` を `DELETE FROM orders` に変えて保存 | タイルに「API の orders を読めません（400）: api/orders.sql: SELECT か WITH で始まる文だけ使えます（DELETE で始まっています）」と出る。戻すと直る |
+| 33 | `pnpm example:dev` を動かしたまま <http://localhost:5173/api/orders.sql> と <http://localhost:5173/db/sales.sqlite> を開く | どちらも 403 で、中身は出ない（SQL とデータベースはサーバーだけが使う） |
+| 34 | `pnpm example:serve` を動かしたまま、ターミナルで `curl -i -H "Host: example.com" http://localhost:8080/api/schema` | `403` と「この名前 (example.com) では開けません…」が返る。`Host` を付けなければ 200 |
 
 ## 4. 自分の Excel で試す
 
@@ -136,8 +150,8 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 ## 5. 自動テスト
 
 ```sh
-pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）
-pnpm e2e         # サンプルを静的ビルドして、ブラウザ（Playwright）で上の主な操作を確認
+pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）
+pnpm e2e         # サンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認
 ```
 
 `pnpm e2e` は初回だけ `pnpm --filter devbi-example-sales exec playwright install chromium` でブラウザを入れます。
@@ -148,3 +162,5 @@ pnpm e2e         # サンプルを静的ビルドして、ブラウザ（Playwri
 - 初回の読み込みが重めです。重いのは DuckDB-wasm（約 34MB、圧縮して 8.5MB）で、2 回目以降はブラウザのキャッシュから読みます。画面の JavaScript は最初に約 440KB を読み、グラフ（約 280KB）、表（約 225KB と CSS 約 73KB）、DuckDB を動かす部分（約 220KB）は使うときに別のファイルとして読みます
 - `dist/` を新しいビルドで置き換えたときは、開いたままのページを読み込み直してください。まだ読んでいなかったグラフなどのファイルが見つからず、タイルに「ページを読み込み直してください」と出ます
 - Parquet は DuckDB の拡張をインターネットから取りに行きます。社内で外に出られないときは xlsx / CSV で試してください
+- データベースは SQLite と PostgreSQL だけです（SQL Server・Oracle・MySQL はこのあと）
+- `read_api` のパラメーターは metrics.yaml に固定で書きます。期間を変えたときにデータベースから読み直す仕組みはまだありません。読む行は 100 万行までで、それより多いときは SQL の WHERE で絞ります

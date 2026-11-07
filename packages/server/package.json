@@ -1,0 +1,51 @@
+{
+  "name": "@devbi/server",
+  "version": "0.0.0",
+  "description": "DevBI's read-only API (SQL files on the server, Arrow to the browser) and devbi-serve: the built site and the API in one process.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ishibashi0112/devbi.git",
+    "directory": "packages/server"
+  },
+  "engines": {
+    "node": ">=22.16"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "bin": {
+    "devbi-serve": "./bin/devbi-serve.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "apache-arrow": "^17.0.0"
+  },
+  "peerDependencies": {
+    "pg": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.0",
+    "pg": "^8.16.0",
+    "tsup": "^9.0.0"
+  }
+}
