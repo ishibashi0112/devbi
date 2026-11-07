@@ -99,7 +99,7 @@ pnpm example:dev
 
 `examples/sales` を VS Code で開きます（リポジトリのルートを開いてもよい）。補完に使う `examples/sales/.devbi/` は `pnpm example:dev` を動かすと作られます（開発サーバーなしなら `pnpm gen`）。
 
-Ctrl+Space は候補を出すキーです。Mac では control とスペースバーを押します。日本語と英字の切り替えになってしまうとき（Mac ではこのキーが入力ソースの切り替えに割り当てられていることがあります）は、option + esc を押すか、`"` の中で文字を 1 つ打つと候補が出ます。
+表の Ctrl+Space は、VS Code で候補を出すキーです（Windows / Linux）。**Mac では option + esc** を押してください。Mac の control + スペースは、たいてい日本語と英字の切り替えに使われていて、VS Code まで届きません。コマンドパレット（command + shift + P）の「候補をトリガー」（Trigger Suggest）でも同じです。JSON で `"` の中に文字を打つと、キーを押さなくても候補が出ることがあります。
 
 | # | やること | こうなれば OK |
 | --- | --- | --- |
