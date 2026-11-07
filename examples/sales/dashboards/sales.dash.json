@@ -1,4 +1,5 @@
 {
+  "$schema": "../.devbi/dash.schema.json",
   "title": "売上ダッシュボード",
   "description": "サンプルデータ（data/sales.xlsx の「明細」シート）",
   "metrics": "sales",

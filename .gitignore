@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# pnpm gen / the Vite plugin writes these from models/ (they include local_* names, so keep them out of git)
+.devbi/
 *.tsbuildinfo
 .vite/
 test-results/

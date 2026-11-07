@@ -1,0 +1,240 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "label": {
+      "description": "表示名。既定はファイル名",
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "description": "説明"
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "description": "元の表を作る DuckDB の SQL。read_xlsx('data/x.xlsx', sheet = '明細') / read_csv / read_parquet / read_arrow / read_json でファイルを読む"
+    },
+    "time": {
+      "description": "日付の列。期間の絞り込み、時間の粒度、前年比・累計に使う",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "description": "日付か日時の列名"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "column": {
+              "type": "string",
+              "minLength": 1,
+              "description": "日付か日時の列名"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "description": "表示名。既定は名前"
+            },
+            "fiscal_year_start": {
+              "description": "年度の始まりの月（1〜12）。既定は 1",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            }
+          },
+          "required": [
+            "column"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "dimensions": {
+      "description": "軸（分けたり絞ったりする値）。名前 → 列名か定義",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "description": "列名"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "column": {
+                "description": "列名。sql とどちらか一つ",
+                "type": "string",
+                "minLength": 1
+              },
+              "sql": {
+                "description": "model の列を使った SQL の式。例: \"金額 >= 100000\"",
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "表示名。既定は名前"
+              },
+              "description": {
+                "type": "string",
+                "description": "説明"
+              },
+              "format": {
+                "type": "string",
+                "description": "書式。\"#,##0\"、\"¥#,##0\"、\"0.0%\"、\"compact\" など（Excel の表示形式の一部）"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "measures": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "description": "集計の式（sql）"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sql": {
+                "type": "string",
+                "minLength": 1,
+                "description": "集計関数を使った DuckDB の式。ほかの sql の指標を名前で使える。例: SUM(金額)、revenue / orders"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "表示名。既定は名前"
+              },
+              "description": {
+                "type": "string",
+                "description": "説明"
+              },
+              "format": {
+                "type": "string",
+                "description": "書式。\"#,##0\"、\"¥#,##0\"、\"0.0%\"、\"compact\" など（Excel の表示形式の一部）"
+              }
+            },
+            "required": [
+              "sql"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "of": {
+                "type": "string",
+                "minLength": 1,
+                "description": "比べる sql の指標の名前"
+              },
+              "compare": {
+                "type": "string",
+                "enum": [
+                  "previous_year",
+                  "previous_period"
+                ],
+                "description": "previous_year: 1 年前と比べる。previous_period: 直前の同じ長さの期間と比べる"
+              },
+              "as": {
+                "description": "value: 比較先の値、delta: 差、ratio: 比（既定）、change: 増減率（比 − 1）",
+                "type": "string",
+                "enum": [
+                  "value",
+                  "delta",
+                  "ratio",
+                  "change"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "表示名。既定は名前"
+              },
+              "description": {
+                "type": "string",
+                "description": "説明"
+              },
+              "format": {
+                "type": "string",
+                "description": "書式。\"#,##0\"、\"¥#,##0\"、\"0.0%\"、\"compact\" など（Excel の表示形式の一部）"
+              }
+            },
+            "required": [
+              "of",
+              "compare"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "of": {
+                "type": "string",
+                "minLength": 1,
+                "description": "足し上げる sql の指標の名前"
+              },
+              "running": {
+                "anyOf": [
+                  {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "year",
+                      "fiscal_year"
+                    ]
+                  }
+                ],
+                "description": "true / all: 全期間の累計、year: 1 月で戻る、fiscal_year: 年度の始まりで戻る"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "表示名。既定は名前"
+              },
+              "description": {
+                "type": "string",
+                "description": "説明"
+              },
+              "format": {
+                "type": "string",
+                "description": "書式。\"#,##0\"、\"¥#,##0\"、\"0.0%\"、\"compact\" など（Excel の表示形式の一部）"
+              }
+            },
+            "required": [
+              "of",
+              "running"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "description": "指標（集計する値）。名前 → 式か定義"
+    }
+  },
+  "required": [
+    "model",
+    "measures"
+  ],
+  "additionalProperties": false,
+  "title": "DevBI 指標ファイル（*.metrics.yaml）"
+}

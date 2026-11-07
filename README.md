@@ -11,6 +11,7 @@ pnpm install
 pnpm example:dev      # packages/* をビルドして、examples/sales を Vite の dev server で開く（http://localhost:5173）
 pnpm example:preview  # 静的ビルドしたものを開く（http://localhost:4173）
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
+pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）
 pnpm e2e              # examples/sales を静的ビルドして Playwright で確認
 ```
@@ -40,7 +41,10 @@ models/
   sales.metrics.yaml       # 指標と軸
 data/
   sales.xlsx               # または .csv / .arrow / .parquet
+.devbi/                    # pnpm gen が作る JSON Schema と型（git に入れない）
 ```
+
+dash.json に `"$schema": "../.devbi/dash.schema.json"`、metrics.yaml の 1 行目に `# yaml-language-server: $schema=../.devbi/metrics.schema.json` と書くと、VS Code でタイルの種類や指標の名前が補完されます（YAML は拡張機能「YAML」が要ります）。詳しくは [docs/reference.md](docs/reference.md#エディタでの補完と型pnpm-gen)。
 
 ### metrics.yaml
 
@@ -82,9 +86,9 @@ measures:
 ### 昇格したタイル
 
 ```tsx
-import type { Query, TileProps } from "devbi";
-export const query: Query = { measures: ["revenue"], dimensions: ["customer"], limit: 10 };
-export default function TopCustomers({ rows, format, select, selection }: TileProps) { ... }
+import { defineQuery, type RowOf, type TileProps } from "devbi";
+export const query = defineQuery({ measures: ["revenue"], dimensions: ["customer"], limit: 10 });  // 名前は pnpm gen のあと型で検査
+export default function TopCustomers({ rows, format, select, selection }: TileProps<RowOf<typeof query>>) { ... }
 ```
 
 組み込みタイルと同じ `TileProps` を受け取ります。`select({ field: "customer", in: ["A社"] })` でほかのタイルを絞り込み、`select(null)` で解除。追加の集計が要るときは `useDevbiQuery(query, { tileId })`。

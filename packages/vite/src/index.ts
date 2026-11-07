@@ -5,6 +5,9 @@ import path from "node:path";
 import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources } from "devbi";
 import type { Plugin, ResolvedConfig, ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
+import { generate } from "./gen.js";
+
+export { generate, envDts, schemaNames, type GenerateResult } from "./gen.js";
 
 export interface DevbiOptions {
   /** Directory holding `dashboards/`, `models/` and `data/`. Relative to the Vite root. Default: the root. */
@@ -135,6 +138,10 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
     resolveId(id) {
       return id === VIRTUAL ? RESOLVED : undefined;
     },
+    async buildStart() {
+      // Keep .devbi/ (names for TypeScript and the editors' JSON Schema) in step with models/.
+      await generate(dir).catch((e: unknown) => config.logger.warn(`devbi: .devbi/ を書けませんでした: ${(e as Error).message}`));
+    },
     async load(id) {
       // DuckDB-wasm's worker points at a .map file the package does not ship; drop the comment so the dev server
       // does not print "Failed to load source map". Not the `?url` import, which must keep Vite's handling.
@@ -171,6 +178,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
         const isProjectFile = /\.(dash\.json|metrics\.yaml)$/.test(file);
         const isData = file.startsWith(path.join(dir, "data") + path.sep);
         if (!isProjectFile && !isData) return;
+        if (file.endsWith(".metrics.yaml")) void generate(dir).catch(() => undefined);
         const graph = server.environments?.client?.moduleGraph ?? server.moduleGraph;
         const mod = graph.getModuleById(RESOLVED);
         if (mod) graph.invalidateModule(mod as never);

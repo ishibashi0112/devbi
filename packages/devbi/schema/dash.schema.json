@@ -1,0 +1,539 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "エディタ用の JSON Schema の場所",
+      "type": "string"
+    },
+    "title": {
+      "description": "ダッシュボードの見出し。既定はファイル名",
+      "type": "string"
+    },
+    "description": {
+      "description": "見出しの横の説明",
+      "type": "string"
+    },
+    "metrics": {
+      "type": "string",
+      "minLength": 1,
+      "description": "タイルが使う指標ファイルの名前（models/<名前>.metrics.yaml）。1 つだけなら省略可"
+    },
+    "columns": {
+      "description": "グリッドの列数。既定は 12",
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "rowHeight": {
+      "description": "1 行の高さ（px）。既定は 80",
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "tiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "タイルの名前。ダッシュボードの中で重複できない"
+          },
+          "x": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "左端の列（0 から）"
+          },
+          "y": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "上端の行（0 から）"
+          },
+          "w": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "幅（列の数）"
+          },
+          "h": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "高さ（行の数）"
+          },
+          "title": {
+            "description": "タイルの見出し",
+            "type": "string"
+          },
+          "type": {
+            "description": "組み込みタイルの種類。component とどちらか一つ",
+            "type": "string",
+            "enum": [
+              "kpi",
+              "bar",
+              "line",
+              "area",
+              "barlist",
+              "table",
+              "pivot",
+              "select",
+              "date-range",
+              "markdown"
+            ],
+            "enumDescriptions": [
+              "大きな数字。最初の指標を大きく、残りの指標をその下に出す。比較の指標は良し悪しで色が付く",
+              "棒グラフ。横軸は time、なければ最初の軸。2 つ目の軸か 2 つ目以降の指標は色分けの系列。棒をクリックで選択",
+              "折れ線グラフ。軸の決め方は bar と同じ。点をクリックで選択",
+              "積み上げ面グラフ。軸の決め方は bar と同じ。系列は大きい順に積む",
+              "横棒のランキング。最初の軸を最初の指標で並べる。行をクリックで選択",
+              "表。すべての列を出す。見出しで並べ替え、行をクリックでその行の軸の値を選択",
+              "クロス集計。1 つの項目を列に、残りの軸を行に、最初の指標をセルに。合計の行と列つき",
+              "最初の軸の値の一覧から選ぶ。9 件以上で検索欄が出る",
+              "期間の選択。time の列で全タイルを絞る。query は書かない",
+              "文章。**太字**、*斜体*、`コード`、[リンク](URL)、# 見出し、- 箇条書き。query は書かない"
+            ]
+          },
+          "component": {
+            "description": "自作タイル（dashboards/ の中の .tsx / .jsx）。dash.json からの相対パス。type とどちらか一つ",
+            "type": "string",
+            "minLength": 1
+          },
+          "query": {
+            "type": "object",
+            "properties": {
+              "metrics": {
+                "type": "string",
+                "minLength": 1,
+                "description": "使う指標ファイルの名前（models/<名前>.metrics.yaml）。既定はダッシュボードの metrics"
+              },
+              "measures": {
+                "description": "出す指標",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "指標の名前"
+                }
+              },
+              "dimensions": {
+                "description": "分ける軸",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "軸の名前"
+                }
+              },
+              "time": {
+                "description": "時間の粒度。day / week（月曜始まり）/ month / quarter / year / fiscal_year。結果の列名は time の列名",
+                "type": "string",
+                "enum": [
+                  "day",
+                  "week",
+                  "month",
+                  "quarter",
+                  "year",
+                  "fiscal_year"
+                ]
+              },
+              "filters": {
+                "description": "このタイルだけに常にかける絞り込み",
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "軸の名前か、time の列名"
+                        },
+                        "in": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "description": "どれかに一致する行。null は空欄に一致"
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "in"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "軸の名前か、time の列名"
+                        },
+                        "between": {
+                          "type": "array",
+                          "items": [
+                            {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            {
+                              "type": [
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ]
+                            }
+                          ],
+                          "additionalItems": false,
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "description": "[始まり, 終わり]。始まり ≦ 値 ＜ 終わり。null の側は無制限"
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "between"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "sort": {
+                "description": "並べ替え。既定は時間の順、軸と指標があれば最初の指標の大きい順",
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "列の名前。\"-revenue\" のように先頭に - で降順"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "列の名前"
+                        },
+                        "desc": {
+                          "description": "true で降順",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "field"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "limit": {
+                "description": "最大の行数",
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false,
+            "description": "何を出すか。SQL は書かず、指標と軸の名前で指定する"
+          },
+          "options": {
+            "description": "タイルの種類ごとの設定",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "required": [
+              "component"
+            ]
+          }
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "kpi"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "bar"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "line"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "area"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "barlist"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "table"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "pivot"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {
+                    "columns": {
+                      "type": "string",
+                      "description": "列にする項目（軸の名前か time の列名）。既定は最後の軸か時間"
+                    },
+                    "totals": {
+                      "type": "boolean",
+                      "description": "false で合計の行と列を消す"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "select"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {
+                    "multiple": {
+                      "type": "boolean",
+                      "description": "false で 1 つだけ選ぶ（既定は複数）"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "date-range"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {
+                    "default": {
+                      "enum": [
+                        "all",
+                        "latest_month",
+                        "last_12_months",
+                        "latest_year",
+                        "previous_year",
+                        "year_to_date",
+                        "latest_fiscal_year",
+                        "previous_fiscal_year"
+                      ],
+                      "description": "最初に選ぶ期間。「最新」はデータの最終日が基準"
+                    },
+                    "metrics": {
+                      "type": "string",
+                      "description": "使う指標ファイル（ダッシュボードの metrics と違うとき）"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "markdown"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "description": "本文（Markdown）"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        ]
+      },
+      "description": "タイルの並び"
+    }
+  },
+  "required": [
+    "tiles"
+  ],
+  "additionalProperties": false,
+  "title": "DevBI ダッシュボード（*.dash.json）"
+}

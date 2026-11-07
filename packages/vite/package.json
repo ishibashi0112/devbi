@@ -23,6 +23,7 @@
   },
   "files": [
     "dist",
+    "bin",
     "client.d.ts"
   ],
   "scripts": {
@@ -41,5 +42,8 @@
     "@devbi/react": "workspace:*",
     "tsup": "^9.0.0",
     "vite": "^8.3.6"
+  },
+  "bin": {
+    "devbi-gen": "./bin/devbi-gen.js"
   }
 }

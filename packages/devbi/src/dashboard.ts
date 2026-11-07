@@ -1,55 +1,86 @@
 import { z } from "zod";
 import { GRAINS, type Grain, type TileSpec } from "./types.js";
 
-const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+/** Names known from the project's metrics files, for a stricter schema (editor completion). */
+export interface SchemaNames {
+  metrics: string[];
+  measures: string[];
+  dimensions: string[];
+  /** Dimension names and time column names: what filters and sort can refer to. */
+  fields: string[];
+}
 
-const filterInput = z.union([
-  z.strictObject({ field: z.string().min(1), in: z.array(scalar) }),
-  z.strictObject({ field: z.string().min(1), between: z.tuple([scalar, scalar]) }),
-]);
+const nonEmpty = <T extends string>(list: readonly T[] | undefined) => (list && list.length ? (list as [T, ...T[]]) : undefined);
 
-const sortInput = z.union([
-  z.string().min(1),
-  z.strictObject({ field: z.string().min(1), desc: z.boolean().optional() }),
-]);
+/** The dash.json schemas. With `names`, names of metrics files, measures and dimensions must be known ones. */
+export function dashboardSchemas(names?: SchemaNames) {
+  const nameOf = (list: string[] | undefined, what: string) => {
+    const known = nonEmpty(list);
+    return (known ? z.enum(known) : z.string().min(1)).describe(what);
+  };
+  const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+  const field = nameOf(names?.fields, "軸の名前か、time の列名");
+  const filter = z.union([
+    z.strictObject({ field, in: z.array(scalar).describe("どれかに一致する行。null は空欄に一致") }),
+    z.strictObject({
+      field,
+      between: z.tuple([scalar, scalar]).describe("[始まり, 終わり]。始まり ≦ 値 ＜ 終わり。null の側は無制限"),
+    }),
+  ]);
+  const sort = z.union([
+    z.string().min(1).describe('列の名前。"-revenue" のように先頭に - で降順'),
+    z.strictObject({ field: z.string().min(1).describe("列の名前"), desc: z.boolean().optional().describe("true で降順") }),
+  ]);
+  const query = z
+    .strictObject({
+      metrics: nameOf(names?.metrics, "使う指標ファイルの名前（models/<名前>.metrics.yaml）。既定はダッシュボードの metrics").optional(),
+      measures: z.array(nameOf(names?.measures, "指標の名前")).optional().describe("出す指標"),
+      dimensions: z.array(nameOf(names?.dimensions, "軸の名前")).optional().describe("分ける軸"),
+      time: z
+        .enum(GRAINS as [Grain, ...Grain[]])
+        .optional()
+        .describe("時間の粒度。day / week（月曜始まり）/ month / quarter / year / fiscal_year。結果の列名は time の列名"),
+      filters: z.array(filter).optional().describe("このタイルだけに常にかける絞り込み"),
+      sort: z.array(sort).optional().describe("並べ替え。既定は時間の順、軸と指標があれば最初の指標の大きい順"),
+      limit: z.number().int().positive().optional().describe("最大の行数"),
+    })
+    .describe("何を出すか。SQL は書かず、指標と軸の名前で指定する");
+  const gridInt = z.number().int().nonnegative();
+  const tile = z
+    .strictObject({
+      id: z.string().min(1).describe("タイルの名前。ダッシュボードの中で重複できない"),
+      x: gridInt.describe("左端の列（0 から）"),
+      y: gridInt.describe("上端の行（0 から）"),
+      w: z.number().int().positive().describe("幅（列の数）"),
+      h: z.number().int().positive().describe("高さ（行の数）"),
+      title: z.string().optional().describe("タイルの見出し"),
+      // Any string at load time: an unknown type is that tile's error, not the dashboard's. The editor schema lists the types.
+      type: z.string().min(1).optional().describe("組み込みタイルの種類。component とどちらか一つ"),
+      component: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("自作タイル（dashboards/ の中の .tsx / .jsx）。dash.json からの相対パス。type とどちらか一つ"),
+      query: query.optional(),
+      options: z.record(z.string(), z.unknown()).optional().describe("タイルの種類ごとの設定"),
+    })
+    .refine((t) => !!t.type !== !!t.component, { message: "type か component のどちらか一つを書いてください" });
+  const dashboard = z
+    .strictObject({
+      $schema: z.string().optional().describe("エディタ用の JSON Schema の場所"),
+      title: z.string().optional().describe("ダッシュボードの見出し。既定はファイル名"),
+      description: z.string().optional().describe("見出しの横の説明"),
+      metrics: nameOf(names?.metrics, "タイルが使う指標ファイルの名前（models/<名前>.metrics.yaml）。1 つだけなら省略可").optional(),
+      columns: z.number().int().positive().optional().describe("グリッドの列数。既定は 12"),
+      rowHeight: z.number().int().positive().optional().describe("1 行の高さ（px）。既定は 80"),
+      tiles: z.array(tile).describe("タイルの並び"),
+    })
+    .meta({ title: "DevBI ダッシュボード（*.dash.json）" });
+  return { query, tile, dashboard };
+}
 
-export const queryInput = z.strictObject({
-  metrics: z.string().min(1).optional(),
-  measures: z.array(z.string().min(1)).optional(),
-  dimensions: z.array(z.string().min(1)).optional(),
-  time: z.enum(GRAINS as [Grain, ...Grain[]]).optional(),
-  filters: z.array(filterInput).optional(),
-  sort: z.array(sortInput).optional(),
-  limit: z.number().int().positive().optional(),
-});
-
-const gridInt = z.number().int().nonnegative();
-
-const tileInput = z
-  .strictObject({
-    id: z.string().min(1),
-    x: gridInt,
-    y: gridInt,
-    w: z.number().int().positive(),
-    h: z.number().int().positive(),
-    title: z.string().optional(),
-    type: z.string().min(1).optional(),
-    component: z.string().min(1).optional(),
-    query: queryInput.optional(),
-    options: z.record(z.string(), z.unknown()).optional(),
-  })
-  .refine((t) => !!t.type !== !!t.component, { message: "type か component のどちらか一つを書いてください" });
-
-const dashboardInput = z.strictObject({
-  $schema: z.string().optional(),
-  title: z.string().optional(),
-  description: z.string().optional(),
-  /** Default metrics view for the tiles (name of `models/<name>.metrics.yaml`). */
-  metrics: z.string().min(1).optional(),
-  columns: z.number().int().positive().optional(),
-  rowHeight: z.number().int().positive().optional(),
-  tiles: z.array(tileInput),
-});
+const { query: queryInput, dashboard: dashboardInput } = dashboardSchemas();
+export { queryInput };
 
 export interface Dashboard {
   name: string;

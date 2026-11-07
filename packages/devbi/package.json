@@ -16,10 +16,12 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./schema/*": "./schema/*"
   },
   "files": [
-    "dist"
+    "dist",
+    "schema"
   ],
   "sideEffects": false,
   "scripts": {

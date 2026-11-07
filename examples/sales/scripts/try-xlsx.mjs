@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { generate } from "@devbi/vite";
 import { listSheets, readXlsx } from "devbi";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -95,6 +96,7 @@ const rowsKey = key("行数", "rows");
 
 const rel = `data/local/${name}.xlsx`;
 const yaml = [
+  "# yaml-language-server: $schema=../.devbi/metrics.schema.json",
   `# pnpm try-xlsx が ${path.basename(src)} の「${sheet}」シートから作った下書き。自由に直してください。`,
   `label: ${q(path.basename(src, path.extname(src)))}`,
   `model: ${q(`SELECT * FROM read_xlsx('${rel}', sheet = '${sheet.replaceAll("'", "''")}')`)}`,
@@ -161,7 +163,7 @@ if (dims.length) {
     query: { measures: [...new Set([main, rowsKey, ...nums.slice(1, 3).map((m) => m.key)])], dimensions: dims.slice(0, 2).map((d) => d.key), limit: 200 },
   });
 }
-const dash = { title: `${path.basename(src, path.extname(src))}（試し）`, description: `${path.basename(src)} の「${sheet}」シート`, metrics: name, tiles };
+const dash = { $schema: "../.devbi/dash.schema.json", title: `${path.basename(src, path.extname(src))}（試し）`, description: `${path.basename(src)} の「${sheet}」シート`, metrics: name, tiles };
 
 // ---- 書き出し --------------------------------------------------------------
 const out = {
@@ -176,6 +178,7 @@ await mkdir(path.dirname(out.data), { recursive: true });
 await copyFile(src, out.data);
 await writeFile(out.metrics, yaml);
 await writeFile(out.dash, `${JSON.stringify(dash, null, 2)}\n`);
+await generate(root); // .devbi/: the new names for the editor's completion, also without the dev server
 
 console.log("\n書いたファイル（どれも git に入りません）:");
 for (const f of Object.values(out)) console.log(`  examples/sales/${path.relative(root, f)}`);

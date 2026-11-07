@@ -77,21 +77,26 @@ function where(preds: string[], indent: string): string {
   return `\n${indent}WHERE ${preds.join(`\n${indent}  AND `)}`;
 }
 
-function resolveSort(sort: SortSpec[] | undefined, fields: FieldInfo[]): { field: string; desc: boolean }[] {
+function resolveSort(sort: readonly SortSpec[] | undefined, fields: FieldInfo[]): { field: string; desc: boolean }[] {
   const names = new Set(fields.map((f) => f.name));
+  let order: { field: string; desc: boolean }[];
   if (sort?.length) {
-    return sort.map((s) => {
+    order = sort.map((s) => {
       const spec = typeof s === "string" ? { field: s.replace(/^-/, ""), desc: s.startsWith("-") } : { field: s.field, desc: !!s.desc };
       if (!names.has(spec.field)) throw new QueryError(`並べ替えの ${spec.field} は結果の列にありません`);
       return spec;
     });
+  } else {
+    const time = fields.find((f) => f.kind === "time");
+    const measure = fields.find((f) => f.kind === "measure");
+    const hasDims = fields.some((f) => f.kind === "dimension");
+    order = time ? [{ field: time.name, desc: false }] : measure && hasDims ? [{ field: measure.name, desc: true }] : [];
   }
-  const time = fields.find((f) => f.kind === "time");
-  if (time) return [{ field: time.name, desc: false }];
-  const measure = fields.find((f) => f.kind === "measure");
-  const dims = fields.filter((f) => f.kind === "dimension");
-  if (measure && dims.length) return [{ field: measure.name, desc: true }];
-  return dims.map((d) => ({ field: d.name, desc: false }));
+  // Break ties with the group keys (time, then the dimensions in order). Each row has its own keys, so the order,
+  // and the rows a limit keeps, are the same on every run and machine (DuckDB's parallel GROUP BY has no order).
+  const used = new Set(order.map((o) => o.field));
+  const keys = [...fields.filter((f) => f.kind === "time"), ...fields.filter((f) => f.kind === "dimension")];
+  return [...order, ...keys.filter((f) => !used.has(f.name)).map((f) => ({ field: f.name, desc: false }))];
 }
 
 function orderLimit(order: { field: string; desc: boolean }[], limit: number | undefined, prefix = ""): string {

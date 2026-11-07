@@ -7,6 +7,7 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [dash.json](#dashjson)（タイルの並び）
 - [組み込みタイル](#組み込みタイル)
 - [自作タイル（JSX）](#自作タイルjsx)
+- [エディタでの補完と型（pnpm gen）](#エディタでの補完と型pnpm-gen)
 - [書式](#書式)
 - [@devbi/vite](#devbivite)
 - [@devbi/react](#devbireact)
@@ -24,6 +25,7 @@ models/
   <名前>.metrics.yaml     # 指標と軸。dash.json の "metrics" で名前を指す
 data/
   *.xlsx / *.csv / *.arrow / *.parquet / *.json
+.devbi/                   # pnpm gen が作る（エディタの補完と TypeScript の型）。git に入れない
 ```
 
 `@devbi/vite` がこの 3 つのフォルダを読み、検証してアプリに渡します。間違いがあると、ファイル名と項目つきの日本語のエラーが開発サーバーの画面に出ます。
@@ -31,6 +33,7 @@ data/
 ## metrics.yaml
 
 ```yaml
+# yaml-language-server: $schema=../.devbi/metrics.schema.json
 label: 売上
 model: SELECT * FROM read_xlsx('data/sales.xlsx', sheet = '明細')
 time: { column: 受注日, fiscal_year_start: 4 }
@@ -148,6 +151,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 
 ```json
 {
+  "$schema": "../.devbi/dash.schema.json",
   "title": "売上",
   "metrics": "sales",
   "tiles": [
@@ -167,7 +171,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `metrics` | タイルが使う指標ファイルの名前（`models/<名前>.metrics.yaml`）。指標ファイルが 1 つだけなら省略可 |
 | `columns` | グリッドの列数。既定は 12 |
 | `rowHeight` | 1 行の高さ（px）。既定は 80 |
-| `$schema` | エディタ用。中身は見ない |
+| `$schema` | エディタの補完用（[下記](#エディタでの補完と型pnpm-gen)）。DevBI は中身を見ない |
 
 ### タイル
 
@@ -175,7 +179,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | --- | --- |
 | `id` | タイルの名前。ダッシュボードの中で重複できない |
 | `x`, `y`, `w`, `h` | グリッド上の位置と大きさ（列・行の数）。はみ出し（`x + w > columns`）と、ほかのタイルとの重なりはエラー |
-| `type` | [組み込みタイル](#組み込みタイル)の種類 |
+| `type` | [組み込みタイル](#組み込みタイル)の種類。ない種類を書くと、そのタイルにエラーが出る（エディタでは波線） |
 | `component` | [自作タイル](#自作タイルjsx)のファイル。dash.json からの相対パスか、`/dashboards/...` |
 | `title` | タイルの見出し |
 | `query` | 何を出すか（下記）。自作タイルはファイルの中に書いてもよい |
@@ -197,7 +201,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `limit` | 最大の行数 |
 | `metrics` | ダッシュボードとは別の指標ファイルを使うとき |
 
-`measures` か `dimensions` か `time` のどれかが要ります。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。
+`measures` か `dimensions` か `time` のどれかが要ります。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
 
 絞り込み（`filters` の要素。クリックでの選択も同じ形）:
 
@@ -234,12 +238,12 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 `dashboards/` の中に `.tsx` か `.jsx` を置き、dash.json の `component` で指します。
 
 ```tsx
-import type { Query, TileProps } from "devbi";
+import { defineQuery, type RowOf, type TileProps } from "devbi";
 
 // 欲しいデータを宣言する（SQL は書かない）。dash.json の "query" が優先
-export const query: Query = { measures: ["revenue", "orders"], dimensions: ["customer"], limit: 10 };
+export const query = defineQuery({ measures: ["revenue", "orders"], dimensions: ["customer"], limit: 10 });
 
-export default function TopCustomers({ rows, format, select, selection }: TileProps) {
+export default function TopCustomers({ rows, format, select, selection }: TileProps<RowOf<typeof query>>) {
   return (
     <ol>
       {rows.map((r) => (
@@ -254,9 +258,13 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 }
 ```
 
+- `defineQuery({...})` は、指標と軸の名前を `models/*.metrics.yaml` と照らし合わせます（[`pnpm gen`](#エディタでの補完と型pnpm-gen) のあと）。`"revenu"` と書くと、エディタに「`"revenue"` ではありませんか」と出ます。候補はすべての指標ファイルの名前をまとめたものなので、`metrics` で選んだファイルにない名前は、読み込み時にタイルのエラーになります。
+- `RowOf<typeof query>` で `rows` の列に型が付きます（指標は `number | null`、軸は値、`time` を書いたときの時間の列は `Date | null`）。`r.` と打つと列の名前が補完されます。
+- `import type { Query } from "devbi"` で `export const query: Query = {...}` と書いてもかまいません。その場合、名前は読み込み時にだけ検証されます。
+
 ### `TileProps`
 
-組み込みタイルも同じものを受け取ります。
+組み込みタイルも同じものを受け取ります。`TileProps<行の型>` で `rows` の型を指定できます（既定は `Row`）。
 
 | プロパティ | 型 | 中身 |
 | --- | --- | --- |
@@ -281,6 +289,38 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 - `useTimeExtent(metrics?)` … データの最初と最後の日付。
 
 タイルの中でエラーが起きても、そのタイルにエラーが出るだけで、ほかのタイルは動き続けます。
+
+## エディタでの補完と型（pnpm gen）
+
+`pnpm gen`（中身は `@devbi/vite` の `devbi-gen`）が `models/*.metrics.yaml` を読んで、`.devbi/` に次の 3 つを書きます。`@devbi/vite` も、開発サーバーとビルドの開始時と、metrics.yaml を保存したときに同じものを書き直します。
+
+| ファイル | 使い道 |
+| --- | --- |
+| `.devbi/dash.schema.json` | dash.json の JSON Schema。タイルの種類（説明つき）、種類ごとの `options`、`query` の指標・軸・時間の名前を補完し、間違いに波線を出す |
+| `.devbi/metrics.schema.json` | metrics.yaml の JSON Schema。キーの補完と説明、`compare` / `as` / `running` などの値の候補 |
+| `.devbi/env.d.ts` | TypeScript 用の名前の一覧。[`defineQuery` と `RowOf`](#自作タイルjsx) が使う |
+
+使うための設定（`pnpm try-xlsx` が作る下書きには最初から入っていて、`.devbi/` も作り直します）:
+
+| ファイル | 書くこと |
+| --- | --- |
+| dash.json | 先頭に `"$schema": "../.devbi/dash.schema.json"`。VS Code はこれだけで補完が効く |
+| metrics.yaml | 1 行目に `# yaml-language-server: $schema=../.devbi/metrics.schema.json`。VS Code は拡張機能「YAML」（`redhat.vscode-yaml`）が要る。このリポジトリか examples/sales を開くとおすすめに出る |
+| tsconfig.json | `"include"` に `".devbi/*.d.ts"` を足す。`".devbi"` だけだと、点で始まるフォルダは読まれない。`".devbi/env.d.ts"` とファイル名で書くと、エディタを開いたあとにできたファイルに気づかない |
+
+- 名前の候補は、すべての指標ファイルの分をまとめたものです。そのタイルの指標ファイルにある名前かどうかは、読み込み時に検証します。
+- `.devbi/` は git に入れません（手元で試す `local_*` の名前が入るため）。clone した直後は `pnpm gen` か `pnpm example:dev` で作られます。
+- 読めない metrics.yaml があると、エラーを出して、その分の名前を入れずに書きます。開発サーバーで書きかけのときは、そのファイルの最後に読めた名前を残します。
+- 名前の入っていない共通の JSON Schema は、パッケージの `devbi/schema/dash.schema.json` と `devbi/schema/metrics.schema.json` にもあります。
+
+`devbi-gen [--dir <フォルダ>] [--check]`:
+
+| オプション | 中身 |
+| --- | --- |
+| `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
+| `--check` | 何も書かずに、古いファイルがあれば一覧を出して終了コード 1 |
+
+読めない metrics.yaml があったときも終了コード 1 です。フォルダに `models/` がないときは、何も書かずに終了コード 2 です。
 
 ## 書式
 
@@ -325,6 +365,8 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 
 - `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
 - 開発サーバーでは、dash.json・metrics.yaml・data/ のファイルを保存するとページを読み込み直します。
+- 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
+- コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。
 
 ## @devbi/react
@@ -360,7 +402,10 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `writeXlsx([{ name, rows }])` | Excel を書く（テストやサンプルデータ用） |
 | `formatNumber(value, format?)` / `formatTime(date, grain?, fiscalYearStart?)` / `formatValue(value, field?)` | [書式](#書式)どおりの文字にする |
 | `getMeasure(view, name)` / `getDimension(view, name)` | 名前で引く |
-| 型 | `Query`、`Filter`、`Row`、`Scalar`、`FieldInfo`、`TileSpec`、`TileProps`、`Grain`、`MetricsView`、`Dashboard` など |
+| `defineQuery(query)` / `RowOf<typeof query>` | 名前を検査するクエリと、その行の型（[自作タイル](#自作タイルjsx)） |
+| `dashboardJsonSchema(names?)` / `metricsJsonSchema()` | dash.json と metrics.yaml の JSON Schema。`names`（`{ metrics, measures, dimensions, fields }`）を渡すと、その名前だけを許す |
+| `TILE_TYPES` / `TILE_TYPE_NAMES` / `DATE_RANGE_PRESETS` | 組み込みタイルの種類（説明と `options`）、`date-range` の期間の名前 |
+| 型 | `Query`、`Filter`、`Row`、`Scalar`、`FieldInfo`、`TileSpec`、`TileProps`、`Grain`、`MetricsView`、`Dashboard`、`MetricsRegistry`（`.devbi/env.d.ts` が名前を足す）など |
 
 ## 見た目の変更（CSS 変数）
 
@@ -395,6 +440,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm example:dev` | パッケージをビルドして、サンプルの開発サーバーを開く（<http://localhost:5173>） |
 | `pnpm example:preview` | サンプルを静的ビルドして開く（<http://localhost:4173>） |
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
+| `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |
 | `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式） |
 | `pnpm e2e` | サンプルを静的ビルドして、ブラウザで操作を確かめる |
-| `pnpm typecheck` / `pnpm build` | 型チェック / パッケージのビルド |
+| `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |

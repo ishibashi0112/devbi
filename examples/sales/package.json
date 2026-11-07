@@ -6,9 +6,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "devbi-gen && tsc -p tsconfig.json",
     "gen:data": "node scripts/generate-data.mjs",
     "try-xlsx": "node scripts/try-xlsx.mjs",
+    "gen": "devbi-gen",
     "e2e": "vite build && playwright test --trace off"
   },
   "dependencies": {
