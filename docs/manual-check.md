@@ -105,10 +105,10 @@ pnpm example:dev
 | --- | --- | --- |
 | 22 | `dashboards/sales.dash.json` で、どれかのタイルの `"type": "bar"` の `bar` を消して Ctrl+Space | `kpi`、`bar`、`pivot` などの候補が説明つきで出る |
 | 23 | 同じファイルの `"measures": ["revenue"]` の中で Ctrl+Space。次に `"revenue"` を `"revenu"` にする | 候補に `revenue`、`orders`、`revenue_yoy` などが出る。`"revenu"` には波線が出る |
-| 24 | `"pivot"` タイルの `options` の中で Ctrl+Space | `columns` と `totals` が出る。`"totals": "no"` にすると波線 |
-| 25 | `models/sales.metrics.yaml` の項目にマウスを乗せる。`compare:` の値を消して Ctrl+Space | 項目の説明が出る。`previous_year`、`previous_period` が候補に出る（拡張機能「YAML」を入れたとき。開くと右下におすすめが出る） |
+| 24 | `"pivot"` タイルの `options` の中で Ctrl+Space | `totals` が候補に出る（`columns` はもう書いてあるので出ない）。`"totals": "no"` にすると波線 |
+| 25 | `models/sales.metrics.yaml` の項目にマウスを乗せる。`compare:` の値を消して Ctrl+Space | 項目の説明が出る。`previous_year`、`previous_period` が候補に出る（拡張機能「YAML」を入れたとき。入っていなければ、開くと右下におすすめが出る） |
 | 26 | `dashboards/sales/TopCustomers.tsx` の `defineQuery` の `"revenue"` を `"revenu"` にする | 赤い波線と「`"revenue"` ではありませんか」の旨のメッセージが出る。`r.` と打つと `revenue`、`orders`、`customer` などが候補に出る |
-| 27 | 開発サーバーを動かしたまま、`sales.metrics.yaml` の `measures:` に `max_price: MAX(単価)` を足して保存 | 22〜26 の候補に `max_price` が加わる（エディタによっては数秒かかる） |
+| 27 | 開発サーバーを動かしたまま、`sales.metrics.yaml` の `measures:` に `max_price: MAX(単価)` を足して保存 | 23 と 26 の候補に `max_price` が加わる（エディタによっては数秒かかる） |
 
 試したあとは `git checkout .` で元に戻せます。
 

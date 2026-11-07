@@ -64,10 +64,15 @@ export type DimensionName = Registered extends true ? RegistryPart<"dimensions">
 export type TimeName = Registered extends true ? RegistryPart<"time"> : string;
 
 /** A {@link Query} whose names are checked against the generated {@link MetricsRegistry}. */
-export interface TypedQuery<M extends MeasureName = MeasureName, D extends DimensionName = DimensionName> extends Query {
+export interface TypedQuery<
+  M extends MeasureName = MeasureName,
+  D extends DimensionName = DimensionName,
+  T extends Grain | undefined = Grain | undefined,
+> extends Query {
   metrics?: MetricsName;
   measures?: readonly M[];
   dimensions?: readonly D[];
+  time?: T;
 }
 
 /**
@@ -79,19 +84,24 @@ export interface TypedQuery<M extends MeasureName = MeasureName, D extends Dimen
  * export default function Top({ rows }: TileProps<RowOf<typeof query>>) { rows[0]?.revenue; }
  * ```
  */
-export function defineQuery<const M extends MeasureName = never, const D extends DimensionName = never>(
-  query: TypedQuery<M, D>,
-): TypedQuery<M, D> {
+export function defineQuery<
+  const M extends MeasureName = never,
+  const D extends DimensionName = never,
+  const T extends Grain | undefined = undefined,
+>(query: TypedQuery<M, D, T>): TypedQuery<M, D, T> {
   return query;
 }
 
 /**
  * The row type of a query declared with {@link defineQuery}: measures are numbers (or null),
- * dimensions are scalars, and the time column is a Date when the query has a time grain.
+ * dimensions are scalars, and the time column is a Date (or null for empty dates) when the query has a time grain.
  */
-export type RowOf<Q> = Q extends TypedQuery<infer M, infer D>
-  ? { [K in M]: number | null } & { [K in D]: Scalar } & (Q extends { time: Grain } ? { [K in TimeName]: Date } : unknown)
+export type RowOf<Q> = Q extends TypedQuery<infer M, infer D, infer T>
+  ? { [K in M]: number | null } & { [K in D]: Scalar } & ([T] extends [Grain] ? TimeColumns : unknown)
   : Row;
+
+// Without generated names the time column's name is unknown, so it is left out (rather than typing every key).
+type TimeColumns = string extends TimeName ? unknown : { [K in TimeName]: Date | null };
 
 export type FieldKind = "dimension" | "time" | "measure";
 

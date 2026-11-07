@@ -10,6 +10,10 @@ export interface GenerateResult {
   problems: string[];
 }
 
+// The last view each metrics file parsed to. While a file is half-edited in the dev server, its old names stay
+// in .devbi/ so promoted tiles do not turn red until the file is fixed.
+const lastGood = new Map<string, MetricsView>();
+
 const HEADER = "// pnpm gen（@devbi/vite）が models/*.metrics.yaml から作るファイルです。手で直さないでください。";
 
 function union(names: string[]): string {
@@ -54,10 +58,15 @@ export async function generate(dir: string, options: { check?: boolean } = {}): 
   const problems: string[] = [];
   const files = existsSync(modelsDir) ? (await readdir(modelsDir)).filter((f) => f.endsWith(".metrics.yaml")).sort() : [];
   for (const f of files) {
+    const file = path.join(modelsDir, f);
     try {
-      views.push(parseMetricsYaml(await readFile(path.join(modelsDir, f), "utf8"), f.slice(0, -".metrics.yaml".length), `models/${f}`));
+      const view = parseMetricsYaml(await readFile(file, "utf8"), f.slice(0, -".metrics.yaml".length), `models/${f}`);
+      lastGood.set(file, view);
+      views.push(view);
     } catch (e) {
       problems.push(e instanceof MetricsError ? e.message : `models/${f}: ${(e as Error).message}`);
+      const previous = lastGood.get(file);
+      if (previous) views.push(previous);
     }
   }
   const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;

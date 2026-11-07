@@ -41,6 +41,15 @@ describe("generate (.devbi/)", () => {
     expect(await readFile(path.join(dir, ".devbi/env.d.ts"), "utf8")).toBe(dts);
   });
 
+  it("keeps a file's last good names while it is broken (half-edited in the dev server)", async () => {
+    const dir = await project({ "models/sales.metrics.yaml": "model: SELECT 1\nmeasures:\n  revenue: SUM(金額)\n" });
+    await generate(dir);
+    await writeFile(path.join(dir, "models/sales.metrics.yaml"), "model: SELECT 1\nmeasures:\n  revenue: { of: nope, compare: previous_year }\n");
+    const r = await generate(dir);
+    expect(r.problems.join("\n")).toContain("指標 nope がありません");
+    expect(await readFile(path.join(dir, ".devbi/env.d.ts"), "utf8")).toContain('measures: "revenue";');
+  });
+
   it("skips metrics files it cannot read and reports them", async () => {
     const dir = await project({ "models/bad.metrics.yaml": "model: SELECT 1\nmeasures:\n  a: { of: nope, compare: previous_year }\n" });
     const r = await generate(dir);

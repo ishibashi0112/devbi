@@ -179,7 +179,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | --- | --- |
 | `id` | タイルの名前。ダッシュボードの中で重複できない |
 | `x`, `y`, `w`, `h` | グリッド上の位置と大きさ（列・行の数）。はみ出し（`x + w > columns`）と、ほかのタイルとの重なりはエラー |
-| `type` | [組み込みタイル](#組み込みタイル)の種類。ない種類を書くとエラー |
+| `type` | [組み込みタイル](#組み込みタイル)の種類。ない種類を書くと、そのタイルにエラーが出る（エディタでは波線） |
 | `component` | [自作タイル](#自作タイルjsx)のファイル。dash.json からの相対パスか、`/dashboards/...` |
 | `title` | タイルの見出し |
 | `query` | 何を出すか（下記）。自作タイルはファイルの中に書いてもよい |
@@ -201,7 +201,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `limit` | 最大の行数 |
 | `metrics` | ダッシュボードとは別の指標ファイルを使うとき |
 
-`measures` か `dimensions` か `time` のどれかが要ります。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。
+`measures` か `dimensions` か `time` のどれかが要ります。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
 
 絞り込み（`filters` の要素。クリックでの選択も同じ形）:
 
@@ -258,8 +258,8 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 }
 ```
 
-- `defineQuery({...})` は、指標と軸の名前を `models/*.metrics.yaml` と照らし合わせます（[`pnpm gen`](#エディタでの補完と型pnpm-gen) のあと）。`"revenu"` と書くと、エディタに「`"revenue"` ではありませんか」と出ます。
-- `RowOf<typeof query>` で `rows` の列に型が付きます（指標は `number | null`、軸は値、`time` は `Date`）。`r.` と打つと列の名前が補完されます。
+- `defineQuery({...})` は、指標と軸の名前を `models/*.metrics.yaml` と照らし合わせます（[`pnpm gen`](#エディタでの補完と型pnpm-gen) のあと）。`"revenu"` と書くと、エディタに「`"revenue"` ではありませんか」と出ます。候補はすべての指標ファイルの名前をまとめたものなので、`metrics` で選んだファイルにない名前は、読み込み時にタイルのエラーになります。
+- `RowOf<typeof query>` で `rows` の列に型が付きます（指標は `number | null`、軸は値、`time` を書いたときの時間の列は `Date | null`）。`r.` と打つと列の名前が補完されます。
 - `import type { Query } from "devbi"` で `export const query: Query = {...}` と書いてもかまいません。その場合、名前は読み込み時にだけ検証されます。
 
 ### `TileProps`
@@ -300,17 +300,17 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 | `.devbi/metrics.schema.json` | metrics.yaml の JSON Schema。キーの補完と説明、`compare` / `as` / `running` などの値の候補 |
 | `.devbi/env.d.ts` | TypeScript 用の名前の一覧。[`defineQuery` と `RowOf`](#自作タイルjsx) が使う |
 
-使うための設定（`pnpm try-xlsx` が作る下書きには最初から入っています）:
+使うための設定（`pnpm try-xlsx` が作る下書きには最初から入っていて、`.devbi/` も作り直します）:
 
 | ファイル | 書くこと |
 | --- | --- |
 | dash.json | 先頭に `"$schema": "../.devbi/dash.schema.json"`。VS Code はこれだけで補完が効く |
-| metrics.yaml | 1 行目に `# yaml-language-server: $schema=../.devbi/metrics.schema.json`。VS Code は拡張機能「YAML」（`redhat.vscode-yaml`）が要る。このリポジトリを開くとおすすめに出る |
-| tsconfig.json | `"include"` に `".devbi/env.d.ts"` を足す（`".devbi"` だけだと、点で始まるフォルダは読まれない） |
+| metrics.yaml | 1 行目に `# yaml-language-server: $schema=../.devbi/metrics.schema.json`。VS Code は拡張機能「YAML」（`redhat.vscode-yaml`）が要る。このリポジトリか examples/sales を開くとおすすめに出る |
+| tsconfig.json | `"include"` に `".devbi/*.d.ts"` を足す。`".devbi"` だけだと、点で始まるフォルダは読まれない。`".devbi/env.d.ts"` とファイル名で書くと、エディタを開いたあとにできたファイルに気づかない |
 
 - 名前の候補は、すべての指標ファイルの分をまとめたものです。そのタイルの指標ファイルにある名前かどうかは、読み込み時に検証します。
 - `.devbi/` は git に入れません（手元で試す `local_*` の名前が入るため）。clone した直後は `pnpm gen` か `pnpm example:dev` で作られます。
-- 書けない metrics.yaml があると、その分の名前を入れずに書き、エラーを出します。
+- 読めない metrics.yaml があると、エラーを出して、その分の名前を入れずに書きます。開発サーバーで書きかけのときは、そのファイルの最後に読めた名前を残します。
 - 名前の入っていない共通の JSON Schema は、パッケージの `devbi/schema/dash.schema.json` と `devbi/schema/metrics.schema.json` にもあります。
 
 `devbi-gen [--dir <フォルダ>] [--check]`:
@@ -318,9 +318,9 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 | オプション | 中身 |
 | --- | --- |
 | `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
-| `--check` | 何も書かずに、古いファイルがあれば終了コード 1（CI 用） |
+| `--check` | 何も書かずに、古いファイルがあれば一覧を出して終了コード 1 |
 
-読めない metrics.yaml があったときも終了コード 1 です。
+読めない metrics.yaml があったときも終了コード 1 です。フォルダに `models/` がないときは、何も書かずに終了コード 2 です。
 
 ## 書式
 

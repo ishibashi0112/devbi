@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { generate } from "@devbi/vite";
 import { listSheets, readXlsx } from "devbi";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -177,6 +178,7 @@ await mkdir(path.dirname(out.data), { recursive: true });
 await copyFile(src, out.data);
 await writeFile(out.metrics, yaml);
 await writeFile(out.dash, `${JSON.stringify(dash, null, 2)}\n`);
+await generate(root); // .devbi/: the new names for the editor's completion, also without the dev server
 
 console.log("\n書いたファイル（どれも git に入りません）:");
 for (const f of Object.values(out)) console.log(`  examples/sales/${path.relative(root, f)}`);

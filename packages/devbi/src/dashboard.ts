@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { TILE_TYPE_NAMES } from "./tiles.js";
 import { GRAINS, type Grain, type TileSpec } from "./types.js";
 
 /** Names known from the project's metrics files, for a stricter schema (editor completion). */
@@ -55,7 +54,8 @@ export function dashboardSchemas(names?: SchemaNames) {
       w: z.number().int().positive().describe("幅（列の数）"),
       h: z.number().int().positive().describe("高さ（行の数）"),
       title: z.string().optional().describe("タイルの見出し"),
-      type: z.enum(TILE_TYPE_NAMES).optional().describe("組み込みタイルの種類。component とどちらか一つ"),
+      // Any string at load time: an unknown type is that tile's error, not the dashboard's. The editor schema lists the types.
+      type: z.string().min(1).optional().describe("組み込みタイルの種類。component とどちらか一つ"),
       component: z
         .string()
         .min(1)
