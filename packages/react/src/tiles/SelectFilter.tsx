@@ -23,7 +23,7 @@ export function SelectFilter({ rows, fields, format, selection, select, tile }: 
     <div className="devbi-select">
       <div className="devbi-select-head">
         {all.length > 8 && (
-          <input type="search" placeholder={`${dim.label}を検索`} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input type="search" name={`${tile.id}-search`} aria-label={`${dim.label}を検索`} placeholder={`${dim.label}を検索`} value={search} onChange={(e) => setSearch(e.target.value)} />
         )}
         <button type="button" disabled={!chosen.length} onClick={() => select(null)}>
           すべて
@@ -35,6 +35,7 @@ export function SelectFilter({ rows, fields, format, selection, select, tile }: 
             <label>
               <input
                 type={multiple ? "checkbox" : "radio"}
+                name={`${tile.id}-${dim.name}`}
                 checked={!!isSelected(selection, dim.name, v)}
                 onChange={() => select(toggleValue(selection, dim.name, v, multiple))}
               />

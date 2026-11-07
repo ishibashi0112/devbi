@@ -97,6 +97,7 @@ export function DateRange({ tile, selection, select }: TileProps) {
       <div className="devbi-daterange-inputs">
         <input
           type="date"
+          name={`${tile.id}-start`}
           aria-label="開始日"
           value={start ? isoDate(start) : ""}
           min={extent.min ? isoDate(extent.min) : undefined}
@@ -109,6 +110,7 @@ export function DateRange({ tile, selection, select }: TileProps) {
         <span>〜</span>
         <input
           type="date"
+          name={`${tile.id}-end`}
           aria-label="終了日"
           value={inputEnd}
           min={extent.min ? isoDate(extent.min) : undefined}

@@ -136,6 +136,13 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       return id === VIRTUAL ? RESOLVED : undefined;
     },
     async load(id) {
+      // DuckDB-wasm's worker points at a .map file the package does not ship; drop the comment so the dev server
+      // does not print "Failed to load source map". Not the `?url` import, which must keep Vite's handling.
+      // The browser fetches it as `…worker.js?v=<hash>`.
+      if (config.command === "serve" && /[\\/]@duckdb[\\/]duckdb-wasm[\\/]dist[\\/][^/\\?]+\.worker\.js(\?v=\w+)?$/.test(id)) {
+        const code = await readFile(id.split("?")[0]!, "utf8");
+        return { code: code.replace(/\n\/\/# sourceMappingURL=\S+\s*$/, "\n"), map: null };
+      }
       if (id !== RESOLVED) return;
       const project = await readProject(dir);
       lastData = project.data;
