@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { listSheets, readXlsx } from "devbi";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -119,6 +120,8 @@ test("the page's own script stays small; charts, the table grid and the DuckDB e
   const size = first.reduce((sum, n) => sum + scripts.get(n)!, 0);
   expect(size).toBeGreaterThan(100_000); // the shared file is in it
   expect(size).toBeLessThan(500_000);
+  // The Excel and print code comes with the first export.
+  expect([...scripts.keys()].filter((n) => /^(xlsx|print)-/.test(n))).toEqual([]);
 });
 
 test("a chart file that cannot be fetched (the site was rebuilt) asks for a reload, in Japanese", async ({ page }) => {
@@ -185,4 +188,108 @@ test("a build has no GUI editor in it", async ({ page }) => {
     expect(code, f).not.toContain("__devbi/editor");
     expect(code, f).not.toContain("react-grid-layout");
   }
+});
+
+test("Excel saves each tile's data as filtered now: a sheet per tile, numbers and dates as Excel's own", async ({ page }) => {
+  await ready(page);
+  const kanto = tile(page, "region").getByRole("button", { name: /関東/ });
+  await kanto.click();
+  await expect(page.locator(".devbi-filters")).toContainText("地域: 関東");
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  const revenue = await kpi(page, "kpi-revenue").innerText();
+
+  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Excel" }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^売上ダッシュボード_\d{8}-\d{4}\.xlsx$/);
+  const file = readFileSync((await download.path())!);
+  // The summary, then the tiles that read data, in the dashboard's order (not the period picker or the text).
+  expect(await listSheets(file)).toEqual([
+    "概要",
+    "売上",
+    "受注件数",
+    "平均受注額",
+    "数量",
+    "月別売上",
+    "地域別売上",
+    "売上と前年同月",
+    "商品分類別の推移",
+    "上位顧客（自作タイル）",
+    "地域 × 四半期",
+    "商品分類",
+    "商品別",
+  ]);
+  const summary = await readXlsx(file, { sheet: "概要", header: false });
+  const [keys, values] = summary.columns.map((c) => c.values);
+  expect(values![keys!.indexOf("絞り込み")]).toMatch(/^受注日: .+、地域: 関東$/);
+  expect(keys).toContain("上位顧客（自作タイル）");
+
+  // A number stays a number (shown as ¥18,599,290 by its format), filtered by the other tiles' selections.
+  const kpiSheet = await readXlsx(file, { sheet: "売上", range: "A4:C5" });
+  expect(kpiSheet.columns.map((c) => c.name)).toEqual(["売上", "売上 前年", "売上 前年比"]);
+  expect(`¥${(kpiSheet.columns[0]!.values[0] as number).toLocaleString("ja-JP")}`).toBe(revenue);
+  expect(kpiSheet.columns[2]!.type).toBe("DOUBLE");
+  // Months are dates; the tile that was clicked is not filtered by its own selection (as on the screen).
+  const monthly = await readXlsx(file, { sheet: "月別売上", range: "A4:B100" });
+  expect(monthly.columns.map((c) => [c.name, c.type])).toEqual([
+    ["受注日", "DATE"],
+    ["売上", "BIGINT"],
+  ]);
+  expect((await readXlsx(file, { sheet: "地域別売上", range: "A4:B100" })).rowCount).toBe(6);
+  // The pivot as its cross table, with totals.
+  const pivot = (await readXlsx(file, { sheet: "地域 × 四半期", range: "A4:Z100" })).columns.filter((c) => c.values.some((v) => v !== null));
+  expect(pivot[0]!.values).toEqual(["関東", "合計"]);
+  expect(pivot.at(-1)!.name).toBe("合計");
+  expect(pivot.length).toBeGreaterThan(2);
+  expect(pivot.slice(1, -1).every((c) => /^\d{4}年Q\d$/.test(c.name) && c.type === "BIGINT")).toBe(true);
+});
+
+/** Instead of the print dialog: keeps what the 印刷・PDF button's hidden frame holds when it prints. */
+async function catchPrint(page: Page) {
+  await page.evaluate(() => {
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (!(n instanceof HTMLIFrameElement) || n.dataset.devbiPrintFrame === undefined) continue;
+          n.addEventListener("load", () => {
+            n.contentWindow!.print = () => ((window as unknown as { printed: string }).printed = n.contentDocument!.title);
+          });
+        }
+      }
+    }).observe(document.body, { childList: true });
+  });
+}
+
+test("印刷・PDF prints a copy of the dashboard: light, without the buttons, tiles kept whole on a page", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await ready(page);
+  await tile(page, "region").getByRole("button", { name: /関東/ }).click();
+  await tile(page, "category").getByLabel("保守").check();
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  await catchPrint(page);
+  await page.getByRole("button", { name: "印刷・PDF" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { printed?: string }).printed)).toMatch(/^売上ダッシュボード_\d{8}$/);
+  await expect(page.getByRole("button", { name: "印刷・PDF" })).toBeEnabled();
+
+  const frame = page.frameLocator("iframe[data-devbi-print-frame]");
+  const copy = frame.locator(".devbi-root");
+  await expect(copy).toHaveAttribute("data-theme", "light");
+  await expect(copy.locator("[data-tile]")).toHaveCount(await page.locator("[data-tile]").count());
+  // The charts as drawn, the selection, the selected period's buttons.
+  await expect(copy.locator('[data-tile="monthly"] svg').first()).toBeVisible();
+  await expect(copy.locator(".devbi-chip").filter({ hasText: "地域: 関東" })).toHaveCount(1);
+  await expect(copy.locator('[data-tile="category"]').getByLabel("保守")).toBeChecked();
+  await expect(copy.locator('[data-tile="period"] input[type="date"]').first()).toHaveValue(
+    await tile(page, "period").locator('input[type="date"]').first().inputValue(),
+  );
+  // Bands of rows that no tile crosses, each kept on one page.
+  expect(await copy.locator(".devbi-print-band").count()).toBeGreaterThan(3);
+  // On paper: white, the time it was printed, no buttons.
+  await page.emulateMedia({ media: "print", colorScheme: "dark" });
+  await expect(copy).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(copy.locator(".devbi-printed")).toHaveText(/^\d{4}\/\d+\/\d+ \d+:\d\d の表示$/);
+  await expect(copy.locator(".devbi-actions")).toBeHidden();
+  await expect(copy.locator(".devbi-chip button")).toHaveCount(3);
+  for (const button of await copy.locator(".devbi-chip button").all()) await expect(button).toBeHidden();
+  // The page itself is as it was.
+  await page.emulateMedia({ media: "screen" });
+  await expect(page.locator(".devbi-root[data-devbi-print], .devbi-printed")).toHaveCount(0);
 });

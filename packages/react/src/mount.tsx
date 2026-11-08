@@ -13,6 +13,8 @@ export interface MountOptions {
   fetch?: typeof fetch;
   /** Keep the page's CSS for plain elements (h1 { … }, td { … }) out of the dashboard. Default `true`. */
   isolate?: boolean;
+  /** The Excel and 印刷・PDF buttons in the dashboard's heading. Default `true`. */
+  exports?: boolean;
 }
 
 export interface MountedDashboard {
@@ -61,7 +63,14 @@ export function mountDashboard(element: Element, project: Project, options: Moun
   entry.mount = mount;
   const key = `${name}\n${options.apiUrl ?? ""}\n${fetchId(options.fetch)}`;
   entry.root.render(
-    <Dashboard key={key} project={p} name={name} isolate={options.isolate ?? true} {...(options.theme ? { theme: options.theme } : {})} />,
+    <Dashboard
+      key={key}
+      project={p}
+      name={name}
+      isolate={options.isolate ?? true}
+      exports={options.exports ?? true}
+      {...(options.theme ? { theme: options.theme } : {})}
+    />,
   );
   return {
     unmount: () => {

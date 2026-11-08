@@ -1,29 +1,13 @@
-import { formatTime, type Filter, type TileSpec } from "devbi";
-import { useCallback, useEffect, useInsertionEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import type { TileSpec } from "devbi";
+import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { DevbiProvider, fieldInfo, useDevbi, useSelectionVersion } from "./context.js";
+import { describeFilter, snapshotText } from "./describe.js";
 import type { DevServer, EditorModule, SavedDashboard } from "./dev.js";
 import type { SnapshotInfo } from "./engine.js";
+import { ExportButtons } from "./ExportButtons.js";
 import { formatTimesOfDay, loadProject, snapshotTimesOf, viewsOf, type Project, type ProjectInput } from "./project.js";
 import { injectStyles } from "./styles.js";
 import { TileFrame } from "./TileFrame.js";
-
-const DAY = 86_400_000;
-
-function describe(f: Filter, format: (v: unknown) => string, isTime: boolean): string {
-  if ("in" in f) return f.in.map((v) => format(v)).join("、");
-  const [lo, hi] = f.between;
-  if (isTime && lo instanceof Date && hi instanceof Date) {
-    const last = new Date(hi.getTime() - DAY);
-    const monthly = lo.getUTCDate() === 1 && hi.getUTCDate() === 1;
-    if (monthly) {
-      const months = (hi.getUTCFullYear() - lo.getUTCFullYear()) * 12 + hi.getUTCMonth() - lo.getUTCMonth();
-      if (months === 1) return formatTime(lo, "month");
-      return `${formatTime(lo, "month")}〜${formatTime(last, "month")}`;
-    }
-    return `${formatTime(lo, "day")}〜${formatTime(last, "day")}`;
-  }
-  return `${lo === null ? "" : format(lo)}〜${hi === null ? "" : format(hi)}`;
-}
 
 function ActiveFilters() {
   const ctx = useDevbi();
@@ -46,7 +30,7 @@ function ActiveFilters() {
             e.filters.map((f, i) => {
               const info = view ? fieldInfo(view, [], f.field) : { label: f.field };
               const isTime = view?.time?.name === f.field;
-              const text = describe(f, (v) => (v === null ? "（空欄）" : v instanceof Date ? formatTime(v, "day") : String(v)), isTime);
+              const text = describeFilter(f, isTime);
               return (
                 <span className="devbi-chip" key={`${e.tileId}-${i}`} title={`${titles.get(e.tileId)}で選択`}>
                   {info.label}: {text}
@@ -66,11 +50,6 @@ function ActiveFilters() {
   );
 }
 
-/** `11月8日 6:00` */
-function formatMadeAt(d: Date): string {
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
 /** When the data was taken, for a dashboard that reads snapshots: the oldest of them. Nothing for live data. */
 function SnapshotNote() {
   const ctx = useDevbi();
@@ -87,12 +66,11 @@ function SnapshotNote() {
       alive = false;
     };
   }, [ctx]);
-  if (info.length === 0) return null;
-  const oldest = info.reduce((a, b) => (a.at <= b.at ? a : b));
-  const times = [...new Set(info.flatMap((i) => i.times))].sort();
+  const text = snapshotText(info);
+  if (!text) return null;
   return (
     <p className="devbi-snapshot" data-testid="snapshot-note">
-      データは {formatMadeAt(oldest.at)} の時点（毎日 {formatTimesOfDay(times)} に更新）
+      {text}
     </p>
   );
 }
@@ -150,6 +128,7 @@ export function Dashboard({
   back,
   theme,
   isolate,
+  exports = true,
   actions,
 }: {
   project: Project;
@@ -157,10 +136,22 @@ export function Dashboard({
   back?: string;
   theme?: Theme;
   isolate?: boolean;
+  /** The Excel and 印刷・PDF buttons in the heading. Default `true`. */
+  exports?: boolean;
   /** Buttons at the end of the heading (DevbiApp's 編集 on the dev server). */
   actions?: ReactNode;
 }) {
   useInsertionEffect(injectStyles, []);
+  // The element printed (印刷・PDF), and narrow layout by its width.
+  const rootEl = useRef<HTMLDivElement | null>(null);
+  const rootRef = useCallback((el: HTMLDivElement | null) => {
+    rootEl.current = el;
+    const stop = narrowRef(el);
+    return () => {
+      rootEl.current = null;
+      stop?.();
+    };
+  }, []);
   const root = { ...themeAttribute(theme), ...(isolate ? { "data-devbi-isolate": "" } : {}) };
   const dashboard = Object.hasOwn(project.dashboards, name) ? project.dashboards[name] : undefined;
   if (!dashboard) {
@@ -174,7 +165,7 @@ export function Dashboard({
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   return (
     <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard}>
-      <div className="devbi-root" ref={narrowRef} {...root}>
+      <div className="devbi-root" ref={rootRef} {...root}>
         <div className="devbi-dashboard">
           {back && (
             <a className="devbi-back" href={back}>
@@ -185,7 +176,12 @@ export function Dashboard({
             <h1>{dashboard.title}</h1>
             {dashboard.description && <p>{dashboard.description}</p>}
             <SnapshotNote />
-            {actions && <div className="devbi-actions">{actions}</div>}
+            {(exports || actions) && (
+              <div className="devbi-actions">
+                {exports && <ExportButtons root={rootEl} />}
+                {actions}
+              </div>
+            )}
           </div>
           <ActiveFilters />
           <div
@@ -260,7 +256,16 @@ function EditorHost({ dev, theme, children }: { dev: DevServer; theme?: Theme; c
  * With one dashboard it is shown directly. On the dev server with `@devbi/editor` installed, each dashboard has
  * an 編集 button (the GUI editor) and new dashboards can be made.
  */
-export function DevbiApp({ project: input, theme }: { project: ProjectInput; theme?: Theme }) {
+export function DevbiApp({
+  project: input,
+  theme,
+  exports = true,
+}: {
+  project: ProjectInput;
+  theme?: Theme;
+  /** The Excel and 印刷・PDF buttons on each dashboard. Default `true`. */
+  exports?: boolean;
+}) {
   useInsertionEffect(injectStyles, []);
   const dev = input.dev?.editor ? input.dev : undefined;
   // The editor's saves, shown without reloading the page (the dev server reloads it for changes made elsewhere).
@@ -346,7 +351,15 @@ export function DevbiApp({ project: input, theme }: { project: ProjectInput; the
       </>
     );
     return (
-      <Dashboard key={shown} project={project} name={shown} theme={theme} actions={actions || undefined} {...(names.length > 1 ? { back: "#/" } : {})} />
+      <Dashboard
+        key={shown}
+        project={project}
+        name={shown}
+        theme={theme}
+        exports={exports}
+        actions={actions || undefined}
+        {...(names.length > 1 ? { back: "#/" } : {})}
+      />
     );
   }
   return (

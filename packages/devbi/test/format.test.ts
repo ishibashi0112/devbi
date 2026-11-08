@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatNumber, formatTime, formatValue } from "../src/index.js";
+import { excelNumberFormat, excelTimeFormat, formatNumber, formatTime, formatValue } from "../src/index.js";
 
 describe("formatNumber", () => {
   it.each([
@@ -42,5 +42,39 @@ describe("formatTime", () => {
     expect(formatValue(true)).toBe("はい");
     expect(formatValue(10n)).toBe("10");
     expect(formatValue(0.5, { kind: "measure", format: "0%" })).toBe("50%");
+  });
+});
+
+describe("excelNumberFormat", () => {
+  it.each([
+    ["#,##0", "#,##0"],
+    ["¥#,##0", '"¥"#,##0'],
+    ['#,##0"円"', '#,##0"円"'],
+    ["0.0%", "0.0%"],
+    ['0.0"%"', '0.0"%"'],
+    ["0.0#", "0.0#"],
+    ["#,##0,", "#,##0,"],
+    ['#,##0,,"百万円"', '#,##0,,"百万円"'],
+    ["0;(0)", '0;"("0")"'],
+    ['0;-0;"なし"', '0;"-"0;"なし"'],
+    ["[$¥-411]#,##0;[Red]-[$¥-411]#,##0", '"¥"#,##0;"-¥"#,##0'],
+    ["compact", "#,##0"],
+    ["compact:¥", '"¥"#,##0'],
+    ['say \\"hi\\" 0', '"say "\\""hi"\\"" "0'],
+  ])("%s → %s", (format, expected) => {
+    expect(excelNumberFormat(format)).toBe(expected);
+  });
+});
+
+describe("excelTimeFormat", () => {
+  it("labels time buckets as formatTime does; quarters have none", () => {
+    expect(excelTimeFormat("month")).toBe('yyyy"年"m"月"');
+    expect(excelTimeFormat("year")).toBe('yyyy"年"');
+    expect(excelTimeFormat("fiscal_year", 4)).toBe('yyyy"年度"');
+    expect(excelTimeFormat("fiscal_year", 1)).toBe('yyyy"年"');
+    expect(excelTimeFormat("week")).toBe('yyyy/m/d"週"');
+    expect(excelTimeFormat("quarter")).toBeUndefined();
+    expect(excelTimeFormat("day")).toBe("yyyy/m/d");
+    expect(excelTimeFormat(undefined, 1, true)).toBe("yyyy/m/d hh:mm");
   });
 });

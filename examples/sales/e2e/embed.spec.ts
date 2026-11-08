@@ -55,6 +55,37 @@ test("one script and a data-devbi element put a dashboard into another app's pag
   expect(errors).toEqual([]);
 });
 
+test("印刷・PDF prints the dashboard alone, not the page around it; data-devbi-exports=\"false\" leaves the buttons out", async ({ page }) => {
+  const { errors } = await open(page);
+  await page.evaluate(() => {
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (!(n instanceof HTMLIFrameElement) || n.dataset.devbiPrintFrame === undefined) continue;
+          n.addEventListener("load", () => {
+            n.contentWindow!.print = () => ((window as unknown as { printed: string }).printed = n.contentDocument!.body.innerText);
+          });
+        }
+      }
+    }).observe(document.body, { childList: true });
+  });
+  await report(page).getByRole("button", { name: "印刷・PDF" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { printed?: string }).printed)).toContain("売上ダッシュボード（DB から）");
+  const body = page.frameLocator("iframe[data-devbi-print-frame]").locator("body");
+  await expect(body.locator(":scope > *")).toHaveCount(1);
+  await expect(body.locator(":scope > .devbi-root")).toHaveAttribute("data-devbi-isolate", "");
+  await expect(body).not.toContainText(await page.locator("main > h1").innerText());
+
+  // Options left out come from the attributes: mounting again with data-devbi-exports="false".
+  await page.evaluate(() => {
+    document.getElementById("report-area")!.setAttribute("data-devbi-exports", "false");
+    (window as unknown as { DevBI: Devbi }).DevBI.mount("#report-area");
+  });
+  await expect(report(page).getByRole("button", { name: "Excel" })).toHaveCount(0);
+  await expect(report(page).getByRole("button", { name: "印刷・PDF" })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test("in a narrow part of the page the tiles go in one column, as on a phone", async ({ page }) => {
   const { errors } = await open(page);
   const root = report(page).locator(".devbi-root");
