@@ -59,6 +59,8 @@ export interface CheckReport {
   findings: Finding[];
   views: ViewReport[];
   tiles: TileReport[];
+  /** The dashboards that could be read (names). */
+  dashboards: string[];
 }
 
 export interface CheckOptions {
@@ -172,8 +174,9 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   const dashboards: { dashboard: Dashboard; file: string }[] = [];
   for (const f of await list(path.join(dir, "dashboards"), ".dash.json")) {
     const file = `dashboards/${f}`;
-    const text = await readFile(path.join(dir, file), "utf8");
+    let text = "";
     try {
+      text = await readFile(path.join(dir, file), "utf8");
       const dashboard = parseDashboardJson(text, f.slice(0, -".dash.json".length), file);
       for (const p of dashboardProblems(dir, file, dashboard)) addIssues(file, p);
       dashboards.push({ dashboard, file });
@@ -198,9 +201,12 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   let vite: ViteDevServer | undefined;
   try {
     if (metrics.size) engine = await createNodeEngine(dir, options.env ? { env: options.env } : {});
-    const broken = new Map<string, Set<string>>(); // view → names that failed on their own
-    const skipped = new Map<string, Set<string>>(); // view → names that need an extension Node cannot load
-    const loaded = new Map<string, string | NotChecked | Error>(); // view → model SQL, or why not
+    // Per view: the model SQL (or why it did not run), and the names that failed or were not checked. A name that
+    // failed only because another did (a measure of a broken measure) has its causes in `causes`, not an error.
+    const state = new Map<
+      string,
+      { model: string | NotChecked | Error; rows: number; failed: Set<string>; unchecked: Set<string>; causes: Map<string, string[]> }
+    >();
 
     for (const [name, { view, file }] of metrics) {
       const report: ViewReport = {
@@ -212,31 +218,39 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
       views.push(report);
       const failed = new Set<string>();
       const unchecked = new Set<string>();
-      broken.set(name, failed);
-      skipped.set(name, unchecked);
+      const causes = new Map<string, string[]>();
       let model: string;
       try {
         model = await engine!.loadView(view);
-        loaded.set(name, model);
       } catch (e) {
+        let why: NotChecked | Error = e instanceof Error ? e : new Error(String(e));
+        const ext = missingExtension(e);
         if (e instanceof NotChecked) {
           report.notChecked = e.message;
           add("warning", file, `確かめていません: ${e.message}`);
-        } else if (missingExtension(e)) {
-          report.notChecked = `DuckDB の拡張 ${missingExtension(e)} を取ってこられないため`;
-          add("warning", file, `model: ${noExtension(missingExtension(e)!)}`);
-          loaded.set(name, new NotChecked(report.notChecked));
-          continue;
+        } else if (ext) {
+          report.notChecked = `DuckDB の拡張 ${ext} を取ってこられないため`;
+          add("warning", file, `model: ${noExtension(ext)}`);
+          why = new NotChecked(report.notChecked);
         } else {
-          add("error", file, `model: ${duckdbMessage(e)}`);
+          const text = duckdbMessage(e);
+          // The browser reads only the files named in read_xlsx(…), read_csv(…) and the like.
+          const hint = /No files found|Cannot open file|No such file/i.test(text)
+            ? "\nデータのファイルは read_csv('data/…') のように read_ の関数で読んでください（ブラウザはそう書いたファイルだけを読み込みます）"
+            : "";
+          add("error", file, `model: ${text}${hint}`);
         }
-        loaded.set(name, e as Error);
+        state.set(name, { model: why, rows: 0, failed, unchecked, causes });
         continue;
       }
+      report.rows = Number(engine!.query(`SELECT count(*) AS n FROM (${model})`)[0]?.n ?? 0);
+      state.set(name, { model, rows: report.rows, failed, unchecked, causes });
+      if (report.rows === 0) add("warning", file, "model の結果が 0 行です（データファイルと model の SQL を確かめてください）");
+
       // Run SQL for one name: a mistake is an error (the name goes in `failed`), a missing extension a warning.
-      const run = (label: string, field: string, sql: () => string) => {
+      const run = <T>(label: string, field: string, go: () => T): T | undefined => {
         try {
-          engine!.query(sql());
+          return go();
         } catch (e) {
           const ext = missingExtension(e);
           if (ext) {
@@ -246,19 +260,56 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
             add("error", file, `${label}: ${e instanceof QueryError ? e.message : duckdbMessage(e)}`);
             failed.add(field);
           }
+          return undefined;
         }
       };
-      const runQuery = (label: string, field: string, query: Query) => run(label, field, () => compileQuery(view, query, { model }).sql);
-      report.rows = Number(engine!.query(`SELECT count(*) AS n FROM (${model})`)[0]?.n ?? 0);
-      if (report.rows === 0) add("warning", file, "model の結果が 0 行です（データファイルと model の SQL を確かめてください）");
-      if (view.time) run(`time（${view.time.name}）`, view.time.name, () => compileTimeExtent(view, { model }));
+      const runQuery = (label: string, field: string, query: Query) =>
+        run(label, field, () => engine!.query(compileQuery(view, query, { model }).sql));
+
+      const time = view.time;
+      if (time) {
+        const extent = run(`time（${time.name}）`, time.name, () => engine!.query(compileTimeExtent(view, { model })))?.[0];
+        // MIN and MAX work on text too, but the period filters and the date-range tile need dates.
+        const value = extent?.min ?? extent?.max;
+        if (value !== undefined && value !== null && !(value instanceof Date)) {
+          add(
+            "error",
+            file,
+            `time（${time.name}）: 日付の列になっていません（${typeof value === "number" ? "数値" : "文字"}の列です。例: ${String(value)}）。` +
+              "model の SQL で DATE か TIMESTAMP にしてください（例: CAST(列 AS DATE)、strptime(列, '%Y/%m/%d')）",
+          );
+          failed.add(time.name);
+        }
+      }
       for (const d of Object.keys(view.dimensions)) runQuery(`軸 ${d}`, d, { dimensions: [d], limit: 1 });
-      for (const [m, def] of Object.entries(view.measures)) {
+
+      // Measures after the ones they use, so that one mistake is one error.
+      const done = new Set<string>();
+      const measure = (m: string) => {
+        if (done.has(m)) return;
+        done.add(m);
+        const def = view.measures[m];
+        if (!def) return;
+        const uses = def.kind === "sql" ? def.refs : [def.of];
+        uses.forEach(measure);
+        const from = [...uses, ...(def.kind !== "sql" && time ? [time.name] : [])];
+        const bad = from.filter((u) => failed.has(u));
+        if (bad.length) {
+          failed.add(m);
+          causes.set(m, [...new Set(bad.flatMap((u) => causes.get(u) ?? [u]))]);
+          return;
+        }
+        if (from.some((u) => unchecked.has(u))) {
+          unchecked.add(m);
+          return;
+        }
         runQuery(`指標 ${m}`, m, { measures: [m] });
         // Comparisons and running totals compile differently with a time grain: that way too.
-        if (view.time && def.kind !== "sql" && !failed.has(m) && !unchecked.has(m))
+        if (time && def.kind !== "sql" && !failed.has(m) && !unchecked.has(m)) {
           runQuery(`指標 ${m}（time: month）`, m, { measures: [m], time: "month" });
-      }
+        }
+      };
+      Object.keys(view.measures).forEach(measure);
     }
 
     // ---- the tiles ----
@@ -267,6 +318,8 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
       // As the runtime picks a query's view: its own, the dashboard's, or the only metrics file.
       const viewName = (n?: string) =>
         n ?? dashboard.metrics ?? (modelFiles.length === 1 ? modelFiles[0]!.slice(0, -".metrics.yaml".length) : undefined);
+      // dash.json's "metrics" and query.metrics are reported with the files (dashboardProblems); other names are not.
+      const listed = (n: string, t: TileSpec) => n === dashboard.metrics || n === t.query?.metrics;
 
       for (const t of dashboard.tiles) {
         const tile: TileReport = { dashboard: dashboard.name, id: t.id };
@@ -275,6 +328,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
           add("error", file, `${where(t)}: ${text}`);
           tile.note = "エラー";
         };
+        // As TileFrame: the query in dash.json, else a promoted tile's `export const query`.
         let query: Query | undefined = t.query;
         if (t.type) {
           if (!Object.hasOwn(TILE_TYPES, t.type)) {
@@ -291,11 +345,11 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
               const view = n ? metrics.get(n)?.view : undefined;
               if (!n) fail(`使う指標ファイルがわかりません。dash.json の "metrics" か options.metrics に書いてください`);
               else if (!modelFiles.includes(`${n}.metrics.yaml`)) {
-                // dash.json's "metrics" and query.metrics are reported with the files; options.metrics is not.
-                if (n === own && !t.query?.metrics) fail(`options.metrics の指標ファイル models/${n}.metrics.yaml がありません`);
+                if (!listed(n, t)) fail(`options.metrics の指標ファイル models/${n}.metrics.yaml がありません`);
               } else if (view && !view.time)
                 fail(`date-range には time（日付の列）が要ります（models/${n}.metrics.yaml に time がありません）`);
-              else if (view?.time && broken.get(n)?.has(view.time.name)) tile.note = `${view.time.name} のエラーのため確かめていません`;
+              else if (view?.time && state.get(n)?.failed.has(view.time.name))
+                tile.note = `${view.time.name} のエラーのため確かめていません`;
             }
             continue;
           }
@@ -303,9 +357,10 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
             fail(`${t.type} には query（measures・dimensions など）が要ります`);
             continue;
           }
-        } else if (t.component) {
+        } else if (t.component && !query) {
           const resolved = resolveComponent(`/${file}`, t.component);
           if (componentProblem(resolved) || !existsSync(path.join(dir, resolved))) continue; // reported with the files
+          let exported: unknown;
           try {
             if (!vite) {
               const { createServer } = await import("vite");
@@ -318,14 +373,24 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
                 optimizeDeps: { noDiscovery: true, include: [] },
               });
             }
-            const mod = await vite.ssrLoadModule(resolved);
-            query = mod.query ? (checkQuery(mod.query, t.component) as Query) : undefined;
+            exported = (await vite.ssrLoadModule(resolved)).query;
           } catch (e) {
-            fail(`${t.component} を読めません: ${message(e).split("\n")[0]}`);
+            // In Node, without the project's vite.config: a tile may need the browser (window…) to load.
+            const text = `${t.component} を Node で読めないため確かめていません（${message(e).split("\n")[0]}）`;
+            add("warning", file, `${where(t)}: ${text}`);
+            tile.note = text;
             continue;
           }
-          if (!query) {
+          if (!exported) {
             tile.note = "自分でデータを読むタイル（query を export していない）";
+            continue;
+          }
+          try {
+            query = checkQuery(exported, t.component) as Query;
+          } catch (e) {
+            fail(
+              `${t.component} の query: ${e instanceof DashboardError ? e.issues.map((i) => (i.path ? `${i.path}: ${i.message}` : i.message)).join("、") : message(e)}`,
+            );
             continue;
           }
         }
@@ -336,33 +401,38 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
           fail(`使う指標ファイルがわかりません。dash.json の "metrics" か query.metrics に書いてください`);
           continue;
         }
-        const entry = metrics.get(n);
-        const model = loaded.get(n);
-        if (!entry || model === undefined) {
-          tile.note = `指標ファイル models/${n}.metrics.yaml にエラーがあるため確かめていません`;
+        if (!modelFiles.includes(`${n}.metrics.yaml`)) {
+          if (listed(n, t)) tile.note = `指標ファイル models/${n}.metrics.yaml がないため確かめていません`;
+          else fail(`query.metrics の指標ファイル models/${n}.metrics.yaml がありません`);
           continue;
         }
-        if (typeof model !== "string") {
+        const entry = metrics.get(n);
+        const st = state.get(n);
+        if (!entry || !st) {
+          tile.note = `models/${n}.metrics.yaml のエラーのため確かめていません`;
+          continue;
+        }
+        if (typeof st.model !== "string") {
           tile.note =
-            model instanceof NotChecked
-              ? `確かめていません（${model.message}）`
+            st.model instanceof NotChecked
+              ? `確かめていません（${st.model.message}）`
               : `models/${n}.metrics.yaml の model のエラーのため確かめていません`;
           continue;
         }
         const names = namesOf(entry.view, query);
-        const failed = names.filter((x) => broken.get(n)?.has(x));
+        const failed = [...new Set(names.filter((x) => st.failed.has(x)).flatMap((x) => st.causes.get(x) ?? [x]))];
         if (failed.length) {
           tile.note = `${failed.join("・")} のエラーのため確かめていません`;
           continue;
         }
-        const unchecked = names.filter((x) => skipped.get(n)?.has(x));
+        const unchecked = names.filter((x) => st.unchecked.has(x));
         if (unchecked.length) {
           tile.note = `${unchecked.join("・")} を確かめていないため確かめていません`;
           continue;
         }
         let compiled;
         try {
-          compiled = compileQuery(entry.view, query, { model });
+          compiled = compileQuery(entry.view, query, { model: st.model });
         } catch (e) {
           fail(`${message(e)}${e instanceof QueryError ? namesHint(entry.view, message(e)) : ""}`);
           continue;
@@ -381,14 +451,17 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
         }
         const shape = t.type ? shapeProblem(t.type, compiled.fields, t.options) : undefined;
         if (shape) fail(shape);
-        else if (tile.rows === 0) add("warning", file, `${where(t)}: 結果が 0 行です（query.filters や指標の式を確かめてください）`);
+        // When the model has no rows, that is the one warning (on the metrics file).
+        else if (tile.rows === 0 && st.rows > 0) {
+          add("warning", file, `${where(t)}: 結果が 0 行です（query.filters や指標の式を確かめてください）`);
+        }
       }
     }
   } finally {
     engine?.close();
     await vite?.close();
   }
-  return { findings, views, tiles };
+  return { findings, views, tiles, dashboards: dashboards.map((d) => d.dashboard.name) };
 }
 
 /** The report as text: a line per metrics file and dashboard, then the problems. */
@@ -401,9 +474,8 @@ export function formatReport(report: CheckReport): string {
         : `${v.file}: ${v.rows === undefined ? "エラー" : `${v.rows.toLocaleString("en-US")} 行`}、指標 ${v.measures}・軸 ${v.dimensions}`,
     );
   }
-  const byDashboard = new Map<string, TileReport[]>();
-  for (const t of report.tiles) byDashboard.set(t.dashboard, [...(byDashboard.get(t.dashboard) ?? []), t]);
-  for (const [name, list] of byDashboard) {
+  for (const name of report.dashboards) {
+    const list = report.tiles.filter((t) => t.dashboard === name);
     const ran = list.filter((t) => t.rows !== undefined);
     lines.push(`dashboards/${name}.dash.json: タイル ${list.length}（クエリを実行 ${ran.length}）`);
     if (ran.length) lines.push(`  ${ran.map((t) => `${t.id} ${t.rows!.toLocaleString("en-US")} 行`).join("、")}`);

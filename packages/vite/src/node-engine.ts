@@ -2,8 +2,10 @@
 // and devbi-inspect run the model SQL and the tiles' queries on. It reads the data as the browser engine
 // (@devbi/react's engine.ts) does: xlsx through devbi's reader, read_api through the API's SQL files, other files
 // as DuckDB reads them. Only for checking: no cache, one query at a time.
+import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import * as duckdb from "@duckdb/duckdb-wasm/blocking";
 import * as arrow from "apache-arrow";
@@ -123,6 +125,26 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
     console.warn = warn;
   }
 
+  // DuckDB's Node runtime reads a path it was not given (FROM 'data/x.csv', a list of files…) from the disk, relative
+  // to the current folder; the browser cannot read it. Each statement runs from an empty folder, so that such a path
+  // fails here as it does in the browser.
+  const empty = mkdtempSync(path.join(tmpdir(), "devbi-duckdb-"));
+  const sql = (text: string) => {
+    const cwd = process.cwd();
+    let moved = false;
+    try {
+      process.chdir(empty);
+      moved = true;
+    } catch {
+      // In a worker thread (no chdir): from the current folder.
+    }
+    try {
+      return conn.query(text);
+    } finally {
+      if (moved) process.chdir(cwd);
+    }
+  };
+
   let api: import("@devbi/server").ApiHandler | undefined;
   const apiHandler = async () => {
     if (!api) {
@@ -135,7 +157,7 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
   const insert = (table: arrow.Table, name: string) => {
     if (table.numRows === 0) {
       const cols = table.schema.fields.map((f) => `${ident(f.name)} ${duckType(f.type)}`);
-      conn.query(`CREATE TABLE ${ident(name)} (${cols.join(", ")})`);
+      sql(`CREATE TABLE ${ident(name)} (${cols.join(", ")})`);
     } else {
       // As IPC bytes: this module's Arrow may be another copy than DuckDB-wasm's own.
       conn.insertArrowFromIPCStream(arrow.tableToIPC(table, "stream"), { name, create: true });
@@ -157,8 +179,8 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
   const views = new Map<string, Promise<string>>();
 
   const loadView = async (view: MetricsView): Promise<string> => {
-    let sql = view.model;
-    for (const s of [...scanSources(sql)].reverse()) {
+    let model = view.model;
+    for (const s of [...scanSources(model)].reverse()) {
       if (s.format === "api") {
         const handler = await apiHandler();
         let bytes: Uint8Array;
@@ -172,7 +194,7 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
         }
         const name = `__devbi_src_${++seq}`;
         insert(arrow.tableFromIPC(bytes), name);
-        sql = `${sql.slice(0, s.start)}${ident(name)}${sql.slice(s.end)}`;
+        model = `${model.slice(0, s.start)}${ident(name)}${model.slice(s.end)}`;
         continue;
       }
       if (hasUrlScheme(s.path)) throw new NotChecked(`ネットの上のファイル ${s.path} は読んでいません`);
@@ -185,18 +207,18 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
         });
         const name = `__devbi_src_${++seq}`;
         insert(xlsxToArrow(table), name);
-        sql = `${sql.slice(0, s.start)}${ident(name)}${sql.slice(s.end)}`;
+        model = `${model.slice(0, s.start)}${ident(name)}${model.slice(s.end)}`;
       } else {
         await register(s.path);
       }
     }
     const table = ident(`__devbi_model_${view.name}`);
-    conn.query(`CREATE OR REPLACE TABLE ${table} AS\n${sql}`);
+    sql(`CREATE OR REPLACE TABLE ${table} AS\n${model}`);
     return `SELECT * FROM ${table}`;
   };
 
-  const query = (sql: string) => {
-    const table = conn.query(sql);
+  const query = (text: string) => {
+    const table = sql(text);
     const fields = table.schema.fields;
     const out: Record<string, unknown>[] = [];
     for (let r = 0; r < table.numRows; r++) {
@@ -233,13 +255,14 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
             : /\.(json|ndjson|jsonl)$/i.test(file)
               ? "read_json_auto"
               : "read_csv_auto";
-        conn.query(`CREATE TABLE ${ident(name)} AS SELECT * FROM ${fn}('${virtual}')`);
+        sql(`CREATE TABLE ${ident(name)} AS SELECT * FROM ${fn}('${virtual}')`);
       }
       return ident(name);
     },
     close() {
       conn.close();
-      void api?.close();
+      api?.close().catch(() => undefined);
+      rmSync(empty, { recursive: true, force: true });
     },
   };
 }

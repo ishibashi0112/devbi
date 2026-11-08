@@ -22,6 +22,14 @@ for (let i = 0; i < args.length; i++) {
 const root = path.resolve(dir);
 if (!existsSync(path.join(root, "models")))
   usage(`${root} に models/ フォルダがありません。DevBI のプロジェクトのフォルダで実行するか、--dir で指してください`);
-const report = await checkProject(root);
-console.log(json ? JSON.stringify(report, null, 2) : formatReport(report));
-process.exit(report.findings.some((f) => f.level === "error") ? 1 : 0);
+let report: Awaited<ReturnType<typeof checkProject>>;
+try {
+  report = await checkProject(root);
+} catch (e) {
+  // Not a finding: the check itself could not run (exit 2, as for a wrong folder).
+  console.error(`確かめられませんでした: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`);
+  process.exit(2);
+}
+// Exit once the output is written (a large --json into a pipe is written later).
+const code = report.findings.some((f) => f.level === "error") ? 1 : 0;
+process.stdout.write(`${json ? JSON.stringify(report, null, 2) : formatReport(report)}\n`, () => process.exit(code));

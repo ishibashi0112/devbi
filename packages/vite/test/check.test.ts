@@ -139,6 +139,107 @@ describe("devbi-check", () => {
     if (r.findings.length) expect(r.tiles[0]?.note).toBe("days を確かめていないため確かめていません");
   });
 
+  it("reports one mistake once: measures of a broken measure, and of a broken time column, are only skipped", async () => {
+    const dir = project({
+      "models/sales.metrics.yaml": [
+        "model: SELECT * FROM read_xlsx('data/sales.xlsx', sheet = '明細')",
+        "time: { column: 受注日x }",
+        "dimensions:",
+        "  region: 地域",
+        "measures:",
+        "  revenue: SUM(金額x)",
+        "  orders: COUNT(*)",
+        "  avg_order: revenue / orders",
+        "  orders_ly: { of: orders, compare: previous_year, as: value }",
+      ].join("\n"),
+      "dashboards/d.dash.json": dash([
+        tile("avg", 0, { type: "kpi", query: { measures: ["avg_order"] } }),
+        tile("ly", 2, { type: "kpi", query: { measures: ["orders_ly"] } }),
+        tile("monthly", 4, { type: "bar", query: { measures: ["orders"], time: "month" } }),
+        tile("region", 6, { type: "barlist", query: { dimensions: ["region"], measures: ["orders"] } }),
+      ]),
+    });
+    const r = await checkProject(dir);
+    expect(r.findings.map((f) => f.message.split(":")[0])).toEqual(["time（受注日x）", "指標 revenue"]);
+    const notes = Object.fromEntries(r.tiles.map((t) => [t.id, t.note ?? t.rows]));
+    expect(notes).toEqual({
+      avg: "revenue のエラーのため確かめていません",
+      ly: "受注日x のエラーのため確かめていません",
+      monthly: "受注日x のエラーのため確かめていません",
+      region: 6,
+    });
+  });
+
+  it("wants dates in the time column, and reads only the files named in read_ functions, as the browser", async () => {
+    const dir = project({
+      "models/sales.metrics.yaml": [
+        "model: SELECT strftime(受注日, '%Y/%m/%d') AS 日付, * FROM read_xlsx('data/sales.xlsx')",
+        "time: { column: 日付 }",
+        "measures:",
+        "  n: COUNT(*)",
+      ].join("\n"),
+      "models/plain.metrics.yaml": "model: SELECT * FROM 'data/x.csv'\nmeasures:\n  n: COUNT(*)\n",
+      "data/x.csv": "a\n1\n",
+      "dashboards/d.dash.json": dash([tile("k", 0, { type: "kpi", query: { measures: ["n"] } })]),
+    });
+    const r = await checkProject(dir);
+    const time = r.findings.find((f) => f.message.startsWith("time"))!;
+    expect(time.message).toMatch(
+      /^time（日付）: 日付の列になっていません（文字の列です。例: 20\d\d\/\d\d\/\d\d）。model の SQL で DATE か TIMESTAMP に/,
+    );
+    const plain = r.findings.find((f) => f.file === "models/plain.metrics.yaml")!;
+    expect(plain.level).toBe("error");
+    expect(plain.message).toMatch(/^model: IO Error: No files found/);
+    expect(plain.message).toContain("read_csv('data/…') のように read_ の関数で読んでください");
+    // A query without the time grain still runs.
+    expect(r.tiles[0]?.rows).toBe(1);
+  });
+
+  it("uses a promoted tile's query as the browser does", async () => {
+    const dir = project({
+      "dashboards/d.dash.json": dash([
+        // dash.json's query wins over the module's.
+        tile("own", 0, { component: "./d/Good.tsx", query: { measures: ["revenu"] } }),
+        tile("good", 2, { component: "./d/Good.tsx" }),
+        tile("self", 4, { component: "./d/Self.tsx" }),
+        tile("other", 6, { component: "./d/Other.tsx" }),
+        tile("browser", 8, { component: "./d/Browser.tsx" }),
+      ]),
+    });
+    mkdirSync(path.join(dir, "dashboards/d"));
+    const tsx = (query: string) => `${query}\nexport default function T() {\n  return null;\n}\n`;
+    writeFileSync(path.join(dir, "dashboards/d/Good.tsx"), tsx('export const query = { measures: ["revenue"] };'));
+    writeFileSync(path.join(dir, "dashboards/d/Self.tsx"), tsx(""));
+    writeFileSync(path.join(dir, "dashboards/d/Other.tsx"), tsx('export const query = { metrics: "nope", measures: ["n"] };'));
+    writeFileSync(
+      path.join(dir, "dashboards/d/Browser.tsx"),
+      tsx("const w = window.innerWidth;\nexport const query = { measures: [String(w)] };"),
+    );
+    const r = await checkProject(dir);
+    expect(r.findings.map((f) => `${f.level} ${f.message}`)).toEqual([
+      "error タイル own: 指標 revenu は sales にありません（sales の指標: revenue・orders・quantity・avg_order・revenue_yoy・revenue_ly・revenue_fytd）",
+      "error タイル other: query.metrics の指標ファイル models/nope.metrics.yaml がありません",
+      expect.stringMatching(/^warning タイル browser: \.\/d\/Browser\.tsx を Node で読めないため確かめていません（.*window/),
+    ]);
+    const tiles = Object.fromEntries(r.tiles.map((t) => [t.id, t]));
+    expect(tiles.good?.rows).toBe(1);
+    expect(tiles.self?.note).toBe("自分でデータを読むタイル（query を export していない）");
+  }, 60_000);
+
+  it("warns once when the model has no rows, and lists a dashboard without tiles", async () => {
+    const dir = project({
+      "models/sales.metrics.yaml":
+        "model: SELECT * FROM read_xlsx('data/sales.xlsx') WHERE false\ndimensions:\n  region: 地域\nmeasures:\n  n: COUNT(*)\n",
+      "dashboards/d.dash.json": dash([tile("r", 0, { type: "barlist", query: { dimensions: ["region"], measures: ["n"] } })]),
+      "dashboards/empty.dash.json": dash([]),
+    });
+    const r = await checkProject(dir);
+    expect(r.findings.map((f) => `${f.file}: ${f.message}`)).toEqual([
+      "models/sales.metrics.yaml: model の結果が 0 行です（データファイルと model の SQL を確かめてください）",
+    ]);
+    expect(formatReport(r)).toContain("dashboards/empty.dash.json: タイル 0（クエリを実行 0）");
+  });
+
   it("reports a project without metrics files", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "devbi-check-"));
     mkdirSync(path.join(dir, "models"));
@@ -184,5 +285,7 @@ describe("devbi-inspect", () => {
     await expect(inspectData(SALES, "nothing")).rejects.toThrow(
       "nothing はデータファイルでも指標ファイル（models/nothing.metrics.yaml）でもありません",
     );
+    expect((await inspectData(SALES, "models/sales.metrics.yaml")).source).toBe("models/sales.metrics.yaml");
+    await expect(inspectData(SALES, "vite.config.ts")).rejects.toThrow("vite.config.ts は読めるデータのファイルではありません");
   });
 });

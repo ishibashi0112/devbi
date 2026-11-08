@@ -396,17 +396,17 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 確かめること:
 
 1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか
-2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
-3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは `export const query` を Vite で読んで、同じように流す
+2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
+3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
 
-SQL を流すのは、ブラウザと同じ DuckDB-wasm（Node で動かす）です。xlsx は画面と同じく DevBI が読み、`read_api` は `api/` の SQL を接続先（環境変数か `.env` の `DEVBI_DB…`）で流します。
+SQL を流すのは、ブラウザと同じ DuckDB-wasm（Node で動かす）です。xlsx は画面と同じく DevBI が読み、`read_api` は `api/` の SQL を接続先で流します（`devbi-serve` と同じく、環境変数とプロジェクトの `.env`・`.env.local` の `DEVBI_DB…`。Vite の `.env.[mode]` は読みません）。ブラウザと同じく、データのファイルは `read_csv('data/…')` のように `read_` の関数に書いたものだけを読みます（`FROM 'data/x.csv'` はエラー）。
 
 ```
 $ pnpm check
 models/sales.metrics.yaml: 6,044 行、指標 7・軸 4
-dashboards/sales.dash.json: タイル 14（クエリを実行 12）
-  kpi-revenue 1 行、kpi-avg 1 行、monthly 31 行、region 0 行、…
-  kpi-qty: quantity のエラーのため確かめていません
+dashboards/sales.dash.json: タイル 14（クエリを実行 9）
+  kpi-revenue 1 行、kpi-avg 1 行、monthly 31 行、region 0 行、vs-last-year 31 行、…
+  kpi-qty・products: quantity のエラーのため確かめていません
 
 ✗ models/sales.metrics.yaml: 指標 quantity: Binder Error: Referenced column "数" not found in FROM clause!
     Candidate bindings: "数量", "商品", "地域"
@@ -417,10 +417,10 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 12）
 ```
 
 - ✗（エラー）は、そのままだと画面でエラーになるもの。⚠（注意）は、表示はできるが見直したいものと、確かめられなかったもの
-- エラーのある指標や軸を使うタイルは、同じエラーを重ねて出さず「… のエラーのため確かめていません」とだけ出します
+- 一つの間違いは一つのエラーにします。エラーのある指標を使う指標（`revenue / orders` や `of: revenue`）、エラーのある time の列を使う比較・累計の指標、それらを使うタイルは、「… のエラーのため確かめていません」とだけ出します。`model` が 0 行のときの注意も、指標ファイルに 1 つだけです
 - DuckDB のエラー（`Binder Error` など）は DuckDB の英語のままです。`Candidate bindings` は、近い名前の列の候補です
 - 期間（date-range）や、ほかのタイルのクリックでの絞り込みはかけず、全期間で流します
-- 確かめないもの: 接続先がないときの `read_api`（注意）、URL のデータ、DuckDB の拡張（Parquet、JSON、`current_date` の icu など）をインターネットから取ってこられないときのその SQL（注意）、自作タイルが `query` の外で読むデータ、見た目（色・幅・高さ）
+- 確かめないもの: 接続先がないときの `read_api`（注意）、URL のデータ、DuckDB の拡張（Parquet、JSON、`current_date` の icu など）をインターネットから取ってこられないときのその SQL（注意）、Node で読み込めない自作タイル（`window` を読むなど。プロジェクトの vite.config も使わないので、そこでの設定が要るものも。注意）、自作タイルが `query` の外で読むデータ、見た目（色・幅・高さ）
 
 `devbi-check [--dir <フォルダ>] [--json]`:
 
@@ -429,7 +429,7 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 12）
 | `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
 | `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ） |
 
-エラーがあれば終了コード 1、注意だけなら 0 です。フォルダに `models/` がないときは 2 です。
+エラーがあれば終了コード 1、注意だけなら 0 です。フォルダに `models/` がないときや、確かめること自体ができなかったとき（DuckDB が動かないなど）は 2 です。
 
 ### データの中を見る（devbi-inspect）
 
@@ -447,7 +447,7 @@ data/sales.xlsx（シート「明細」）: 6,044 行、9 列
 ```
 
 - 列ごとに、`model` の SQL から見える型（xlsx は DevBI の読み方で決まる型）、範囲（文字の列は出さない）、種類の数、空のセルの数。文字と真偽の列は、多い値とその行数
-- ファイルの代わりに指標ファイルの名前（`pnpm inspect sales`）を書くと、その `model` の SQL の結果の列を出します
+- ファイルの代わりに指標ファイルの名前（`pnpm inspect sales`）か、そのパス（`models/sales.metrics.yaml`）を書くと、その `model` の SQL の結果の列を出します
 - ファイルは、今のフォルダからのパスか、プロジェクトのフォルダからのパスで書きます。プロジェクトの外のファイルも読めます。xlsx・CSV・TSV・Parquet・Arrow・JSON（Parquet と JSON は DuckDB の拡張をインターネットから取ってきます）
 - 値がそのまま出ます。人に渡すときは気をつけてください（`pnpm try-xlsx` は値を出しません）
 

@@ -36,7 +36,7 @@ const root = path.resolve(dir);
 if (!existsSync(root)) usage(`フォルダ ${root} がありません`);
 try {
   const report = await inspectData(root, target!, { ...(sheet ? { sheet } : {}), ...(values !== undefined ? { values } : {}) });
-  console.log(json ? JSON.stringify(report, null, 2) : formatInspect(report));
+  process.stdout.write(`${json ? JSON.stringify(report, null, 2) : formatInspect(report)}\n`, () => process.exit(0));
 } catch (e) {
   const ext = missingExtension(e);
   console.error(

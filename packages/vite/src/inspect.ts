@@ -54,14 +54,18 @@ const text = (v: unknown) =>
  * `models/` (its model's result).
  */
 export async function inspectData(dir: string, target: string, options: InspectOptions = {}): Promise<InspectReport> {
+  // A metrics file is named, or given as its path (models/sales.metrics.yaml).
+  if (target.endsWith(".metrics.yaml")) target = path.basename(target).slice(0, -".metrics.yaml".length);
   const metricsFile = path.join(dir, "models", `${target}.metrics.yaml`);
   const isMetrics = !DATA.test(target) && existsSync(metricsFile);
   const file = isMetrics ? undefined : [path.resolve(target), path.resolve(dir, target)].find((p) => existsSync(p));
-  if (!isMetrics && !file) {
+  if (!isMetrics && !(file && DATA.test(target))) {
     throw new Error(
-      DATA.test(target)
-        ? `ファイル ${target} がありません`
-        : `${target} はデータファイルでも指標ファイル（models/${target}.metrics.yaml）でもありません`,
+      file
+        ? `${target} は読めるデータのファイルではありません（xlsx・csv・tsv・txt・parquet・arrow・json・ndjson・jsonl）`
+        : DATA.test(target)
+          ? `ファイル ${target} がありません`
+          : `${target} はデータファイルでも指標ファイル（models/${target}.metrics.yaml）でもありません`,
     );
   }
   const engine = await createNodeEngine(dir, options.env ? { env: options.env } : {});
