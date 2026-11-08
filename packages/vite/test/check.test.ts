@@ -55,15 +55,24 @@ describe("devbi-check", () => {
         tile("k", 0, { type: "kpi", query: { measures: ["revenue", "revenue_ly"] } }),
         tile("typo", 2, { type: "kpi", query: { measures: ["revenu"] } }),
         tile("qty", 4, { type: "kpi", query: { measures: ["quantity"] } }),
-        tile("none", 6, { type: "barlist", query: { dimensions: ["region"], measures: ["revenue"], filters: [{ field: "region", in: ["沖縄"] }] } }),
+        tile("none", 6, {
+          type: "barlist",
+          query: { dimensions: ["region"], measures: ["revenue"], filters: [{ field: "region", in: ["沖縄"] }] },
+        }),
         tile("shape", 8, { type: "barlist", query: { measures: ["revenue"] } }),
-        tile("pivot", 10, { type: "pivot", query: { dimensions: ["region"], measures: ["revenue"], time: "year" }, options: { columns: "year" } }),
+        tile("pivot", 10, {
+          type: "pivot",
+          query: { dimensions: ["region"], measures: ["revenue"], time: "year" },
+          options: { columns: "year" },
+        }),
         tile("donut", 12, { type: "donut", query: { measures: ["revenue"] } }),
         tile("noquery", 14, { type: "bar" }),
         tile("note", 16, { type: "markdown", options: { text: "メモ" } }),
         tile("period", 18, { type: "date-range", options: { metrics: "nothing" } }),
       ]),
-      "dashboards/broken.dash.json": dash([tile("f", 0, { type: "kpi", query: { measures: ["revenue"], filters: [{ field: "region", value: "関東" }] } })]),
+      "dashboards/broken.dash.json": dash([
+        tile("f", 0, { type: "kpi", query: { measures: ["revenue"], filters: [{ field: "region", value: "関東" }] } }),
+      ]),
     });
     const r = await checkProject(dir);
     const msgs = r.findings.map((f) => `${f.level} ${f.file}: ${f.message.split("\n")[0]}`);
@@ -108,19 +117,24 @@ describe("devbi-check", () => {
     const r = await checkProject(dir, { env: {} });
     expect(r.findings.filter((f) => f.level === "error")).toEqual([]);
     expect(r.findings).toEqual([
-      { level: "warning", file: "models/db.metrics.yaml", message: expect.stringContaining("確かめていません: API の orders を読んでいません") },
+      {
+        level: "warning",
+        file: "models/db.metrics.yaml",
+        message: expect.stringContaining("確かめていません: API の orders を読んでいません"),
+      },
     ]);
     expect(r.tiles[0]?.note).toMatch(/^確かめていません（API の orders/);
   });
 
   it("does not call SQL a mistake when only a DuckDB extension it could not download is missing (current_date needs icu)", async () => {
     const dir = project({
-      "models/x.metrics.yaml": "model: SELECT * FROM read_xlsx('data/sales.xlsx')\nmeasures:\n  days: MAX(current_date - 受注日)\n",
+      "models/x.metrics.yaml":
+        "model: SELECT * FROM read_xlsx('data/sales.xlsx')\nmeasures:\n  days: SUM(CASE WHEN 受注日 <= current_date THEN 1 ELSE 0 END)\n",
       "dashboards/d.dash.json": JSON.stringify({ metrics: "x", tiles: [tile("k", 0, { type: "kpi", query: { measures: ["days"] } })] }),
     });
     const r = await checkProject(dir);
     expect(r.findings.filter((f) => f.level === "error")).toEqual([]);
-    // Where DuckDB cannot download it (no internet): a warning, and the tile is left unchecked.
+    // Where DuckDB downloads it (CI), all is checked; where it cannot (no internet), a warning, and the tile is left unchecked.
     for (const f of r.findings) expect(f.message).toContain("DuckDB の拡張 icu をインターネットから取ってこられないため確かめていません");
     if (r.findings.length) expect(r.tiles[0]?.note).toBe("days を確かめていないため確かめていません");
   });
@@ -167,6 +181,8 @@ describe("devbi-inspect", () => {
     const m = await inspectData(SALES, "sales_daily");
     expect(m.source).toBe("models/sales_daily.metrics.yaml");
     expect(m.columns.map((c) => c.name)).toContain("明細数");
-    await expect(inspectData(SALES, "nothing")).rejects.toThrow("nothing はデータファイルでも指標ファイル（models/nothing.metrics.yaml）でもありません");
+    await expect(inspectData(SALES, "nothing")).rejects.toThrow(
+      "nothing はデータファイルでも指標ファイル（models/nothing.metrics.yaml）でもありません",
+    );
   });
 });
