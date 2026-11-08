@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import path from "node:path";
@@ -168,6 +168,8 @@ export function createEditorHandler(options: EditorOptions) {
         if (!isObj(body)) throw new HttpError(400, "tile がありません");
         const tile = tileToPromote(body.tile);
         if (!existsSync(file)) throw new HttpError(404, `${rel} がありません`);
+        // The dev server reads no file in a folder named so (it is the end of the path in a URL).
+        if (/[#?]/.test(name)) throw new HttpError(400, `名前に # か ? があるダッシュボード（${name}）では、タイルをファイルにできません`);
         const metrics = typeof body.metrics === "string" ? body.metrics : undefined;
         const view = await readView(options.dir, metrics);
         const folder = path.join(dashDir, name);
@@ -180,19 +182,12 @@ export function createEditorHandler(options: EditorOptions) {
             send(res, 200, { path: `/dashboards/${name}/${component}.tsx`, component: `./${name}/${component}.tsx`, created });
             return true;
           };
-          if (existsSync(target)) {
-            // Written before (then undone in the editor): the same tile uses the same file again.
-            if ((await readFile(target, "utf8")) === source) return answer(false);
-            continue;
-          }
-          if (existsSync(path.join(folder, `${component}.jsx`))) continue;
-          await mkdir(folder, { recursive: true });
-          const tmp = path.join(folder, `.${component}.tsx.${process.pid}-${Date.now()}.tmp`);
-          try {
-            await writeFile(tmp, source);
+          if (!existsSync(target)) {
+            if (existsSync(path.join(folder, `${component}.jsx`))) continue;
+            await mkdir(folder, { recursive: true });
             options.onWrite?.(target, versionOf(source), client);
-            // A link, not a rename: never over a file that appeared meanwhile, and never half a file for the dev server.
-            const made = await link(tmp, target).then(
+            // "wx": never over a file that appeared meanwhile (another tab writing the same name).
+            const made = await writeFile(target, source, { flag: "wx" }).then(
               () => true,
               (e: NodeJS.ErrnoException) => {
                 if (e.code === "EEXIST") return false;
@@ -200,9 +195,9 @@ export function createEditorHandler(options: EditorOptions) {
               },
             );
             if (made) return answer(true);
-          } finally {
-            await rm(tmp, { force: true });
           }
+          // Written before (then undone in the editor): the same tile uses the same file again.
+          if ((await readFile(target, "utf8").catch(() => undefined)) === source) return answer(false);
         }
         throw new HttpError(409, `dashboards/${name}/ に、${base}.tsx から ${base}100.tsx までがもうあります`);
       }

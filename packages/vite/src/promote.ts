@@ -33,8 +33,11 @@ export function componentName(id: string, type: string): string {
 
 const IDENT = /^[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*$/u;
 
-/** One line of a comment: a title or a label cannot end the comment and start code. */
-const oneLine = (s: string) => s.replace(/[\r\n\u2028\u2029]+/g, " ");
+/**
+ * Text from dash.json or metrics.yaml in a comment: one line, so it cannot end the comment and start code, and no
+ * `@`, so it cannot be a pragma the compiler reads in any comment (`@jsxImportSource https://…` would load a module).
+ */
+const oneLine = (s: string) => s.replace(/[\r\n\u2028\u2029]+/g, " ").replaceAll("@", "＠");
 
 const key = (k: string) => (k === "__proto__" ? `["__proto__"]` : IDENT.test(k) ? k : JSON.stringify(k));
 

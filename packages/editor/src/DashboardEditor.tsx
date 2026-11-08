@@ -53,6 +53,8 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   const [future, setFuture] = useState<RawDashboard[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [saving, setSaving] = useState(false);
+  /** A save (or "コードにする") is under way: set at once, unlike `saving`, so a second one started meanwhile waits. */
+  const busy = useRef(false);
   const [closing, setClosing] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   /** The panel's unfinished edit (a tile's new name), taken before the selection changes. */
@@ -131,7 +133,8 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
     async (overwrite = false, next?: RawDashboard): Promise<boolean> => {
       const target = next ?? spec;
       // Nothing changed: no write (it would rewrite a hand-written file in the editor's style).
-      if (!target || !file || saving || (!overwrite && !next && !dirty)) return false;
+      if (!target || !file || busy.current || (!overwrite && !next && !dirty)) return false;
+      busy.current = true;
       setSaving(true);
       try {
         // Overwrite: write over whatever is on disk now (after a conflict the user chose to keep their version),
@@ -156,10 +159,11 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
         setNotice({ kind: conflict ? "warn" : "error", text: (e as Error).message, conflict });
         return false;
       } finally {
+        busy.current = false;
         setSaving(false);
       }
     },
-    [spec, file, saving, dirty, dev, name, onSaved],
+    [spec, file, dirty, dev, name, onSaved],
   );
 
   /** The latest state, for a change made after waiting for the dev server. */
@@ -174,23 +178,34 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   const promote = useCallback(
     async (id: string): Promise<boolean> => {
       const tile = spec?.tiles.find((t) => t.id === id);
-      if (!spec || !tile) return false;
+      // Like a save: not while one is under way, and ⌘S does nothing meanwhile (this saves everything after).
+      if (!spec || !tile || busy.current) return false;
+      busy.current = true;
+      setSaving(true);
       let written: TileFile;
       try {
         written = await writeTileFile(dev, name, tile, metricsNameOf(project.metrics, spec, tile));
       } catch (e) {
         setNotice({ kind: "error", text: (e as Error).message });
         return false;
+      } finally {
+        busy.current = false;
+        setSaving(false);
       }
       // The page loaded before the file was there: the tiles here, and the page once the editor closes, load it so.
       project.components[written.path] ??= () => dev.importTile(written.path);
+      const file = written.path.slice(1);
       const now = latest.current;
-      if (!now.spec) return false;
+      // Changed while the file was written (its query, its name, removed, undone): the file has the old tile.
+      const current = now.spec?.tiles.find((t) => t.id === id);
+      if (!now.spec || !current || JSON.stringify(current) !== JSON.stringify(tile)) {
+        setNotice({ kind: "warn", text: `${file} に書き出しましたが、その間にタイルが変わったので、タイルはそのままにしました。もう一度「コードにする」を押してください` });
+        return false;
+      }
       const next = updateTile(now.spec, id, (t) => promoteTile(t, written.component));
       now.change(next);
       // When the save fails, its notice says why (the file changed on disk, for one); the tile is changed, unsaved.
       if (!(await now.save(false, next))) return true;
-      const file = written.path.slice(1);
       setNotice({
         kind: "info",
         text: `${written.created ? `${file} に書き出して` : `前に書き出した ${file} を使うようにして`}、保存しました。このタイルのデータと描き方は、これからはこのファイルで変えます`,
