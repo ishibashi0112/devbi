@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { dashboardSchemas, type SchemaNames } from "./dashboard.js";
 import { metricsInput } from "./metrics.js";
-import { TILE_TYPES, TILE_TYPE_NAMES, type TileTypeInfo } from "./tiles.js";
+import { TILE_TYPES, TILE_TYPE_NAMES, type TileOptionSchema, type TileTypeInfo } from "./tiles.js";
 
 type JsonSchema = Record<string, unknown>;
 
@@ -22,10 +22,17 @@ function tidy(node: unknown): unknown {
   return out;
 }
 
+/** An option as JSON Schema: the GUI editor's `label` and `input` stay out; `enumLabels` is VS Code's `enumDescriptions`. */
 function optionSchema(info: TileTypeInfo): JsonSchema {
+  const option = (o: TileOptionSchema): JsonSchema => ({
+    ...(o.type ? { type: o.type } : {}),
+    ...(o.enum ? { enum: o.enum } : {}),
+    ...(o.enumLabels ? { enumDescriptions: o.enumLabels } : {}),
+    description: o.description,
+  });
   return {
     type: "object",
-    properties: Object.fromEntries(Object.entries(info.options).map(([k, o]) => [k, { ...o }])),
+    properties: Object.fromEntries(Object.entries(info.options).map(([k, o]) => [k, option(o)])),
     additionalProperties: false,
   };
 }

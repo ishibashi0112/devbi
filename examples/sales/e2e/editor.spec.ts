@@ -241,3 +241,136 @@ test("the editor's endpoint is only for the editor's own requests", async ({ pag
   expect(status).toEqual({ plain: 403, bad: 409 });
   expect(readFileSync(salesFile, "utf8")).toBe(original);
 });
+
+const panel = (page: Page) => page.getByRole("complementary", { name: "設定" });
+
+/** Press a tile (not drag it): the property panel shows it. */
+async function pick(page: Page, id: string) {
+  await item(page, id).locator(".devbi-ed-cover").click();
+  await expect(panel(page).getByLabel("名前（id）")).toHaveValue(id);
+}
+
+test("the property panel: type, title, measures and time grain show on the tile at once, and save as those lines", async ({ page }) => {
+  await openEditor(page);
+  await expect(panel(page).getByRole("heading", { name: "ダッシュボード" })).toBeVisible();
+  await pick(page, "monthly");
+  const p = panel(page);
+  await p.getByLabel("種類").selectOption({ label: "折れ線グラフ" });
+  await expect(item(page, "monthly").locator(".devbi-tile-line")).toBeVisible();
+  await p.getByRole("checkbox", { name: /受注件数/ }).check();
+  await expect(item(page, "monthly")).toContainText("受注件数");
+  await p.getByLabel(/期間の単位/).selectOption({ label: "四半期" });
+
+  // Typing in a box is one undo step, however many letters.
+  const title = p.getByLabel("見出し", { exact: true });
+  await title.click();
+  await title.press("End");
+  await title.pressSequentially("（税込）");
+  await expect(item(page, "monthly").getByRole("heading", { name: "月別売上（税込）" })).toBeVisible();
+  await page.getByRole("button", { name: "元に戻す" }).click();
+  await expect(title).toHaveValue("月別売上");
+  await page.getByRole("button", { name: "やり直す" }).click();
+  await expect(title).toHaveValue("月別売上（税込）");
+
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  expect(readFileSync(salesFile, "utf8")).toBe(
+    original.replace(
+      `"type": "bar",\n      "title": "月別売上",\n      "query": { "measures": ["revenue"], "time": "month" }`,
+      `"type": "line",\n      "title": "月別売上（税込）",\n      "query": { "measures": ["revenue", "orders"], "time": "quarter" }`,
+    ),
+  );
+});
+
+test("the property panel: filters from the data's values, sort and limit; with no tile, the dashboard's own settings", async ({ page }) => {
+  await openEditor(page);
+  await pick(page, "region");
+  const p = panel(page);
+  const before = await item(page, "region").locator(".devbi-tile-body").innerText();
+  await p.getByLabel("絞り込みを追加").selectOption({ label: "商品分類" });
+  await p.getByRole("checkbox", { name: "保守" }).check();
+  await expect(item(page, "region").locator(".devbi-tile-body")).not.toHaveText(before);
+  await p.getByLabel("並び順を追加").selectOption({ label: "地域" });
+  await p.getByLabel("地域の向き").selectOption({ label: "大きい順" });
+  await p.getByLabel("件数", { exact: true }).fill("3");
+  await expect(item(page, "region").locator(".devbi-tile-body")).not.toContainText("九州");
+
+  // Back to the dashboard's own settings.
+  await p.getByRole("button", { name: "ダッシュボード全体" }).click();
+  await expect(p.getByRole("heading", { name: "ダッシュボード" })).toBeVisible();
+  await p.getByLabel("見出し", { exact: true }).fill("売上（四半期の会議用）");
+  await expect(page.getByRole("heading", { name: "売上（四半期の会議用）", level: 1 })).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const saved = readFileSync(salesFile, "utf8");
+  const spec = JSON.parse(saved);
+  expect(spec.title).toBe("売上（四半期の会議用）");
+  expect(spec.tiles.find((t: { id: string }) => t.id === "region").query).toEqual({
+    measures: ["revenue"],
+    dimensions: ["region"],
+    filters: [{ field: "category", in: ["保守"] }],
+    sort: ["-region"],
+    limit: 3,
+  });
+  // Only the title and that tile's query changed (its `"query": {` line is in the file already, for another tile).
+  const changed = saved.split("\n").filter((line) => !original.split("\n").includes(line));
+  expect(changed).toEqual([
+    `  "title": "売上（四半期の会議用）",`,
+    `        "measures": ["revenue"],`,
+    `        "dimensions": ["region"],`,
+    `        "filters": [{ "field": "category", "in": ["保守"] }],`,
+    `        "sort": ["-region"],`,
+    `        "limit": 3`,
+  ]);
+});
+
+test("the property panel: a tile's name is checked, options show at once, a type without data drops the query", async ({ page }) => {
+  await openEditor(page);
+  await pick(page, "region");
+  const p = panel(page);
+  const id = p.getByLabel("名前（id）");
+  await id.fill("kpi-orders");
+  await expect(p.getByText("kpi-orders は、ほかのタイルの名前です")).toBeVisible();
+  await id.fill("region-sales");
+  await id.press("Enter");
+  await expect(item(page, "region-sales")).toBeVisible();
+  await expect(id).toHaveValue("region-sales");
+
+  // The pivot's totals.
+  await pick(page, "region-quarter");
+  await expect(item(page, "region-quarter")).toContainText("合計");
+  await p.getByLabel("合計の行と列").selectOption({ label: "いいえ" });
+  await expect(item(page, "region-quarter")).not.toContainText("合計");
+
+  // The period picker starts over with its new default.
+  await pick(page, "period");
+  await p.getByLabel("最初の期間").selectOption({ label: "前の年度" });
+  await expect(item(page, "period").getByRole("button", { name: "2025年度" })).toHaveAttribute("aria-pressed", "true");
+
+  // A query that cannot show anything says so in the panel too.
+  await pick(page, "kpi-orders");
+  await p.getByRole("checkbox", { name: /受注件数/ }).uncheck();
+  await expect(p.getByText("measures か dimensions を一つ以上指定してください")).toBeVisible();
+  await expect(item(page, "kpi-orders")).toContainText("measures か dimensions を一つ以上指定してください");
+  await page.getByRole("button", { name: "元に戻す" }).click();
+  await expect(item(page, "kpi-orders").getByTestId("kpi-value")).toHaveText(/^[\d,]+$/);
+
+  // A type without a query: the query goes, the text a new one starts with comes.
+  await pick(page, "monthly");
+  await p.getByLabel("種類").selectOption({ label: "文章" });
+  await expect(item(page, "monthly").locator(".devbi-tile-markdown")).toBeVisible();
+  await expect(p.getByLabel("本文")).toHaveValue(/ここに説明を書きます/);
+  await p.getByRole("button", { name: "このタイルを消す" }).click();
+  await expect(item(page, "monthly")).toHaveCount(0);
+  await expect(p.getByRole("heading", { name: "ダッシュボード" })).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const spec = JSON.parse(readFileSync(salesFile, "utf8"));
+  const ids = spec.tiles.map((t: { id: string }) => t.id);
+  expect(ids).toContain("region-sales");
+  expect(ids).not.toContain("monthly");
+  expect(spec.tiles.find((t: { id: string }) => t.id === "region-quarter").options).toEqual({ columns: "受注日", totals: false });
+  expect(spec.tiles.find((t: { id: string }) => t.id === "period").options).toEqual({ default: "previous_fiscal_year" });
+});

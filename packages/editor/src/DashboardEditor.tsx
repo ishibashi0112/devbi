@@ -1,13 +1,15 @@
-import { DevbiProvider, TileFrame, injectStyles, themeAttribute, type DashboardEditorProps } from "@devbi/react";
-import { TILE_TYPES, TILE_TYPE_NAMES, defineDashboard, formatDashboardJson, type BuiltinTileType, type Dashboard, type MetricsView, type TileSpec } from "devbi";
-import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { DevbiProvider, TileFrame, injectStyles, themeAttribute, useDevbi, type DashboardEditorProps } from "@devbi/react";
+import { TILE_TYPES, TILE_TYPE_NAMES, defineDashboard, formatDashboardJson, type BuiltinTileType, type Dashboard, type TileSpec } from "devbi";
+import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ReactGridLayout, useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
 import { EditorError, readDashboard, writeDashboard, type DashboardFile } from "./api.js";
+import { viewFor } from "./edit.js";
 import { boxesOf, newTile, placeTiles, type Box, type RawDashboard } from "./layout.js";
+import { Panel } from "./Panel.js";
 import { injectEditorStyles } from "./styles.js";
 
-/** Narrower than this, the 12 columns are too thin to drag (the dashboard shows in one column there anyway). */
-const MIN_WIDTH = 720;
+/** Narrower than this, the 12 columns are too thin to drag. */
+const MIN_WIDTH = 640;
 const GAP = 12;
 const HISTORY = 100;
 const TILE_STYLE: CSSProperties = { height: "100%" };
@@ -22,22 +24,14 @@ function compact(spec: RawDashboard): RawDashboard {
 
 const same = (a: RawDashboard, b: RawDashboard) => a === b || formatDashboardJson(a) === formatDashboardJson(b);
 
-/** The dashboard's metrics view, for a new tile's first measure and dimension. */
-function viewFor(project: DashboardEditorProps["project"], spec: RawDashboard): { view?: MetricsView; needsMetrics: boolean } {
-  const names = Object.keys(project.metrics).sort();
-  const own = spec.metrics ?? (names.length === 1 ? names[0] : undefined);
-  if (own) return { view: project.metrics[own], needsMetrics: false };
-  return { view: names[0] ? project.metrics[names[0]] : undefined, needsMetrics: true };
-}
-
 function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName));
 }
 
 /**
  * The GUI editor for one dashboard: drag tiles to move them, drag an edge or corner to resize, add and remove
- * tiles, and save to `dashboards/<name>.dash.json` (in the hand-written style, so the git diff is small). The tiles
- * show their data while you edit.
+ * tiles, set a tile's type, title and data in the property panel, and save to `dashboards/<name>.dash.json` (in the
+ * hand-written style, so the git diff is small). The tiles show their data while you edit.
  */
 export function DashboardEditor({ project: given, name, dev, theme, onSaved, onClose }: DashboardEditorProps) {
   useInsertionEffect(injectStyles, []);
@@ -61,6 +55,8 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   /** Files changed on disk that the page has not taken in: it reloads when the editor closes. */
   const stale = useRef(false);
   const loaded = useRef(false);
+  /** The `merge` key of the last change: typing in one text box is one undo step, not one per letter. */
+  const lastMerge = useRef<string | null>(null);
 
   const open = useCallback(
     async (message?: Notice) => {
@@ -70,6 +66,7 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
         const compacted = compact(tiles);
         setFile(read);
         setSpec(compacted);
+        lastMerge.current = null;
         setPast([]);
         setFuture([]);
         setLoadError(null);
@@ -92,9 +89,11 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   }, [open]);
 
   const change = useCallback(
-    (next: RawDashboard) => {
+    (next: RawDashboard, merge?: string) => {
       if (!spec || next === spec) return;
-      setPast((p) => [...p.slice(-(HISTORY - 1)), spec]);
+      const fold = !!merge && merge === lastMerge.current;
+      lastMerge.current = merge ?? null;
+      if (!fold) setPast((p) => [...p.slice(-(HISTORY - 1)), spec]);
       setFuture([]);
       setSpec(next);
     },
@@ -102,12 +101,14 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   );
   const undo = useCallback(() => {
     if (!spec || !past.length) return;
+    lastMerge.current = null;
     setFuture((f) => [spec, ...f]);
     setSpec(past[past.length - 1]!);
     setPast((p) => p.slice(0, -1));
   }, [spec, past]);
   const redo = useCallback(() => {
     if (!spec || !future.length) return;
+    lastMerge.current = null;
     setPast((p) => [...p, spec]);
     setSpec(future[0]!);
     setFuture((f) => f.slice(1));
@@ -191,7 +192,7 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   const added = useRef<string | null>(null);
   const add = (type: BuiltinTileType) => {
     if (!spec) return;
-    const { view, needsMetrics } = viewFor(project, spec);
+    const { view, needsMetrics } = viewFor(project.metrics, spec);
     const tile = newTile(type, spec, view, needsMetrics);
     change(compact({ ...spec, tiles: [...spec.tiles, tile] }));
     setSelected(tile.id);
@@ -325,33 +326,26 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
             </button>
           </div>
         )}
-        <Canvas project={project} name={name} path={file.path} spec={spec} selected={selected} onSelect={setSelected} onChange={change} onRemove={remove} />
+        <Body project={project} name={name} path={file.path} spec={spec} selected={selected} onSelect={setSelected} onChange={change} onRemove={remove} />
       </div>
     </div>
   );
 }
 
-/** The dashboard as a grid of draggable, resizable tiles that show their data. */
-function Canvas({
-  project,
-  name,
-  path,
-  spec,
-  selected,
-  onSelect,
-  onChange,
-  onRemove,
-}: {
+type BodyProps = {
   project: DashboardEditorProps["project"];
   name: string;
   path: string;
   spec: RawDashboard;
   selected: string | null;
   onSelect(id: string | null): void;
-  onChange(next: RawDashboard): void;
+  onChange(next: RawDashboard, merge?: string): void;
   onRemove(id: string): void;
-}) {
-  const { width, containerRef, mounted } = useContainerWidth();
+};
+
+/** The grid and the property panel, with the tiles' data while the dashboard is valid. */
+function Body(props: BodyProps) {
+  const { project, name, path, spec } = props;
   const checked = useMemo((): { dashboard: Dashboard & { path: string } } | { error: Error } => {
     try {
       return { dashboard: { ...defineDashboard(spec, name, path.slice(1)), path } };
@@ -359,60 +353,120 @@ function Canvas({
       return { error: e as Error };
     }
   }, [spec, name, path]);
-  // The tiles' data stays while they move: a new context (and new queries) only when what they show changes.
-  const content = JSON.stringify({ ...spec, tiles: spec.tiles.map(({ x: _x, y: _y, w: _w, h: _h, ...rest }) => rest) });
+  const valid = "dashboard" in checked ? checked.dashboard : null;
+  // One context while the editor is open, so a change to one tile runs only that tile's query again, and the period
+  // and other selections stay. A new one when the dashboard's metrics file (every tile's default) changes. Its
+  // `dashboard.tiles` may lag behind; the tiles here come from `valid`.
+  const metricsKey = valid ? (valid.metrics ?? "") : null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shown = useMemo(() => ("dashboard" in checked ? checked.dashboard : null), [content]);
+  const context = useMemo(() => valid, [metricsKey]);
+  const panel = (live: boolean, clearSelection: (id: string) => void) => (
+    <Panel
+      metrics={project.metrics}
+      name={name}
+      spec={spec}
+      selected={props.selected}
+      live={live}
+      onSelect={props.onSelect}
+      onChange={props.onChange}
+      onRemove={props.onRemove}
+      clearSelection={clearSelection}
+    />
+  );
+  return (
+    <div className="devbi-ed-body">
+      {valid && context ? (
+        <DevbiProvider project={project} dashboard={context}>
+          <Live ids={valid.tiles.map((t) => t.id)}>
+            {(clear) => (
+              <>
+                <Canvas {...props} tiles={valid.tiles} />
+                {panel(true, clear)}
+              </>
+            )}
+          </Live>
+        </DevbiProvider>
+      ) : (
+        <>
+          <div className="devbi-ed-grid">
+            <div className="devbi-ed-notice" data-kind="error">
+              <span>{"error" in checked ? checked.error.message : ""}</span>
+            </div>
+          </div>
+          {panel(false, () => {})}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Inside the provider: a removed (or renamed) tile's selection is cleared, so it no longer filters the others. */
+function Live({ ids, children }: { ids: string[]; children(clear: (id: string) => void): ReactNode }) {
+  const { selection } = useDevbi();
+  const before = useRef(ids);
+  const key = ids.join("\n");
+  useEffect(() => {
+    for (const id of before.current) if (!ids.includes(id)) selection.set(id, null);
+    before.current = ids;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, selection]);
+  const clear = useCallback((id: string) => selection.set(id, null), [selection]);
+  return <>{children(clear)}</>;
+}
+
+/** The dashboard as a grid of draggable, resizable tiles that show their data. */
+function Canvas({ spec, tiles, selected, onSelect, onChange, onRemove }: BodyProps & { tiles: TileSpec[] }) {
+  const { width, containerRef, mounted } = useContainerWidth();
   const boxes = useMemo(() => boxesOf(spec), [spec]);
   const onLayoutChange = useCallback((layout: Layout) => onChange(placeTiles(spec, layout as readonly Box[])), [spec, onChange]);
-  const tiles: TileSpec[] = "dashboard" in checked ? checked.dashboard.tiles : [];
   const columns = spec.columns ?? 12;
   const rowHeight = spec.rowHeight ?? 80;
   return (
-    <div className="devbi-ed-grid" ref={containerRef}>
-      {"error" in checked && (
-        <div className="devbi-ed-notice" data-kind="error">
-          <span>{checked.error.message}</span>
-        </div>
-      )}
+    <div
+      className="devbi-ed-grid"
+      ref={containerRef}
+      onPointerDown={(e) => {
+        // A press between the tiles: back to the dashboard's settings.
+        if (!(e.target as Element).closest("[data-editor-tile]")) onSelect(null);
+      }}
+    >
       {spec.tiles.length === 0 && <div className="devbi-ed-empty">「＋ タイルを追加」から、数字やグラフを置いていきます</div>}
       {mounted && width > 0 && width < MIN_WIDTH && <p className="devbi-hint">タイルを動かすには、幅 {MIN_WIDTH}px 以上の画面で開いてください</p>}
-      {mounted && width >= MIN_WIDTH && shown && (
-        <DevbiProvider project={project} dashboard={shown}>
-          <ReactGridLayout
-            width={width}
-            layout={boxes}
-            gridConfig={{ cols: columns, rowHeight, margin: [GAP, GAP], containerPadding: [0, 0] }}
-            dragConfig={{ enabled: true, cancel: ".devbi-ed-nodrag", threshold: 3 }}
-            resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
-            compactor={verticalCompactor}
-            onLayoutChange={onLayoutChange}
-          >
-            {tiles.map((t) => (
-              <div
-                key={t.id}
-                data-editor-tile={t.id}
-                className={`devbi-ed-item${selected === t.id ? " devbi-ed-selected" : ""}`}
-                onPointerDown={() => onSelect(t.id)}
+      {mounted && width >= MIN_WIDTH && (
+        <ReactGridLayout
+          width={width}
+          layout={boxes}
+          gridConfig={{ cols: columns, rowHeight, margin: [GAP, GAP], containerPadding: [0, 0] }}
+          dragConfig={{ enabled: true, cancel: ".devbi-ed-nodrag", threshold: 3 }}
+          resizeConfig={{ enabled: true, handles: ["se", "e", "s"] }}
+          compactor={verticalCompactor}
+          onLayoutChange={onLayoutChange}
+        >
+          {tiles.map((t) => (
+            <div
+              key={t.id}
+              data-editor-tile={t.id}
+              className={`devbi-ed-item${selected === t.id ? " devbi-ed-selected" : ""}`}
+              onPointerDown={() => onSelect(t.id)}
+            >
+              {/* The period picker takes its default when it starts: a new one when its options change. */}
+              <TileFrame key={t.type === "date-range" ? JSON.stringify(t.options ?? null) : "tile"} tile={t} style={TILE_STYLE} />
+              <div className="devbi-ed-cover" aria-hidden="true" />
+              <span className="devbi-ed-label">
+                {t.id} · {t.type ? (Object.hasOwn(TILE_TYPES, t.type) ? TILE_TYPES[t.type as BuiltinTileType].label : t.type) : t.component}
+              </span>
+              <button
+                type="button"
+                className="devbi-ed-remove devbi-ed-nodrag"
+                aria-label={`${t.title ?? t.id}を消す`}
+                title="このタイルを消す（Delete）"
+                onClick={() => onRemove(t.id)}
               >
-                <TileFrame tile={t} style={TILE_STYLE} />
-                <div className="devbi-ed-cover" aria-hidden="true" />
-                <span className="devbi-ed-label">
-                  {t.id} · {t.type ? (Object.hasOwn(TILE_TYPES, t.type) ? TILE_TYPES[t.type as BuiltinTileType].label : t.type) : t.component}
-                </span>
-                <button
-                  type="button"
-                  className="devbi-ed-remove devbi-ed-nodrag"
-                  aria-label={`${t.title ?? t.id}を消す`}
-                  title="このタイルを消す（Delete）"
-                  onClick={() => onRemove(t.id)}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </ReactGridLayout>
-        </DevbiProvider>
+                ×
+              </button>
+            </div>
+          ))}
+        </ReactGridLayout>
       )}
     </div>
   );

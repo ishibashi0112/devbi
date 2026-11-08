@@ -16,14 +16,15 @@ export const editorCss = `
 .devbi-ed-item { transition: transform 200ms ease, width 200ms ease, height 200ms ease; }
 .devbi-ed-item.react-draggable-dragging, .devbi-ed-item.resizing { transition: none; z-index: 3; }
 .devbi-ed-item.react-draggable-dragging { cursor: grabbing; }
-.devbi-ed-item > .devbi-tile { height: 100%; }
+/* Each tile's own layers (a table's sticky header, for one) stay under the cover. */
+.devbi-ed-item > .devbi-tile { height: 100%; isolation: isolate; }
 /* The tile shows its data, but clicks and drags go to the editor, not to the chart. */
-.devbi-ed-cover { position: absolute; inset: 0; cursor: grab; border-radius: var(--devbi-radius); }
+.devbi-ed-cover { position: absolute; inset: 0; z-index: 1; cursor: grab; border-radius: var(--devbi-radius); }
 .devbi-ed-item:hover > .devbi-ed-cover { box-shadow: inset 0 0 0 1px var(--devbi-accent); }
 .devbi-ed-item.devbi-ed-selected > .devbi-ed-cover { box-shadow: inset 0 0 0 2px var(--devbi-accent); }
-.devbi-ed-label { position: absolute; left: 8px; bottom: 6px; max-width: calc(100% - 16px); padding: 1px 6px; border-radius: 4px; background: var(--devbi-accent-soft); color: var(--devbi-text); font-size: 11px; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; }
+.devbi-ed-label { position: absolute; z-index: 2; left: 8px; bottom: 6px; max-width: calc(100% - 16px); padding: 1px 6px; border-radius: 4px; background: var(--devbi-accent-soft); color: var(--devbi-text); font-size: 11px; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; }
 .devbi-ed-item:hover > .devbi-ed-label, .devbi-ed-item.devbi-ed-selected > .devbi-ed-label { opacity: 1; }
-.devbi-ed-remove { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border: 1px solid var(--devbi-border); border-radius: 6px; background: var(--devbi-card); color: var(--devbi-muted); cursor: pointer; line-height: 1; opacity: 0; }
+.devbi-ed-remove { position: absolute; z-index: 2; top: 6px; right: 6px; width: 24px; height: 24px; border: 1px solid var(--devbi-border); border-radius: 6px; background: var(--devbi-card); color: var(--devbi-muted); cursor: pointer; line-height: 1; opacity: 0; }
 .devbi-ed-item:hover > .devbi-ed-remove, .devbi-ed-item.devbi-ed-selected > .devbi-ed-remove, .devbi-ed-remove:focus-visible { opacity: 1; }
 .devbi-ed-remove:hover { color: var(--devbi-down); border-color: var(--devbi-down); }
 .devbi-ed-grid .react-grid-placeholder { background: var(--devbi-accent-soft); border: 2px dashed var(--devbi-accent); border-radius: var(--devbi-radius); transition-duration: 100ms; z-index: 2; user-select: none; }
@@ -40,6 +41,39 @@ export const editorCss = `
 .devbi-ed-form input, .devbi-ed-form select { font: inherit; color: inherit; background: var(--devbi-bg); border: 1px solid var(--devbi-border); border-radius: 6px; padding: 6px 8px; }
 .devbi-ed-form input:focus-visible, .devbi-ed-form select:focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 1px; }
 .devbi-ed-form .devbi-ed-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.devbi-ed-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.devbi-ed-panel { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow: auto; display: grid; gap: 12px; padding: 14px 16px; background: var(--devbi-card); border: 1px solid var(--devbi-border); border-radius: var(--devbi-radius); font-size: 13px; }
+.devbi-ed-panel h2 { font-size: 15px; margin: 0; overflow-wrap: anywhere; }
+.devbi-ed-panel h3 { font-size: 12px; margin: 6px 0 0; padding-top: 10px; border-top: 1px solid var(--devbi-border); color: var(--devbi-muted); font-weight: 600; }
+.devbi-ed-panel p { margin: 0; }
+.devbi-ed-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.devbi-ed-panel input:not([type="checkbox"]), .devbi-ed-panel select, .devbi-ed-panel textarea { font: inherit; color: inherit; background: var(--devbi-bg); border: 1px solid var(--devbi-border); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+.devbi-ed-panel textarea { min-height: 96px; resize: vertical; }
+.devbi-ed-panel :is(input, select, textarea):focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 1px; }
+.devbi-ed-panel input[aria-invalid="true"] { border-color: var(--devbi-down); }
+.devbi-ed-field:has(input[aria-invalid="true"]) small { color: var(--devbi-down); }
+.devbi-ed-panel fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; min-width: 0; }
+.devbi-ed-panel legend { padding: 0; margin-bottom: 2px; }
+.devbi-ed-name { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.devbi-ed-name label, .devbi-ed-values label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.devbi-ed-name label > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devbi-ed-code { color: var(--devbi-muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.devbi-ed-order { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--devbi-accent-soft); font-size: 11px; }
+.devbi-ed-mini { border: 1px solid var(--devbi-border); background: var(--devbi-card); color: inherit; border-radius: 4px; padding: 0 6px; cursor: pointer; font-size: 12px; line-height: 1.7; white-space: nowrap; }
+.devbi-ed-mini:hover { border-color: var(--devbi-accent); }
+.devbi-ed-row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+.devbi-ed-row > select, .devbi-ed-row > input { flex: 1; }
+.devbi-ed-filter { border: 1px solid var(--devbi-border); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
+.devbi-ed-values { max-height: 200px; overflow: auto; display: grid; gap: 2px; }
+.devbi-ed-warn { color: var(--devbi-down); }
+.devbi-ed-danger { justify-self: start; margin-top: 4px; }
+.devbi-ed-danger:hover { border-color: var(--devbi-down); color: var(--devbi-down); }
+@media (max-width: 1180px) { .devbi-ed-body { grid-template-columns: minmax(0, 1fr) 260px; } }
+/* Narrower: the panel sits over the bottom of the screen, so it stays in view next to the tile being set. */
+@media (max-width: 940px) {
+  .devbi-ed-body { grid-template-columns: minmax(0, 1fr); padding-bottom: 46vh; }
+  .devbi-ed-panel { position: fixed; z-index: 20; left: 8px; right: 8px; top: auto; bottom: 8px; max-height: 44vh; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25); }
+}
 @media (prefers-reduced-motion: reduce) { .devbi-ed-item, .devbi-ed-grid .react-grid-layout { transition: none; } }
 `;
 
