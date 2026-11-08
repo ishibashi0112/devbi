@@ -54,6 +54,41 @@ describe("the dev server", () => {
   });
 });
 
+describe("what the dev server bundles ahead (optimizeDeps.include)", () => {
+  const include = async (root: string, command = "serve") => {
+    const devbi = (await import("../src/index.js")).default;
+    const config = (devbi().config as (u: unknown, e: { mode: string; command: string }) => { optimizeDeps: { include: string[]; exclude?: string[] } })(
+      { root },
+      { mode: "development", command },
+    );
+    // DuckDB-wasm is never left out (it would load its own apache-arrow, or not load at all with pnpm).
+    expect(config.optimizeDeps.exclude).toBeUndefined();
+    return config.optimizeDeps.include;
+  };
+  const project = (packages: string[], linked = false) => {
+    const root = mkdtempSync(path.join(tmpdir(), "devbi-deps-"));
+    for (const name of packages) {
+      const at = path.join(root, "node_modules", ...name.split("/"));
+      mkdirSync(path.dirname(at), { recursive: true });
+      const real = linked ? mkdtempSync(path.join(tmpdir(), "devbi-src-")) : at;
+      mkdirSync(real, { recursive: true });
+      writeFileSync(path.join(real, "package.json"), JSON.stringify({ name }));
+      if (linked) symlinkSync(real, at, "junction");
+    }
+    return root;
+  };
+
+  it("installed from npm: the editor, and what a tile it writes imports", async () => {
+    expect(await include(project(["@devbi/editor", "@devbi/react", "devbi"]))).toEqual(["@devbi/editor", "devbi", "@devbi/react"]);
+    expect(await include(project(["@devbi/react", "devbi"]))).toEqual([]);
+    expect(await include(project(["@devbi/editor", "@devbi/react", "devbi"]), "build")).toEqual([]);
+  });
+
+  it("linked to their source (this repository, pnpm link): only the editor's own dependency", async () => {
+    expect(await include(project(["@devbi/editor", "@devbi/react", "devbi"], true))).toEqual(["@devbi/editor > react-grid-layout"]);
+  });
+});
+
 describe("snapshots", () => {
   it("passes the times of the api/*.sql with a snapshot line to the browser, not the SQL", async () => {
     const { readSnapshots } = await import("../src/index.js");

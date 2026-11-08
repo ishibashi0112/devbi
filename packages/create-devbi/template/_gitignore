@@ -1,0 +1,9 @@
+node_modules/
+dist/
+# 開発サーバーと devbi-gen が models/ から作る補完と型（git に入れない）
+.devbi/
+*.tsbuildinfo
+.vite/
+.DS_Store
+# 本物の接続先（パスワードを含む）を書く .env.local は git に入れない
+.env*.local

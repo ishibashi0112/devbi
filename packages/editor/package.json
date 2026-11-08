@@ -1,15 +1,22 @@
 {
   "name": "@devbi/editor",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "DevBI's GUI editor: lay out tiles and save dash.json from the Vite dev server. Never part of a build.",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/ishibashi0112/devbi.git",
     "directory": "packages/editor"
   },
+  "homepage": "https://github.com/ishibashi0112/devbi#readme",
+  "bugs": "https://github.com/ishibashi0112/devbi/issues",
+  "keywords": [
+    "devbi",
+    "bi",
+    "dashboard",
+    "editor"
+  ],
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -27,20 +34,23 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "devbi": "workspace:*",
+    "devbi": "workspace:^",
     "react-grid-layout": "^2.3.0"
   },
   "peerDependencies": {
-    "@devbi/react": "workspace:*",
+    "@devbi/react": "workspace:^",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@devbi/react": "workspace:*",
+    "@devbi/react": "workspace:^",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsup": "^9.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

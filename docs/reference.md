@@ -2,6 +2,7 @@
 
 DevBI のファイル形式と API の一覧です。v0 なので、1.0 までに名前や形が変わることがあります。使い方の流れは [README](../README.md)、画面での確かめ方は [manual-check.md](manual-check.md) を見てください。
 
+- [はじめる（create-devbi）](#はじめるcreate-devbi)
 - [プロジェクトの形](#プロジェクトの形)
 - [metrics.yaml](#metricsyaml)（指標と軸）
 - [dash.json](#dashjson)（タイルの並び）
@@ -19,6 +20,24 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [devbi（コア）](#devbiコア)
 - [見た目の変更（CSS 変数）](#見た目の変更css-変数)
 - [コマンド](#コマンド)
+
+## はじめる（create-devbi）
+
+```sh
+npm create devbi@latest my-reports     # pnpm create devbi my-reports / yarn create devbi my-reports / bun create devbi my-reports
+cd my-reports
+npm install
+npm run dev                            # http://localhost:5173 。見出しの右の「編集」で GUI エディタ
+```
+
+`my-reports/` に、サンプルの売上ダッシュボード（架空の受注明細の Excel、自作タイル 1 つ）と、Vite・React・GUI エディタの設定が入ったプロジェクトができます。中身はこのリポジトリの `examples/sales` の売上ダッシュボードと同じです。
+
+- フォルダは、ないか空のものにします（`.git` だけはあってよい）。名前を書かなければ聞かれます（ターミナルでないときは `my-reports`）
+- `git init` もします。git のリポジトリの中（モノレポなど）ではしません。`--no-git` でしない
+- package.json の名前はフォルダ名から作ります（英数字以外は `-`。残らなければ `devbi-reports`）
+- DevBI のパッケージ（`devbi`、`@devbi/react`、`@devbi/vite`、`@devbi/editor`）は `create-devbi` と同じ版を `^` で入れます。React・Vite・TypeScript は、このリポジトリでテストしている版です
+- できるスクリプト: `dev`（開発サーバー）、`build`（`dist/` に静的なサイト）、`preview`（ビルドしたものを開く）、`gen`（[補完と型](#エディタでの補完と型pnpm-gen)）、`typecheck`（`devbi-gen` と `tsc`）
+- データベースから読むとき（[@devbi/server](#データベースから読むdevbiserver)）は、`npm install -D @devbi/server` とドライバー（`pg` など）を足します
 
 ## プロジェクトの形
 
@@ -377,6 +396,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
 - 開発サーバーでは、dash.json・metrics.yaml・data/・api/ のファイルを保存したときと、`dashboards/` に自作タイルのファイル（`.tsx`・`.jsx`）を足したり消したりしたときに、ページを読み込み直します（GUI エディタで編集中は[別の動き](#ほかで書き換えたとき)）。自作タイルのファイルを直したときは、Vite（React）の決まりどおりです（`export const query` のあるファイルは、ページを読み込み直します）。
 - プロジェクトに `@devbi/editor` が入っていると、開発サーバーでだけ [GUI エディタ](#gui-エディタdevbieditor)を付けます（`vite.config.ts` や `main.tsx` は変えなくてよい）。ビルド、`vite preview` には入りません。
+- 開発サーバーでは、npm から入れた `@devbi/editor`・`devbi`・`@devbi/react` を、Vite の `optimizeDeps.include` に足して先にまとめます（エディタを開いたときや、「コードにする」で書き出したファイルを読んだときに、Vite が新しい依存を見つけてページを読み込み直さないように）。DuckDB-wasm も、ほかと同じく先にまとめます（`optimizeDeps.exclude` に入れると、npm で入れたときは集計が動かず、pnpm で入れたときは開けません）。
 - 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
@@ -1135,6 +1155,8 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
 | `pnpm --filter devbi-example-sales copy-db <URL>` | サンプルの 4 つの表を、SQL Server・Oracle・MySQL に写す（先に同じ名前の表を消す）。`DEVBI_DB` をその URL にすると、「DB から」のダッシュボードがそのデータベースから読む |
 | `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |
+| `pnpm check:packed` | パッケージを npm に出す形（`pnpm pack`）に固め、`create-devbi` で作ったプロジェクトに npm と pnpm で入れて、型チェック・ビルド・開発サーバーと GUI エディタ（「コードにする」でページが読み込み直されないこと）を確かめる。作ったプロジェクトは一時フォルダに残る（場所が最後に出る）。`DEVBI_PACKED_DIR` で場所を決められる |
+| `node scripts/version.mjs <版>` | 公開する 6 つのパッケージの版をそろえて変える。公開のしかたは [releasing.md](releasing.md) |
 | `dotnet test dotnet/DevBI.sln` | C# の見本のテスト（.NET 10 SDK）。SQL ファイルの読み方が TypeScript と同じか（`packages/server/test/fixtures/sqlserver-cases.json` と比べる）と、HTTP の答え方。`DEVBI_TEST_MSSQL` があれば SQL Server でも流す |
 | `dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179` | サンプルのビルド（`dist/`）と API を ASP.NET Core で出す。接続は環境変数 `ConnectionStrings__DEVBI_DB` に ADO.NET の接続文字列で（先に `copy-db` で SQL Server に表を写す） |
 | `E2E_BASE_URL=http://127.0.0.1:4179 pnpm --filter devbi-example-sales exec playwright test` | e2e を、`devbi-serve` ではなく、そこで動いているサーバーに向けて流す |

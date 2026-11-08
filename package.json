@@ -18,7 +18,8 @@
     "try-xlsx": "pnpm build && pnpm --filter devbi-example-sales try-xlsx",
     "gen": "pnpm build && pnpm --filter devbi-example-sales gen",
     "e2e": "pnpm build && pnpm --filter devbi-example-sales e2e",
-    "e2e:nextjs": "pnpm example:build && pnpm --filter devbi-example-nextjs e2e"
+    "e2e:nextjs": "pnpm example:build && pnpm --filter devbi-example-nextjs e2e",
+    "check:packed": "pnpm build && node scripts/check-packed.mjs"
   },
   "devDependencies": {
     "@duckdb/node-api": "2.0.0-r.1",

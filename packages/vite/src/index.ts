@@ -338,7 +338,10 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       // A tile the editor writes out ("コードにする") imports these: bundled ahead too, so loading it after the page
       // has opened does not make Vite find a new dependency and reload the page.
       if (editor) for (const name of ["devbi", "@devbi/react"]) if (findPackage(root, name)?.linked === false) include.push(name);
-      return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"], include }, server: { fs: { deny } } };
+      // DuckDB-wasm is bundled ahead too (not excluded): with @devbi/react from npm, an excluded one imported its own
+      // apache-arrow next to the copy in @devbi/react's bundle, and DuckDB took no table DevBI made (xlsx, the API);
+      // with pnpm, the bundle's import of it did not resolve from the project at all.
+      return { optimizeDeps: { include }, server: { fs: { deny } } };
     },
     configResolved(c) {
       config = c;
