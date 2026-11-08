@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +32,12 @@ export function packageManagerOf(userAgent: string | undefined): PackageManager 
   return name === "pnpm" || name === "yarn" || name === "bun" ? name : "npm";
 }
 
+/** Yarn 2 or later (Plug'n'Play by default: no node_modules, where @devbi/vite looks for the GUI editor). */
+export function isYarnBerry(userAgent: string | undefined): boolean {
+  const m = /^yarn\/(\d+)/.exec(userAgent ?? "");
+  return !!m && Number(m[1]) >= 2;
+}
+
 /** The commands to install and to run a script, as the README and the last message show them. */
 export function commandsOf(pm: PackageManager): { install: string; run: string } {
   return { install: pm === "yarn" ? "yarn" : `${pm} install`, run: pm === "npm" || pm === "bun" ? `${pm} run` : pm };
@@ -54,6 +60,8 @@ export interface CreateOptions {
   packageManager?: PackageManager;
   /** Run `git init` (unless the folder is in a git repository already). Default true. */
   git?: boolean;
+  /** Yarn 2 or later: a .yarnrc.yml that makes node_modules (Vite and @devbi/vite look for packages there). */
+  yarnNodeModules?: boolean;
 }
 
 export interface Created {
@@ -63,9 +71,10 @@ export interface Created {
   git: boolean;
 }
 
-/** Whether a folder can take the project: missing, or empty (a `.git` alone is fine). */
+/** Whether a folder can take the project: missing, or empty (a `.git` alone is fine). Not a file. */
 export function isEmptyFolder(dir: string): boolean {
-  return !existsSync(dir) || readdirSync(dir).every((f) => f === ".git");
+  if (!existsSync(dir)) return true;
+  return statSync(dir).isDirectory() && readdirSync(dir).every((f) => f === ".git");
 }
 
 /** Makes a DevBI project in `dir` (missing or empty): the sample dashboard, Vite, React and the GUI editor. */
@@ -99,6 +108,7 @@ export function createProject(dir: string, options: CreateOptions = {}): Created
     devDependencies: sorted({ ...Object.fromEntries(DEVBI_DEV_DEPENDENCIES.map((d) => [d, range])), ...DEV_DEPENDENCIES }),
   };
   writeFileSync(path.join(target, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+  if (options.yarnNodeModules) writeFileSync(path.join(target, ".yarnrc.yml"), "nodeLinker: node-modules\n");
   return { dir: target, name, git: options.git !== false && gitInit(target) };
 }
 

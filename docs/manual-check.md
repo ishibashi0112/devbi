@@ -252,7 +252,7 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 | --- | --- | --- |
 | 93 | `pnpm build && node packages/create-devbi/bin/create-devbi.js ~/devbi-try` | 「/Users/〜/devbi-try に DevBI のプロジェクトを作りました（git init 済み）。」と、`cd`・`npm install`・`npm run dev` が出る。`ls -a ~/devbi-try` で `.gitignore`、`README.md`、`dashboards/`、`models/`、`data/sales.xlsx`、`src/`、`vite.config.ts` があり、`package.json` の `devbi` などは `^0.1.0`（npm に出るまで、ここで `npm install` はできません。確かめたら `rm -rf ~/devbi-try`） |
 | 94 | もう一度 93 と同じコマンド | 「/Users/〜/devbi-try は空ではありません」と出て、何も書かない |
-| 95 | `pnpm check:packed`（5 分ほど。初回は React や Vite を npm から取ってきます） | npm で入れたものと pnpm で入れたもの、それぞれで型チェック・ビルドが通り、「1 passed」が 2 回出る。最後に、作ったプロジェクトの場所（`…/app-npm`、`…/app-pnpm`）が出る |
+| 95 | `pnpm check:packed`（Mac・Linux。5 分ほど。初回は React や Vite を npm から取ってきます） | npm で入れたものと pnpm で入れたもの、それぞれで型チェック・ビルドが通り、「1 passed」が 2 回出る。最後に、作ったプロジェクトの場所（`…/app-npm`、`…/app-pnpm`）が出る |
 | 96 | 95 で出た `app-npm` のフォルダで `npm run dev`、<http://localhost:5173> を開く | 売上ダッシュボードが出る（確かめのため「上位顧客」の自作タイルは外してあり、「地域 × 四半期」は「コードにする」で書き出したあとの形）。「編集」で GUI エディタが開く |
 
 ## 4. 自分の Excel で試す

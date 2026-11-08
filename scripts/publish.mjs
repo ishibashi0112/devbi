@@ -3,6 +3,8 @@
 // Packs each published package with pnpm (workspace:^ becomes ^<version>) and publishes the tarball with npm, the
 // dependencies before what depends on them, create-devbi last. A version already on npm is skipped, so a release that
 // stopped halfway can run again. In GitHub Actions, with provenance (where and from which commit it was built).
+// A prerelease version gets the dist-tag "next"; any other becomes "latest" (an older line's fix release would need
+// its own --tag: npm refuses to make it latest).
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,6 +33,8 @@ for (const { dir, pkg } of packages) {
   execFileSync("pnpm", ["pack", "--pack-destination", out], { cwd: dir, stdio: "inherit" });
   const tarball = readdirSync(out).find((f) => !before.has(f));
   const args = ["publish", path.join(out, tarball), "--access", "public"];
+  // A prerelease (0.2.0-beta.1) goes out as "next", so `npm create devbi@latest` keeps the last release.
+  if (pkg.version.includes("-")) args.push("--tag", "next");
   if (process.env.GITHUB_ACTIONS) args.push("--provenance");
   if (dryRun) args.push("--dry-run");
   console.log(`\n$ npm ${args.join(" ")}`);

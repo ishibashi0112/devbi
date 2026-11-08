@@ -7,6 +7,7 @@ const terminal = process.stdin.isTTY && process.stdout.isTTY;
 process.exitCode = await main(process.argv.slice(2), {
   cwd: process.cwd(),
   userAgent: process.env.npm_config_user_agent,
+  npmGit: process.env.npm_config_git,
   out: (text) => console.log(text),
   err: (text) => console.error(text),
   ...(terminal

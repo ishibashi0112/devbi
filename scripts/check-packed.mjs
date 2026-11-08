@@ -57,7 +57,8 @@ for (const manager of ["npm", "pnpm"]) {
   if (manager === "npm") project.overrides = tarball;
   else project.pnpm = { overrides: tarball };
   writeJson(file, project);
-  if (manager === "npm") run("npm", ["install", "--no-audit", "--no-fund"], app);
+  // No install scripts: none of these packages needs one (pnpm runs none by default either).
+  if (manager === "npm") run("npm", ["install", "--no-audit", "--no-fund", "--ignore-scripts"], app);
   else run("pnpm", ["install", "--ignore-workspace"], app);
 
   // 4. What a user runs first.

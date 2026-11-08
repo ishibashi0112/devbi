@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-サンプルの売上ダッシュボード（架空の受注明細の Excel）、Vite、React、GUI エディタが入ったフォルダができます（`git init` も。`--no-git` でしない）。フォルダは、ないか空のものにしてください。
+サンプルの売上ダッシュボード（架空の受注明細の Excel）、Vite、React、GUI エディタが入ったフォルダができます（`git init` も。しないときは `npm create devbi@latest my-reports -- --no-git`）。フォルダは、ないか空のものにしてください。
 
 使い方は [リファレンス](https://github.com/ishibashi0112/devbi/blob/main/docs/reference.md)。
 

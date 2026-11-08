@@ -110,15 +110,16 @@ describe("create-devbi", () => {
 
   it("works from the command line", async () => {
     const cwd = tmp();
-    const run = async (args: string[], ask?: string) => {
+    const run = async (args: string[], ask?: string | Error, more: { userAgent?: string; npmGit?: string } = {}) => {
       const out: string[] = [];
       const err: string[] = [];
       const code = await main(args, {
         cwd,
-        userAgent: "pnpm/10.28.0 npm/? node/v22",
+        userAgent: more.userAgent ?? "pnpm/10.28.0 npm/? node/v22",
+        npmGit: more.npmGit,
         out: (t) => out.push(t),
         err: (t) => err.push(t),
-        ...(ask === undefined ? {} : { ask: async () => ask }),
+        ...(ask === undefined ? {} : { ask: async () => (ask instanceof Error ? Promise.reject(ask) : ask) }),
       });
       return { code, out: out.join("\n"), err: err.join("\n") };
     };
@@ -136,6 +137,22 @@ describe("create-devbi", () => {
     expect((await run(["--no-git"], "月次 売上")).out).toContain(`  cd "月次 売上"\n`);
     expect(JSON.parse(readFileSync(path.join(cwd, "月次 売上", "package.json"), "utf8")).name).toBe("devbi-reports");
     expect((await run(["--no-git"])).out).toContain("  cd my-reports\n");
+    // Ctrl+C at the question: nothing made.
+    const quit = await run([], new Error("Aborted with Ctrl+C"));
+    expect(quit).toEqual({ code: 130, out: "", err: "\nやめました" });
+    // A file of that name.
+    writeFileSync(path.join(cwd, "notes"), "mine");
+    expect((await run(["notes"])).err).toContain("notes はファイルです");
+    // `npm create devbi x --no-git`: npm keeps --no-git for itself and says so in npm_config_git.
+    if (spawnSync("git", ["--version"]).status === 0) {
+      expect((await run(["by-npm"], undefined, { userAgent: "npm/10.9.0 node/v22", npmGit: "false" })).out).not.toContain("git init 済み");
+      expect(existsSync(path.join(cwd, "by-npm", ".git"))).toBe(false);
+    }
+    // Yarn 2 or later: node_modules, where @devbi/vite finds the GUI editor (Plug'n'Play has none).
+    await run(["berry", "--no-git"], undefined, { userAgent: "yarn/4.9.2 npm/? node/v22" });
+    expect(readFileSync(path.join(cwd, "berry", ".yarnrc.yml"), "utf8")).toBe("nodeLinker: node-modules\n");
+    await run(["classic", "--no-git"], undefined, { userAgent: "yarn/1.22.22 npm/? node/v22" });
+    expect(existsSync(path.join(cwd, "classic", ".yarnrc.yml"))).toBe(false);
     // Outside the folder it ran in: the whole path.
     const away = path.join(tmp(), "away");
     expect((await run([path.relative(cwd, away), "--no-git"])).out).toContain(`${away} に DevBI のプロジェクトを作りました。\n\n  cd ${away}\n`);

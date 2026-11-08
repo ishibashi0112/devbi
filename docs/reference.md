@@ -33,7 +33,8 @@ npm run dev                            # http://localhost:5173 。見出しの�
 `my-reports/` に、サンプルの売上ダッシュボード（架空の受注明細の Excel、自作タイル 1 つ）と、Vite・React・GUI エディタの設定が入ったプロジェクトができます。中身はこのリポジトリの `examples/sales` の売上ダッシュボードと同じです。
 
 - フォルダは、ないか空のものにします（`.git` だけはあってよい）。名前を書かなければ聞かれます（ターミナルでないときは `my-reports`）
-- `git init` もします。git のリポジトリの中（モノレポなど）ではしません。`--no-git` でしない
+- `git init` もします。git のリポジトリの中（モノレポなど）ではしません。`--no-git` でしない（`npm create` では `npm create devbi@latest my-reports -- --no-git` のように `--` のあとに）
+- Yarn 2 以降では、`node_modules` を作る `.yarnrc.yml`（`nodeLinker: node-modules`）も置きます（Plug'n'Play のままだと、`@devbi/vite` が GUI エディタを見つけられないため）
 - package.json の名前はフォルダ名から作ります（英数字以外は `-`。残らなければ `devbi-reports`）
 - DevBI のパッケージ（`devbi`、`@devbi/react`、`@devbi/vite`、`@devbi/editor`）は `create-devbi` と同じ版を `^` で入れます。React・Vite・TypeScript は、このリポジトリでテストしている版です
 - できるスクリプト: `dev`（開発サーバー）、`build`（`dist/` に静的なサイト）、`preview`（ビルドしたものを開く）、`gen`（[補完と型](#エディタでの補完と型pnpm-gen)）、`typecheck`（`devbi-gen` と `tsc`）
@@ -1155,7 +1156,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
 | `pnpm --filter devbi-example-sales copy-db <URL>` | サンプルの 4 つの表を、SQL Server・Oracle・MySQL に写す（先に同じ名前の表を消す）。`DEVBI_DB` をその URL にすると、「DB から」のダッシュボードがそのデータベースから読む |
 | `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |
-| `pnpm check:packed` | パッケージを npm に出す形（`pnpm pack`）に固め、`create-devbi` で作ったプロジェクトに npm と pnpm で入れて、型チェック・ビルド・開発サーバーと GUI エディタ（「コードにする」でページが読み込み直されないこと）を確かめる。作ったプロジェクトは一時フォルダに残る（場所が最後に出る）。`DEVBI_PACKED_DIR` で場所を決められる |
+| `pnpm check:packed` | （Mac・Linux）パッケージを npm に出す形（`pnpm pack`）に固め、`create-devbi` で作ったプロジェクトに npm と pnpm で入れて、型チェック・ビルド・開発サーバーと GUI エディタ（「コードにする」でページが読み込み直されないこと）を確かめる。作ったプロジェクトは一時フォルダに残る（場所が最後に出る）。`DEVBI_PACKED_DIR` で場所を決められる |
 | `node scripts/version.mjs <版>` | 公開する 6 つのパッケージの版をそろえて変える。公開のしかたは [releasing.md](releasing.md) |
 | `dotnet test dotnet/DevBI.sln` | C# の見本のテスト（.NET 10 SDK）。SQL ファイルの読み方が TypeScript と同じか（`packages/server/test/fixtures/sqlserver-cases.json` と比べる）と、HTTP の答え方。`DEVBI_TEST_MSSQL` があれば SQL Server でも流す |
 | `dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179` | サンプルのビルド（`dist/`）と API を ASP.NET Core で出す。接続は環境変数 `ConnectionStrings__DEVBI_DB` に ADO.NET の接続文字列で（先に `copy-db` で SQL Server に表を写す） |
