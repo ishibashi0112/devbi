@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { formatDashboardJson } from "devbi";
 import type { ViteDevServer } from "vite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { versionOf } from "../src/editor.js";
 
 const SALES = `{\n  "metrics": "s",\n  "tiles": [\n    {\n      "id": "k",\n      "x": 0, "y": 0, "w": 3, "h": 2,\n      "type": "kpi",\n      "query": { "measures": ["n"] }\n    }\n  ]\n}\n`;
@@ -39,6 +39,9 @@ describe("the GUI editor's endpoint on the dev server", () => {
   const file = (name: string) => path.join(dir, "dashboards", `${name}.dash.json`);
   const put = (name: string, spec: unknown, version: string | null, headers: Record<string, string> = editor) =>
     send(base, "PUT", `/__devbi/editor/dashboards/${encodeURIComponent(name)}`, headers, { spec, version });
+  const promote = (body: unknown, name = "sales", headers: Record<string, string> = editor) =>
+    send(base, "POST", `/__devbi/editor/dashboards/${encodeURIComponent(name)}/tiles`, headers, body);
+  const tileFile = (name: string) => path.join(dir, "dashboards", "sales", name);
 
   beforeAll(async () => {
     dir = mkdtempSync(path.join(tmpdir(), "devbi-editor-"));
@@ -117,12 +120,129 @@ describe("the GUI editor's endpoint on the dev server", () => {
     expect((await send(base, "PUT", "/__devbi/editor/dashboards/sales", editor, "not an object")).status).toBe(400);
   });
 
+  it("writes a built-in tile out as a .tsx file (コードにする), named after the tile, never over another file", async () => {
+    const tile = { id: "k", x: 0, y: 0, w: 3, h: 2, type: "kpi", title: "件数", query: { measures: ["n"] } };
+    const first = await promote({ tile, metrics: "s" });
+    expect(first.status).toBe(200);
+    expect(first.body).toEqual({ path: "/dashboards/sales/K.tsx", component: "./sales/K.tsx", created: true });
+    const written = readFileSync(tileFile("K.tsx"), "utf8");
+    expect(written).toContain(`export const query = defineQuery({ measures: ["n"] });`);
+    expect(written).toContain("models/s.metrics.yaml");
+    expect(written).toContain("export default function K(props: TileProps<RowOf<typeof query>>) {");
+    // The same tile again (written out, undone in the editor, written out again): the same file.
+    expect((await promote({ tile, metrics: "s" })).body).toEqual({ ...first.body, created: false });
+    // Another tile with that name: the next one free, and the first file stays as it is.
+    const other = await promote({ tile: { ...tile, title: "別の" }, metrics: "s" });
+    expect(other.body).toEqual({ path: "/dashboards/sales/K2.tsx", component: "./sales/K2.tsx", created: true });
+    expect(readFileSync(tileFile("K.tsx"), "utf8")).toBe(written);
+    // Two at once (two tabs): neither writes over the other's.
+    const both = await Promise.all(["一", "二"].map((title) => promote({ tile: { ...tile, id: "c", title } })));
+    expect(both.map((r) => r.body.path).sort()).toEqual(["/dashboards/sales/C.tsx", "/dashboards/sales/C2.tsx"]);
+    for (const r of both) expect(readFileSync(path.join(dir, r.body.path as string), "utf8")).toContain(`// 「${r === both[0] ? "一" : "二"}」のタイル`);
+    // The dashboard can then name it, as the editor's save does.
+    const spec = JSON.parse(SALES);
+    spec.tiles[0] = { id: "k", x: 0, y: 0, w: 3, h: 2, component: "./sales/K.tsx", title: "件数" };
+    expect((await put("sales", spec, versionOf(SALES))).status).toBe(200);
+    writeFileSync(file("sales"), SALES);
+  });
+
+  it("writes out only a built-in tile that dash.json allows, of a dashboard that is there", async () => {
+    const tile = { id: "k", type: "kpi", query: { measures: ["n"] } };
+    const chart = await promote({ tile: { ...tile, type: "chart" } });
+    expect(chart.status).toBe(400);
+    expect(chart.body.error).toMatch(/組み込みのタイルだけ/);
+    expect((await promote({ tile: { id: "c", component: "./sales/K.tsx" } })).status).toBe(400);
+    const query = await promote({ tile: { ...tile, query: { measures: "n" } } });
+    expect(query.status).toBe(422);
+    expect((await promote({ tile: { ...tile, id: "" } })).status).toBe(422);
+    expect((await promote({ tile }, "nothing")).status).toBe(404);
+    expect((await promote({ tile }, "../models")).status).toBe(400);
+    writeFileSync(file("a#b"), SALES);
+    const hash = await promote({ tile }, "a#b");
+    rmSync(file("a#b"));
+    expect(hash.status).toBe(400);
+    expect(hash.body.error).toMatch(/# か \?/);
+    expect(existsSync(path.join(dir, "dashboards", "a#b"))).toBe(false);
+    expect((await promote({ tile }, "sales", {})).status).toBe(403);
+    expect((await send(base, "GET", "/__devbi/editor/dashboards/sales/tiles", editor)).status).toBe(405);
+    expect(existsSync(path.join(dir, "dashboards", "nothing"))).toBe(false);
+  });
+
+  it("tells the page of a tile file added or removed, instead of reloading it (the editor may have unsaved changes)", async () => {
+    // The page has loaded virtual:devbi (its import.meta.glob lists the tile files).
+    await (await fetch(new URL("/@id/__x00__virtual:devbi", base))).text();
+    mkdirSync(path.join(dir, "dashboards", "sales"), { recursive: true });
+    const hot = server.environments.client.hot;
+    const sent: { type?: string; event?: string; data?: unknown }[] = [];
+    const original = hot.send;
+    hot.send = ((payload: unknown) => void sent.push(payload as never)) as typeof hot.send;
+    const change = (data: unknown) => ({ type: "custom", event: "devbi:change", data });
+    try {
+      writeFileSync(tileFile("Added.tsx"), "export default function Added() { return null; }\n");
+      await vi.waitFor(() => expect(sent).toContainEqual(change({ file: "dashboards/sales/Added.tsx", type: "create" })), { timeout: 10_000 });
+      rmSync(tileFile("Added.tsx"));
+      await vi.waitFor(() => expect(sent).toContainEqual(change({ file: "dashboards/sales/Added.tsx", type: "delete" })), { timeout: 10_000 });
+      // The editor's own file: the page that wrote it is named, and does not reload for it.
+      const res = await promote({ tile: { id: "own", type: "kpi", query: { measures: ["n"] } } });
+      expect(res.body.created).toBe(true);
+      await vi.waitFor(() => expect(sent).toContainEqual(change({ file: "dashboards/sales/Own.tsx", type: "create", by: "page-1" })), { timeout: 10_000 });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(sent.filter((p) => p.type === "full-reload")).toEqual([]);
+    } finally {
+      hot.send = original;
+    }
+  });
+
   it("gives the page the dev server's hooks, without the editor when @devbi/editor is not installed", async () => {
     const res = await fetch(new URL("/@id/__x00__virtual:devbi", base));
     const code = await res.text();
     expect(code).toContain("devbi:change");
     expect(code).toContain("dev: {");
     expect(code).not.toContain("@devbi/editor");
+    // The page loads a tile file written after it opened, from a dashboard whose name is not as is in a URL.
+    const expr = /importTile: \(path\) => import\(\/\* @vite-ignore \*\/ (.+)\),\n/.exec(code)?.[1];
+    expect(expr).toBeDefined();
+    // Vite wraps the URL (it adds ?import to a URL that is not JS); the page's own wrapping is what this checks.
+    const urlOf = (p: string) =>
+      new Function("path", "__vite__injectQuery", `return ${expr!.replace("import.meta.env.BASE_URL", JSON.stringify("/"))};`)(p, (u: string) => u) as string;
+    writeFileSync(file("a b%[c]"), SALES);
+    try {
+      const written = await promote({ tile: { id: "k", type: "kpi", query: { measures: ["n"] } } }, "a b%[c]");
+      expect(written.body.path).toBe("/dashboards/a b%[c]/K.tsx");
+      // (Without its imports, which this folder has not installed.)
+      writeFileSync(path.join(dir, "dashboards", "a b%[c]", "K.tsx"), "export default function K(props: object) { return null; }\n");
+      const tile = await fetch(new URL(urlOf(written.body.path as string), base));
+      expect(tile.status).toBe(200);
+      expect(await tile.text()).toContain("function K(props)");
+    } finally {
+      rmSync(file("a b%[c]"));
+      rmSync(path.join(dir, "dashboards", "a b%[c]"), { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the dev server without HMR (server.hmr: false)", () => {
+  it("reloads the page for a tile file added or removed, as for a project file", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-nohmr-"));
+    mkdirSync(path.join(dir, "dashboards", "sales"), { recursive: true });
+    const { createServer } = await import("vite");
+    const devbi = (await import("../src/index.js")).default;
+    const server = await createServer({ root: dir, configFile: false, logLevel: "silent", plugins: [devbi()], server: { port: 0, hmr: false } });
+    const sent: { type?: string }[] = [];
+    const original = server.ws.send;
+    server.ws.send = ((payload: unknown) => void sent.push(payload as never)) as typeof server.ws.send;
+    try {
+      await server.listen();
+      await new Promise((r) => setTimeout(r, 300)); // the watcher is ready
+      const tile = path.join(dir, "dashboards", "sales", "Added.tsx");
+      writeFileSync(tile, "export default function Added() { return null; }\n");
+      await vi.waitFor(() => expect(sent.filter((p) => p.type === "full-reload")).toHaveLength(1), { timeout: 10_000 });
+      rmSync(tile);
+      await vi.waitFor(() => expect(sent.filter((p) => p.type === "full-reload")).toHaveLength(2), { timeout: 10_000 });
+    } finally {
+      server.ws.send = original;
+      await server.close();
+    }
   });
 });
 

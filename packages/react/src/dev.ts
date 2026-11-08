@@ -1,10 +1,13 @@
 import type { ComponentType } from "react";
 import type { Theme } from "./Dashboard.js";
-import type { Project } from "./project.js";
+import type { Project, TileModule } from "./project.js";
 
 /** A project file the dev server saw change. */
 export interface FileChange {
-  /** From the project folder: `dashboards/sales.dash.json`, `models/sales.metrics.yaml`, `data/…`, `api/…`. */
+  /**
+   * From the project folder: `dashboards/sales.dash.json`, `models/sales.metrics.yaml`, `data/…`, `api/…`, or a
+   * promoted tile's file added or removed (`dashboards/sales/TopCustomers.tsx`; a change to one is React's own update).
+   */
   file: string;
   type: "create" | "update" | "delete";
   /** The page that wrote it (a save from the GUI editor). */
@@ -55,6 +58,11 @@ export interface DevServer {
   endpoint: string;
   /** The GUI editor, when the project has `@devbi/editor` installed. */
   editor?: () => Promise<EditorModule>;
+  /**
+   * Load a promoted tile's file written after the page loaded (the editor's "コードにする"), which the project's
+   * `components` do not have yet. `path` is from the project folder: `/dashboards/sales/Monthly.tsx`.
+   */
+  importTile(path: string): Promise<TileModule>;
   /**
    * Hear about changed project files. A listener that returns `true` takes care of the change; otherwise the page
    * reloads. Returns the function that stops listening.

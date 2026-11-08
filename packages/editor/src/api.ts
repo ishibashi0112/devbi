@@ -1,5 +1,5 @@
 import type { DevServer } from "@devbi/react";
-import type { RawDashboard } from "./layout.js";
+import type { RawDashboard, RawTile } from "./layout.js";
 
 /** A dash.json as the dev server read or wrote it. */
 export interface DashboardFile {
@@ -23,10 +23,20 @@ export class EditorError extends Error {
   }
 }
 
-async function call(dev: DevServer, method: "GET" | "PUT", name: string, body?: unknown): Promise<Record<string, unknown>> {
+/** A built-in tile written out as code ("コードにする"). */
+export interface TileFile {
+  /** From the project folder: `/dashboards/<name>/<Name>.tsx` */
+  path: string;
+  /** What the tile names in dash.json: `./<name>/<Name>.tsx` */
+  component: string;
+  /** false: the same file was there already (written before, then undone in the editor). */
+  created: boolean;
+}
+
+async function call(dev: DevServer, method: "GET" | "PUT" | "POST", name: string, body?: unknown, under = ""): Promise<Record<string, unknown>> {
   let res: Response;
   try {
-    res = await fetch(`${dev.endpoint}dashboards/${encodeURIComponent(name)}`, {
+    res = await fetch(`${dev.endpoint}dashboards/${encodeURIComponent(name)}${under}`, {
       method,
       cache: "no-store",
       headers: {
@@ -57,4 +67,13 @@ export async function readDashboard(dev: DevServer, name: string): Promise<Dashb
 export async function writeDashboard(dev: DevServer, name: string, spec: RawDashboard, version: string | null): Promise<DashboardFile> {
   const data = await call(dev, "PUT", name, { spec, version });
   return { name, path: data.path as string, spec, version: data.version as string };
+}
+
+/**
+ * Write the tile out as `dashboards/<name>/<Name>.tsx` (drawn by the same built-in tile, with its query and options
+ * in the file). `metrics` is the metrics file it reads, for the labels in the file's notes.
+ */
+export async function writeTileFile(dev: DevServer, name: string, tile: RawTile, metrics: string | undefined): Promise<TileFile> {
+  const data = await call(dev, "POST", name, { tile, ...(metrics ? { metrics } : {}) }, "/tiles");
+  return data as unknown as TileFile;
 }

@@ -116,6 +116,16 @@ export function changeType(spec: RawDashboard, tile: RawTile, type: BuiltinTileT
   return setTileKey(next, "options", options);
 }
 
+/**
+ * The tile once written out as code: it names the file (`component`), whose query and options it no longer has.
+ * Its name, place, size and title stay in dash.json.
+ */
+export function promoteTile(tile: RawTile, component: string): RawTile {
+  let next = tile;
+  for (const key of ["type", "query", "options"]) next = setTileKey(next, key, undefined);
+  return setTileKey(next, "component", component);
+}
+
 /** The fields a filter or a pivot's columns can use: the time column, then the dimensions, with their labels. */
 export function fieldsOf(view: MetricsView): [name: string, label: string][] {
   return [...(view.time ? [[view.time.name, view.time.label] as [string, string]] : []), ...Object.entries(view.dimensions).map(([n, d]) => [n, d.label] as [string, string])];

@@ -237,6 +237,9 @@ importers:
       '@devbi/react':
         specifier: workspace:*
         version: link:../react
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
       tsup:
         specifier: ^9.0.0
         version: 9.0.0(postcss@8.5.32)(typescript@6.0.3)(yaml@2.9.1)

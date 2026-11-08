@@ -1,7 +1,7 @@
 // The GUI editor (@devbi/editor) on Vite's dev server. It writes to e2e-work/ (see editor.vite.config.ts), which each
 // test puts back first.
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -10,6 +10,8 @@ const original = readFileSync(path.join(root, "dashboards/sales.dash.json"), "ut
 const metrics = readFileSync(path.join(root, "models/sales.metrics.yaml"), "utf8");
 const salesFile = path.join(work, "dashboards/sales.dash.json");
 const newFile = path.join(work, "dashboards/monthly.dash.json");
+/** The sales dashboard's tile files: the example's own TopCustomers.tsx, and those the tests write ("コードにする"). */
+const tilesDir = path.join(work, "dashboards/sales");
 
 test.describe.configure({ mode: "serial" });
 
@@ -17,6 +19,7 @@ test.beforeEach(() => {
   writeFileSync(salesFile, original);
   writeFileSync(path.join(work, "models/sales.metrics.yaml"), metrics);
   rmSync(newFile, { force: true });
+  for (const f of readdirSync(tilesDir)) if (f !== "TopCustomers.tsx") rmSync(path.join(tilesDir, f));
 });
 
 const item = (page: Page, id: string) => page.locator(`[data-editor-tile="${id}"]`);
@@ -411,4 +414,65 @@ test("the property panel keeps what is being typed: a new name when another tile
   expect(byId("monthly-2")).toBeTruthy();
   expect(byId("region-2").query.filters).toEqual([{ field: "受注日", between: ["2025-04-01", null] }]);
   expect(byId("products").query.measures).toEqual(["revenue", "quantity", "revenue_yoy", "orders"]);
+});
+
+test("コードにする: the tile is written out as a .tsx file that draws it as before, and the dashboard is saved, without a reload", async ({ page }) => {
+  await openEditor(page);
+  await mark(page);
+  const p = panel(page);
+  const pivot = item(page, "region-quarter");
+  await expect(pivot.locator("table")).toContainText("北海道・東北");
+  await pick(page, "region-quarter");
+  await p.getByRole("button", { name: "コードにする…" }).click();
+  await expect(p).toContainText("dashboards/sales/ に .tsx ファイルを書き出し");
+  await p.getByRole("button", { name: "書き出す" }).click();
+  await expect(page.getByRole("status")).toContainText("dashboards/sales/RegionQuarter.tsx に書き出して、保存しました");
+  // The panel now has only what dash.json still says: the title and the name.
+  await expect(p).toContainText("コードのタイルです（dashboards/sales/RegionQuarter.tsx）");
+  await expect(p.getByLabel("種類")).toHaveCount(0);
+  await expect(p.getByText("指標", { exact: true })).toHaveCount(0);
+  await expect(p.getByRole("button", { name: "コードにする…" })).toHaveCount(0);
+  await expect(pivot).toContainText("./sales/RegionQuarter.tsx");
+  await expect(pivot.locator("table")).toContainText("北海道・東北");
+  await expect(page.getByText("未保存の変更があります")).toHaveCount(0);
+  expect(await marked(page)).toBe(true);
+
+  const source = readFileSync(path.join(tilesDir, "RegionQuarter.tsx"), "utf8");
+  expect(source).toContain(`export const query = defineQuery({ measures: ["revenue"], dimensions: ["region"], time: "quarter" });`);
+  expect(source).toContain(`const options = { columns: "受注日" };`);
+  expect(source).toContain("const Builtin = builtinTiles.pivot.component;");
+  expect(source).toContain("export default function RegionQuarter(props: TileProps<RowOf<typeof query>>) {");
+  const before = original.split("\n");
+  const after = readFileSync(salesFile, "utf8").split("\n");
+  expect(after.filter((l) => !before.includes(l))).toEqual([`      "component": "./sales/RegionQuarter.tsx",`, `      "title": "地域 × 四半期"`]);
+  expect(before.filter((l) => !after.includes(l))).toEqual([
+    `      "type": "pivot",`,
+    `      "title": "地域 × 四半期",`,
+    `      "query": { "measures": ["revenue"], "dimensions": ["region"], "time": "quarter" },`,
+    `      "options": { "columns": "受注日" }`,
+  ]);
+
+  // Undo: the built-in tile again (unsaved). Written out again, it uses the same file.
+  await page.getByRole("button", { name: "元に戻す" }).click();
+  await expect(p.getByLabel("種類")).toHaveValue("pivot");
+  await expect(page.getByText("未保存の変更があります")).toBeVisible();
+  await p.getByRole("button", { name: "コードにする…" }).click();
+  await p.getByRole("button", { name: "書き出す" }).click();
+  await expect(page.getByRole("status")).toContainText("前に書き出した dashboards/sales/RegionQuarter.tsx を使うようにして、保存しました");
+  expect(readdirSync(tilesDir).sort()).toEqual(["RegionQuarter.tsx", "TopCustomers.tsx"]);
+
+  // The page after the editor closes has the new file too, still without a reload.
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(page.locator('[data-tile="region-quarter"] table')).toContainText("北海道・東北");
+  expect(await marked(page)).toBe(true);
+});
+
+test("a tile file added elsewhere while there are unsaved changes does not reload the page", async ({ page }) => {
+  await openEditor(page);
+  await mark(page);
+  await page.getByLabel("タイルを追加").selectOption({ label: "文章" });
+  writeFileSync(path.join(tilesDir, "Elsewhere.tsx"), "export default function Elsewhere() {\n  return null;\n}\n");
+  await expect(page.getByRole("alert")).toContainText("dashboards/sales/Elsewhere.tsx が変わりました");
+  await expect(item(page, "markdown")).toBeVisible();
+  expect(await marked(page)).toBe(true);
 });

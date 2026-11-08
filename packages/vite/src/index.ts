@@ -220,13 +220,13 @@ function resolveDuckdb(root: string): { wasm: string; worker: string } {
 }
 
 /**
- * The GUI editor (@devbi/editor), when the project has it installed: whether it is a link to its source (this
- * monorepo, `pnpm link`) rather than a package in node_modules, which Vite bundles ahead (optimizeDeps).
+ * A package the project has installed (the GUI editor, @devbi/editor, for one): whether it is a link to its source
+ * (this monorepo, `pnpm link`) rather than a package in node_modules, which Vite bundles ahead (optimizeDeps).
  */
-function findEditor(root: string): { linked: boolean } | undefined {
+function findPackage(root: string, name: string): { linked: boolean } | undefined {
   // Where Vite looks for a package imported from the project: node_modules/ in the root and the folders above it.
   for (let dir = root; ; dir = path.dirname(dir)) {
-    const pkg = path.join(dir, "node_modules", "@devbi", "editor", "package.json");
+    const pkg = path.join(dir, "node_modules", ...name.split("/"), "package.json");
     if (existsSync(pkg)) return { linked: !realPath(pkg).split(path.sep).includes("node_modules") };
     if (path.dirname(dir) === dir) return undefined;
   }
@@ -302,6 +302,11 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
     const isProjectFile = /^(dashboards\/[^/]+\.dash\.json|models\/[^/]+\.metrics\.yaml)$/.test(rel);
     return isProjectFile || /^(data|api)\//.test(rel) ? rel : undefined;
   };
+  /** A promoted tile's file (what virtual:devbi's import.meta.glob takes), by its path in the project folder. */
+  const tileChange = (file: string): string | undefined => {
+    const rel = posix(path.relative(dir, file));
+    return /^dashboards\/.+\.(tsx|jsx)$/.test(rel) && !/(^|\/)node_modules\//.test(rel) ? rel : undefined;
+  };
   /** virtual:devbi is read again on the next load; .devbi/ follows models/. */
   const invalidate = (graph: { getModuleById(id: string): unknown; invalidateModule(mod: never): void }, rel: string) => {
     if (rel.endsWith(".metrics.yaml")) void generate(dir).catch(() => undefined);
@@ -328,8 +333,11 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       if (options.embed && command === "build" && !user.build?.ssr && !user.build?.lib) embedWarnings = addEmbedEntry(user, root);
       // The GUI editor, on the dev server only. Bundled ahead with the rest, so opening it does not make Vite
       // optimize new dependencies and reload the page; from source (a link), only its dependencies are.
-      editor = command === "serve" ? findEditor(root) : undefined;
+      editor = command === "serve" ? findPackage(root, "@devbi/editor") : undefined;
       const include = editor ? [editor.linked ? "@devbi/editor > react-grid-layout" : "@devbi/editor"] : [];
+      // A tile the editor writes out ("コードにする") imports these: bundled ahead too, so loading it after the page
+      // has opened does not make Vite find a new dependency and reload the page.
+      if (editor) for (const name of ["devbi", "@devbi/react"]) if (findPackage(root, name)?.linked === false) include.push(name);
       return { optimizeDeps: { exclude: ["@duckdb/duckdb-wasm"], include }, server: { fs: { deny } } };
     },
     configResolved(c) {
@@ -408,6 +416,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
               `    client: devbiClient,`,
               `    endpoint: import.meta.env.BASE_URL + "__devbi/editor/",`,
               editor ? `    editor: () => import("@devbi/editor"),` : "",
+              // A tile file written after the page loaded (the editor's "コードにする"): not in the glob above yet.
+              `    importTile: (path) => import(/* @vite-ignore */ import.meta.env.BASE_URL + ${JSON.stringify(base)} + encodeURI(path.slice(1))),`,
               `    onChange(listener) { devbiListeners.add(listener); return () => devbiListeners.delete(listener); },`,
               `  },`,
             ].join("\n")
@@ -429,32 +439,42 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       server.watcher.add(["dashboards", "models", "data", "api"].map((d) => path.join(dir, d)));
       // Without HMR, Vite calls no hotUpdate hook: reload the page for any project file, as before the editor.
       if (server.config.server.hmr === false) {
-        const reload = (file: string) => {
-          const change = projectChange(file);
-          if (!change) return;
-          invalidate(server.environments.client.moduleGraph, change);
-          server.ws.send({ type: "full-reload" });
-        };
-        for (const event of ["add", "change", "unlink"] as const) server.watcher.on(event, reload);
+        for (const event of ["add", "change", "unlink"] as const) {
+          server.watcher.on(event, (file: string) => {
+            // A tile file added or removed changes import.meta.glob in virtual:devbi.
+            const change = projectChange(file) ?? (event === "change" ? undefined : tileChange(file));
+            if (!change) return;
+            invalidate(server.environments.client.moduleGraph, change);
+            server.ws.send({ type: "full-reload" });
+          });
+        }
       }
       if (!editor) {
         config.logger.info("devbi: GUI エディタを使うには pnpm add -D @devbi/editor", { timestamp: true });
       }
     },
-    async hotUpdate({ type, file, read }) {
-      if (this.environment.name !== "client") return;
-      const rel = projectChange(file);
-      if (!rel) return;
-      invalidate(this.environment.moduleGraph, rel);
-      // The GUI editor's own save: the page that saved it has it already.
-      let by: string | undefined;
-      const last = lastWrites.get(fileKey(file));
-      if (last && type !== "delete") {
-        const text = await Promise.resolve(read()).catch(() => undefined);
-        if (text !== undefined && versionOf(text) === last.version) by = last.client;
-      }
-      this.environment.hot.send({ type: "custom", event: "devbi:change", data: { file: rel, type, ...(by ? { by } : {}) } });
-      return [];
+    hotUpdate: {
+      // After Vite's own: for a tile file added or removed, import.meta.glob has put virtual:devbi in the update,
+      // which would reload the page at once (and lose the GUI editor's unsaved changes). The page decides instead.
+      order: "post",
+      async handler({ type, file, read, modules }) {
+        if (this.environment.name !== "client") return;
+        const project = projectChange(file);
+        const tile = project || type === "update" ? undefined : tileChange(file);
+        const rel = project ?? tile;
+        if (!rel) return;
+        invalidate(this.environment.moduleGraph, rel);
+        // The GUI editor's own save: the page that saved it has it already.
+        let by: string | undefined;
+        const last = lastWrites.get(fileKey(file));
+        if (last && type !== "delete") {
+          const text = await Promise.resolve(read()).catch(() => undefined);
+          if (text !== undefined && versionOf(text) === last.version) by = last.client;
+        }
+        this.environment.hot.send({ type: "custom", event: "devbi:change", data: { file: rel, type, ...(by ? { by } : {}) } });
+        // A tile file: Vite still updates the modules that import it (a tile that imported it before it existed).
+        return project ? [] : modules.filter((m) => m.id !== RESOLVED);
+      },
     },
     configurePreviewServer(server: PreviewServer) {
       mountApi(server.middlewares, server.httpServer, true);

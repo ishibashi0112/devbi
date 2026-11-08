@@ -5,6 +5,7 @@ import {
   TILE_TYPE_NAMES,
   compileQuery,
   isoDate,
+  resolveComponent,
   type BuiltinTileType,
   type Grain,
   type MetricsView,
@@ -62,6 +63,10 @@ export interface PanelProps {
   clearSelection(id: string): void;
   /** What to finish before the selection changes (a new name typed but not yet taken), or null. */
   registerFlush(flush: Flush | null): void;
+  /** "コードにする": write the tile out as a .tsx file, point the tile at it and save. Whether it was done. */
+  onPromote(id: string): Promise<boolean>;
+  /** Whether there are unsaved changes (saved along with "コードにする"). */
+  dirty: boolean;
 }
 
 /**
@@ -169,7 +174,7 @@ function DashboardPanel({ metrics, name, spec, onChange }: PanelProps) {
   );
 }
 
-function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, clearSelection, registerFlush }: PanelProps & { tile: RawTile }) {
+function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemove, clearSelection, registerFlush, onPromote, dirty }: PanelProps & { tile: RawTile }) {
   const onTile = (update: (t: RawTile) => RawTile, merge?: string) => onChange(updateTile(spec, tile.id, update), merge);
   const type = typeof tile.type === "string" ? tile.type : undefined;
   const builtin = type && Object.hasOwn(TILE_TYPES, type) ? (type as BuiltinTileType) : undefined;
@@ -185,7 +190,8 @@ function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, cl
       </div>
       {component ? (
         <p className="devbi-hint">
-          コードのタイルです（<code className="devbi-ed-code">{component}</code>）。中身とデータの指定はそのファイルで変えます。
+          コードのタイルです（<code className="devbi-ed-code">{resolveComponent(`/dashboards/${name}.dash.json`, component).slice(1)}</code>
+          ）。中身とデータの指定はそのファイルで変えます。
         </p>
       ) : (
         <Field label="種類" hint={builtin ? TILE_TYPES[builtin].description : undefined}>
@@ -225,10 +231,60 @@ function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, cl
       {builtin && Object.keys(TILE_TYPES[builtin].options).length > 0 && (
         <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} />
       )}
+      {builtin && <Promote folder={`dashboards/${name}/`} dirty={dirty} onPromote={() => onPromote(tile.id)} />}
       <button type="button" className="devbi-button devbi-ed-danger" onClick={() => onRemove(tile.id)}>
         このタイルを消す
       </button>
     </>
+  );
+}
+
+/**
+ * "コードにする": the tile written out as a .tsx file, which draws it from then on. Its data and drawing are then
+ * changed in the file, so the panel asks once more first.
+ */
+function Promote({ folder, dirty, onPromote }: { folder: string; dirty: boolean; onPromote(): Promise<boolean> }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const heading = useId();
+  return (
+    <section className="devbi-ed-promote" aria-labelledby={heading}>
+      <h3 id={heading}>コードにする</h3>
+      {asking ? (
+        <>
+          <p>
+            <code className="devbi-ed-code">{folder}</code> に .tsx ファイルを書き出し、このタイルはそのファイルで描くようにして、ダッシュボードを保存します
+            {dirty ? "（保存していないほかの変更も、いっしょに保存します）" : ""}。そのあと、このタイルのデータと描き方はファイルで変えます（ここで変えられるのは、見出しと名前だけになります）。
+          </p>
+          <div className="devbi-ed-row">
+            <button
+              type="button"
+              className="devbi-button devbi-button-primary"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void onPromote().then((done) => {
+                  setBusy(false);
+                  if (done) setAsking(false);
+                });
+              }}
+            >
+              {busy ? "書き出しています…" : "書き出す"}
+            </button>
+            <button type="button" className="devbi-button" disabled={busy} onClick={() => setAsking(false)}>
+              やめる
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="devbi-hint">組み込みのタイルでは足りない表示は、React のコードで描けます。はじめは同じ見た目のまま書き出します。</p>
+          <button type="button" className="devbi-button devbi-ed-promote-start" onClick={() => setAsking(true)}>
+            コードにする…
+          </button>
+        </>
+      )}
+    </section>
   );
 }
 

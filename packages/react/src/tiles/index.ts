@@ -1,4 +1,4 @@
-import type { TileProps } from "devbi";
+import type { BuiltinTileType, TileProps } from "devbi";
 import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { loadChunk } from "../chunk.js";
 import { BarList } from "./BarList.js";
@@ -23,9 +23,9 @@ const table = lazy(() => loadChunk(() => import("./GridTable.js")).then((m) => (
 
 /**
  * Built-in tile types for `"type"` in dash.json. The chart tiles (`bar`, `line`, `area`) and `table` are `React.lazy`
- * components: render them inside `<Suspense>` (TileFrame does).
+ * components: render them inside `<Suspense>` (TileFrame does, around a promoted tile too).
  */
-export const builtinTiles: Record<string, BuiltinTile> = {
+export const builtinTiles: Readonly<Record<BuiltinTileType, BuiltinTile>> = {
   kpi: { component: Kpi },
   bar: { component: chart("bar") },
   line: { component: chart("line") },

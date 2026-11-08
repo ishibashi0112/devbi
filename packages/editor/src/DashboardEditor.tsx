@@ -2,8 +2,8 @@ import { DevbiProvider, TileFrame, injectStyles, themeAttribute, useDevbi, type 
 import { TILE_TYPES, TILE_TYPE_NAMES, defineDashboard, formatDashboardJson, type BuiltinTileType, type Dashboard, type TileSpec } from "devbi";
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ReactGridLayout, useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
-import { EditorError, readDashboard, writeDashboard, type DashboardFile } from "./api.js";
-import { viewFor } from "./edit.js";
+import { EditorError, readDashboard, writeDashboard, writeTileFile, type DashboardFile, type TileFile } from "./api.js";
+import { metricsNameOf, promoteTile, updateTile, viewFor } from "./edit.js";
 import { boxesOf, newTile, placeTiles, type Box, type RawDashboard } from "./layout.js";
 import { Panel, type Flush } from "./Panel.js";
 import { injectEditorStyles } from "./styles.js";
@@ -53,6 +53,8 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   const [future, setFuture] = useState<RawDashboard[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [saving, setSaving] = useState(false);
+  /** A save (or "コードにする") is under way: set at once, unlike `saving`, so a second one started meanwhile waits. */
+  const busy = useRef(false);
   const [closing, setClosing] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   /** The panel's unfinished edit (a tile's new name), taken before the selection changes. */
@@ -126,10 +128,13 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
     setFuture((f) => f.slice(1));
   }, [spec, future]);
 
+  /** Write the dashboard (`next`: this content, which the editor has just changed to, rather than what it shows). */
   const save = useCallback(
-    async (overwrite = false): Promise<boolean> => {
+    async (overwrite = false, next?: RawDashboard): Promise<boolean> => {
+      const target = next ?? spec;
       // Nothing changed: no write (it would rewrite a hand-written file in the editor's style).
-      if (!spec || !file || saving || (!overwrite && !dirty)) return false;
+      if (!target || !file || busy.current || (!overwrite && !next && !dirty)) return false;
+      busy.current = true;
       setSaving(true);
       try {
         // Overwrite: write over whatever is on disk now (after a conflict the user chose to keep their version),
@@ -144,9 +149,9 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
               },
             )
           : file.version;
-        const written = await writeDashboard(dev, name, spec, version);
+        const written = await writeDashboard(dev, name, target, version);
         setFile(written);
-        onSaved(name, { path: written.path, spec });
+        onSaved(name, { path: written.path, spec: target });
         setNotice({ kind: "info", text: `保存しました（${written.path.slice(1)}）` });
         return true;
       } catch (e) {
@@ -154,10 +159,60 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
         setNotice({ kind: conflict ? "warn" : "error", text: (e as Error).message, conflict });
         return false;
       } finally {
+        busy.current = false;
         setSaving(false);
       }
     },
-    [spec, file, saving, dirty, dev, name, onSaved],
+    [spec, file, dirty, dev, name, onSaved],
+  );
+
+  /** The latest state, for a change made after waiting for the dev server. */
+  const latest = useRef({ spec, change, save });
+  latest.current = { spec, change, save };
+
+  /**
+   * "コードにする": the dev server writes the tile out as a .tsx file, then the tile names it and the dashboard is
+   * saved (with any other unsaved change): a page reload, which an edit to the new file makes, loses nothing. Undo
+   * puts the built-in tile back (save to keep that); the file stays, and the same tile written again uses it.
+   */
+  const promote = useCallback(
+    async (id: string): Promise<boolean> => {
+      const tile = spec?.tiles.find((t) => t.id === id);
+      // Like a save: not while one is under way, and ⌘S does nothing meanwhile (this saves everything after).
+      if (!spec || !tile || busy.current) return false;
+      busy.current = true;
+      setSaving(true);
+      let written: TileFile;
+      try {
+        written = await writeTileFile(dev, name, tile, metricsNameOf(project.metrics, spec, tile));
+      } catch (e) {
+        setNotice({ kind: "error", text: (e as Error).message });
+        return false;
+      } finally {
+        busy.current = false;
+        setSaving(false);
+      }
+      // The page loaded before the file was there: the tiles here, and the page once the editor closes, load it so.
+      project.components[written.path] ??= () => dev.importTile(written.path);
+      const file = written.path.slice(1);
+      const now = latest.current;
+      // Changed while the file was written (its query, its name, removed, undone): the file has the old tile.
+      const current = now.spec?.tiles.find((t) => t.id === id);
+      if (!now.spec || !current || JSON.stringify(current) !== JSON.stringify(tile)) {
+        setNotice({ kind: "warn", text: `${file} に書き出しましたが、その間にタイルが変わったので、タイルはそのままにしました。もう一度「コードにする」を押してください` });
+        return false;
+      }
+      const next = updateTile(now.spec, id, (t) => promoteTile(t, written.component));
+      now.change(next);
+      // When the save fails, its notice says why (the file changed on disk, for one); the tile is changed, unsaved.
+      if (!(await now.save(false, next))) return true;
+      setNotice({
+        kind: "info",
+        text: `${written.created ? `${file} に書き出して` : `前に書き出した ${file} を使うようにして`}、保存しました。このタイルのデータと描き方は、これからはこのファイルで変えます`,
+      });
+      return true;
+    },
+    [spec, dev, name, project],
   );
 
   // Files changed elsewhere (VS Code, git): take this dashboard's new content when nothing is unsaved; with unsaved
@@ -348,6 +403,8 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
           onChange={change}
           onRemove={remove}
           registerFlush={registerFlush}
+          onPromote={promote}
+          dirty={dirty}
         />
       </div>
     </div>
@@ -364,6 +421,8 @@ type BodyProps = {
   onChange(next: RawDashboard, merge?: string): void;
   onRemove(id: string): void;
   registerFlush(flush: Flush | null): void;
+  onPromote(id: string): Promise<boolean>;
+  dirty: boolean;
 };
 
 /** The grid and the property panel, with the tiles' data while the dashboard is valid. */
@@ -396,6 +455,8 @@ function Body(props: BodyProps) {
       onRemove={props.onRemove}
       clearSelection={clearSelection}
       registerFlush={props.registerFlush}
+      onPromote={props.onPromote}
+      dirty={props.dirty}
     />
   );
   return (
