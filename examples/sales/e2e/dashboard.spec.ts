@@ -192,11 +192,13 @@ test("a build has no GUI editor in it", async ({ page }) => {
 
 test("Excel saves each tile's data as filtered now: a sheet per tile, numbers and dates as Excel's own", async ({ page }) => {
   await ready(page);
+  const all = await kpi(page, "kpi-revenue").innerText();
   const kanto = tile(page, "region").getByRole("button", { name: /関東/ });
   await kanto.click();
   await expect(page.locator(".devbi-filters")).toContainText("地域: 関東");
+  // the tiles start loading just after the chip shows: wait for the new number, not only for no tile loading
+  await expect(kpi(page, "kpi-revenue")).not.toHaveText(all);
   await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
-  const revenue = await kpi(page, "kpi-revenue").innerText();
 
   const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Excel" }).click()]);
   expect(download.suggestedFilename()).toMatch(/^売上ダッシュボード_\d{8}-\d{4}\.xlsx$/);
@@ -225,7 +227,7 @@ test("Excel saves each tile's data as filtered now: a sheet per tile, numbers an
   // A number stays a number (shown as ¥18,599,290 by its format), filtered by the other tiles' selections.
   const kpiSheet = await readXlsx(file, { sheet: "売上", range: "A4:C5" });
   expect(kpiSheet.columns.map((c) => c.name)).toEqual(["売上", "売上 前年", "売上 前年比"]);
-  expect(`¥${(kpiSheet.columns[0]!.values[0] as number).toLocaleString("ja-JP")}`).toBe(revenue);
+  await expect(kpi(page, "kpi-revenue")).toHaveText(`¥${(kpiSheet.columns[0]!.values[0] as number).toLocaleString("ja-JP")}`);
   expect(kpiSheet.columns[2]!.type).toBe("DOUBLE");
   // Months are dates; the tile that was clicked is not filtered by its own selection (as on the screen).
   const monthly = await readXlsx(file, { sheet: "月別売上", range: "A4:B100" });
