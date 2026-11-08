@@ -274,7 +274,16 @@ export function DevbiApp({ project: input, theme }: { project: ProjectInput; the
     }
   }, [merged]);
   const hash = useHash();
-  const [editing, setEditingState] = useState<string | null>(() => (dev ? readEditing() : null));
+  // The editor opens again after a reload only on the dashboard it was editing (not if the address changed since).
+  const [editing, setEditingState] = useState<string | null>(() => {
+    const name = dev ? readEditing() : null;
+    const here = typeof location === "undefined" ? "" : decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+    if (name !== null && here !== name && (here !== "" || Object.keys(input.dashboards).length !== 1)) {
+      writeEditing(null);
+      return null;
+    }
+    return name;
+  });
   const [creating, setCreating] = useState(false);
   const setEditing = useCallback((name: string | null) => {
     writeEditing(name);
@@ -313,10 +322,12 @@ export function DevbiApp({ project: input, theme }: { project: ProjectInput; the
       </EditorHost>
     );
   }
-  if (dev && shown !== null && editing === shown) {
+  // The editor stays on its dashboard when the address changes (the browser's back button): unsaved changes are
+  // kept until it is closed.
+  if (dev && editing !== null && Object.hasOwn(project.dashboards, editing)) {
     return (
       <EditorHost dev={dev} theme={theme}>
-        {(editor) => <editor.DashboardEditor key={shown} project={project} name={shown} dev={dev} theme={theme} onSaved={onSaved} onClose={() => setEditing(null)} />}
+        {(editor) => <editor.DashboardEditor key={editing} project={project} name={editing} dev={dev} theme={theme} onSaved={onSaved} onClose={() => setEditing(null)} />}
       </EditorHost>
     );
   }

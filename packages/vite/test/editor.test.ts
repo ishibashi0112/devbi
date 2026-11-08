@@ -125,3 +125,51 @@ describe("the GUI editor's endpoint on the dev server", () => {
     expect(code).not.toContain("@devbi/editor");
   });
 });
+
+describe("the read-only API on the dev and preview servers, and the Host header", () => {
+  const project = () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-hosts-"));
+    mkdirSync(path.join(dir, "api"));
+    mkdirSync(path.join(dir, "dist"));
+    writeFileSync(path.join(dir, "api", "orders.sql"), "SELECT 1 AS one");
+    writeFileSync(path.join(dir, "dist", "index.html"), "<!doctype html>");
+    return dir;
+  };
+
+  it("leaves a name the dev server does not know to Vite, which refuses it (DNS rebinding)", async () => {
+    const { createServer } = await import("vite");
+    const devbi = (await import("../src/index.js")).default;
+    const server = await createServer({ root: project(), configFile: false, logLevel: "silent", plugins: [devbi()], server: { port: 0, host: "127.0.0.1" } });
+    await server.listen();
+    try {
+      const base = server.resolvedUrls!.local[0]!;
+      const port = new URL(base).port;
+      expect((await send(base, "GET", "/api/schema", {})).status).toBe(200);
+      expect((await send(base, "GET", "/api/schema", { Host: `evil.example:${port}` })).status).toBe(403);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses preview.allowedHosts on the preview server", async () => {
+    const { preview } = await import("vite");
+    const devbi = (await import("../src/index.js")).default;
+    const server = await preview({
+      root: project(),
+      configFile: false,
+      logLevel: "silent",
+      plugins: [devbi()],
+      preview: { port: 0, host: "127.0.0.1", allowedHosts: ["staging.example.com"] },
+    });
+    try {
+      const base = server.resolvedUrls!.local[0]!;
+      const port = new URL(base).port;
+      const allowed = await send(base, "GET", "/api/schema", { Host: `staging.example.com:${port}` });
+      expect(allowed.status).toBe(200);
+      expect(allowed.body).toHaveProperty("datasets");
+      expect((await send(base, "GET", "/api/schema", { Host: `evil.example:${port}` })).status).toBe(403);
+    } finally {
+      await server.close();
+    }
+  });
+});

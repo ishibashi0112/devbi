@@ -261,19 +261,25 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   /** The editor's last save of each file: a change to that content is the saving page's own (no reload there). */
   const lastWrites = new Map<string, { version: string; client: string | undefined }>();
 
-  /** Whether a Host header names this server (Vite's allowedHosts), as Vite checks it after the plugins' middlewares. */
-  const allowedHost = async (host: string | undefined) => {
+  /**
+   * Whether a Host header names this server, as Vite checks it after the plugins' middlewares: its allowedHosts,
+   * and no check over HTTPS (a page cannot point another name at it there: the certificate would not match).
+   */
+  const allowedHost = async (host: string | undefined, preview = false) => {
     if (!host) return false;
+    const server = preview ? config.preview : config.server;
+    if (server.https || server.allowedHosts === true) return true;
     const { isHostAllowed } = await import("@devbi/server");
-    const hosts = config.command === "serve" ? config.server.allowedHosts : config.preview.allowedHosts;
-    return isHostAllowed(host, hosts === true ? true : (hosts ?? []));
+    return isHostAllowed(host, server.allowedHosts ?? []);
   };
+  /** The key of a file in lastWrites: Vite gives the hooks paths with / on Windows too. */
+  const fileKey = (file: string) => posix(path.resolve(file));
 
   /**
    * The read-only API (api/*.sql) for the dev and preview servers, the same one devbi-serve runs. Connection URLs
    * come from DEVBI_DB… in the environment or Vite's .env files. Database errors are shown as they are (local use).
    */
-  const mountApi = (middlewares: Connect.Server, httpServer: { once(event: "close", fn: () => void): unknown } | null) => {
+  const mountApi = (middlewares: Connect.Server, httpServer: { once(event: "close", fn: () => void): unknown } | null, preview: boolean) => {
     if (!existsSync(path.join(dir, "api"))) return;
     const env = { ...process.env, ...loadEnv(config.mode, config.envDir || config.root, "DEVBI_") };
     const handler = import("@devbi/server").then((m) =>
@@ -284,10 +290,23 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       // This runs before Vite's own check of the Host header (DNS rebinding): unknown hosts are left to it.
       handler
         .then(async (h) => {
-          if (!(await allowedHost(req.headers.host)) || !(await h.handle(req, res))) next();
+          if (!(await allowedHost(req.headers.host, preview)) || !(await h.handle(req, res))) next();
         })
         .catch(next);
     });
+  };
+
+  /** A dashboard, metrics, data or api file, by its path in the project folder; anything else: undefined. */
+  const projectChange = (file: string): string | undefined => {
+    const rel = posix(path.relative(dir, file));
+    const isProjectFile = /^(dashboards\/[^/]+\.dash\.json|models\/[^/]+\.metrics\.yaml)$/.test(rel);
+    return isProjectFile || /^(data|api)\//.test(rel) ? rel : undefined;
+  };
+  /** virtual:devbi is read again on the next load; .devbi/ follows models/. */
+  const invalidate = (graph: { getModuleById(id: string): unknown; invalidateModule(mod: never): void }, rel: string) => {
+    if (rel.endsWith(".metrics.yaml")) void generate(dir).catch(() => undefined);
+    const mod = graph.getModuleById(RESOLVED);
+    if (mod) graph.invalidateModule(mod as never);
   };
 
   return {
@@ -397,34 +416,39 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       ].join("\n");
     },
     configureServer(server: ViteDevServer) {
-      mountApi(server.middlewares, server.httpServer);
+      mountApi(server.middlewares, server.httpServer, false);
       const handleEditor = createEditorHandler({
         dir,
         allowedHost,
         problems: (rel, d) => dashboardProblems(dir, rel, d),
-        onWrite: (file, version, client) => lastWrites.set(file, { version, client }),
+        onWrite: (file, version, client) => lastWrites.set(fileKey(file), { version, client }),
       });
       server.middlewares.use((req, res, next) => {
         handleEditor(req, res).then((handled) => !handled && next(), next);
       });
       server.watcher.add(["dashboards", "models", "data", "api"].map((d) => path.join(dir, d)));
+      // Without HMR, Vite calls no hotUpdate hook: reload the page for any project file, as before the editor.
+      if (server.config.server.hmr === false) {
+        const reload = (file: string) => {
+          const change = projectChange(file);
+          if (!change) return;
+          invalidate(server.environments.client.moduleGraph, change);
+          server.ws.send({ type: "full-reload" });
+        };
+        for (const event of ["add", "change", "unlink"] as const) server.watcher.on(event, reload);
+      }
       if (!editor) {
         config.logger.info("devbi: GUI エディタを使うには pnpm add -D @devbi/editor", { timestamp: true });
       }
     },
     async hotUpdate({ type, file, read }) {
       if (this.environment.name !== "client") return;
-      const rel = posix(path.relative(dir, file));
-      const isProjectFile = /^(dashboards\/[^/]+\.dash\.json|models\/[^/]+\.metrics\.yaml)$/.test(rel);
-      const isData = /^(data|api)\//.test(rel);
-      if (!isProjectFile && !isData) return;
-      if (rel.endsWith(".metrics.yaml")) void generate(dir).catch(() => undefined);
-      const graph = this.environment.moduleGraph;
-      const mod = graph.getModuleById(RESOLVED);
-      if (mod) graph.invalidateModule(mod);
+      const rel = projectChange(file);
+      if (!rel) return;
+      invalidate(this.environment.moduleGraph, rel);
       // The GUI editor's own save: the page that saved it has it already.
       let by: string | undefined;
-      const last = lastWrites.get(file);
+      const last = lastWrites.get(fileKey(file));
       if (last && type !== "delete") {
         const text = await Promise.resolve(read()).catch(() => undefined);
         if (text !== undefined && versionOf(text) === last.version) by = last.client;
@@ -433,7 +457,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       return [];
     },
     configurePreviewServer(server: PreviewServer) {
-      mountApi(server.middlewares, server.httpServer);
+      mountApi(server.middlewares, server.httpServer, true);
     },
     async writeBundle(output) {
       const outDir = output.dir ?? config.build.outDir;

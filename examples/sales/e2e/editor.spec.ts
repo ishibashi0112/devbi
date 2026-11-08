@@ -108,9 +108,12 @@ test("adding a tile shows data at once; removing it can be undone", async ({ pag
   expect(readFileSync(salesFile, "utf8")).toBe(original.replace(/\n {4}}\n {2}]\n}\n$/, `\n    },\n${tile}\n  ]\n}\n`));
 });
 
-test("closing with unsaved changes asks first", async ({ page }) => {
+test("closing with unsaved changes asks first; going back in the browser keeps them", async ({ page }) => {
   await openEditor(page);
   await page.getByLabel("タイルを追加").selectOption({ label: "文章" });
+  await page.evaluate(() => (location.hash = "#/"));
+  await expect(item(page, "markdown")).toBeVisible();
+  await expect(page.getByText("未保存の変更があります")).toBeVisible();
   await page.getByRole("button", { name: "閉じる", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("保存していない変更があります");
   await page.getByRole("button", { name: "保存せずに閉じる" }).click();
@@ -168,12 +171,17 @@ test("a new dashboard: name, heading, then tiles", async ({ page }) => {
 
 test("a change made elsewhere: taken in when nothing is unsaved, asked about when something is", async ({ page }) => {
   await openEditor(page);
+  await mark(page);
+  // Half-written: the editor keeps what it shows, and says why it could not read the file.
+  writeFileSync(salesFile, "{ broken");
+  await expect(page.getByRole("alert")).toContainText("JSON として読めません");
+  await expect(item(page, "kpi-revenue")).toBeVisible();
   writeFileSync(salesFile, original.replace(`"title": "売上ダッシュボード"`, `"title": "売上（VS Code で変更）"`));
   await expect(page.getByRole("heading", { name: "売上（VS Code で変更）" })).toBeVisible();
   await expect(page.getByRole("status")).toContainText("読み込み直しました");
 
   await page.getByLabel("タイルを追加").selectOption({ label: "文章" });
-  writeFileSync(salesFile, original.replace(`"title": "売上ダッシュボード"`, `"title": "売上（もう一度変更）"`));
+  writeFileSync(salesFile, "{ broken again");
   await expect(page.getByRole("alert")).toContainText("ほかで書き換えられました");
   // Still the editor's version on screen, and saving is refused until the user picks one.
   await expect(item(page, "markdown")).toBeVisible();
@@ -184,6 +192,22 @@ test("a change made elsewhere: taken in when nothing is unsaved, asked about whe
   const saved = readFileSync(salesFile, "utf8");
   expect(saved).toContain(`"title": "売上（VS Code で変更）"`);
   expect(saved).toContain(`"id": "markdown"`);
+  // The page took the file from disk while the editor was open: it reloads when the editor closes.
+  expect(await marked(page)).toBe(true);
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect.poll(() => marked(page).catch(() => false)).toBe(false);
+  await expect(page.getByRole("heading", { name: "売上（VS Code で変更）", level: 1 })).toBeVisible();
+  await expect(page.locator('[data-tile="markdown"]')).toBeVisible();
+});
+
+test("saving with nothing changed leaves a file written in another style alone", async ({ page }) => {
+  const other = `${JSON.stringify(JSON.parse(original), null, 2)}\n`;
+  writeFileSync(salesFile, other);
+  await openEditor(page);
+  await page.keyboard.press("ControlOrMeta+s");
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("status")).toHaveCount(0);
+  expect(readFileSync(salesFile, "utf8")).toBe(other);
 });
 
 test("after models/ or data/ changes, the page reloads and the editor opens again", async ({ page }) => {

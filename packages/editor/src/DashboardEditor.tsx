@@ -39,9 +39,13 @@ function isTyping(target: EventTarget | null): boolean {
  * tiles, and save to `dashboards/<name>.dash.json` (in the hand-written style, so the git diff is small). The tiles
  * show their data while you edit.
  */
-export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }: DashboardEditorProps) {
+export function DashboardEditor({ project: given, name, dev, theme, onSaved, onClose }: DashboardEditorProps) {
   useInsertionEffect(injectStyles, []);
   useInsertionEffect(injectEditorStyles, []);
+  // The project as the editor opened with it: the page's copy changes with each save, and a new one would start
+  // every tile's query again. Its metrics and promoted tiles do not change while the editor is open (a change to
+  // those reloads the page, or waits for the editor to close).
+  const [project] = useState(given);
   /** The file as last read or saved. */
   const [file, setFile] = useState<DashboardFile | null>(null);
   /** What is being edited. */
@@ -54,6 +58,9 @@ export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }:
   const [selected, setSelected] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const dirty = !!file && !!spec && !same(file.spec, spec);
+  /** Files changed on disk that the page has not taken in: it reloads when the editor closes. */
+  const stale = useRef(false);
+  const loaded = useRef(false);
 
   const open = useCallback(
     async (message?: Notice) => {
@@ -66,13 +73,16 @@ export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }:
         setPast([]);
         setFuture([]);
         setLoadError(null);
+        loaded.current = true;
         setNotice(
           compacted !== tiles
             ? { kind: "info", text: "空いている行があったので、タイルを上に詰めました（保存するまでファイルは変わりません）" }
             : (message ?? null),
         );
       } catch (e) {
-        setLoadError((e as Error).message);
+        // Once open, what is on screen stays, with the reason it could not be read again.
+        if (loaded.current) setNotice({ kind: "error", text: (e as Error).message });
+        else setLoadError((e as Error).message);
       }
     },
     [dev, name],
@@ -105,11 +115,22 @@ export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }:
 
   const save = useCallback(
     async (overwrite = false): Promise<boolean> => {
-      if (!spec || !file || saving) return false;
+      // Nothing changed: no write (it would rewrite a hand-written file in the editor's style).
+      if (!spec || !file || saving || (!overwrite && !dirty)) return false;
       setSaving(true);
       try {
-        // Overwrite: write over whatever is on disk now (after a conflict the user chose to keep their version).
-        const version = overwrite ? await readDashboard(dev, name).then((f) => f.version, (e: unknown) => (e instanceof EditorError && e.status === 404 ? null : Promise.reject(e))) : file.version;
+        // Overwrite: write over whatever is on disk now (after a conflict the user chose to keep their version),
+        // even a file that is no longer JSON (its version comes with the 422) or that is gone (null: create).
+        const version = overwrite
+          ? await readDashboard(dev, name).then(
+              (f) => f.version,
+              (e: unknown) => {
+                if (e instanceof EditorError && e.status === 404) return null;
+                if (e instanceof EditorError && e.status === 422 && typeof e.version === "string") return e.version;
+                throw e;
+              },
+            )
+          : file.version;
         const written = await writeDashboard(dev, name, spec, version);
         setFile(written);
         onSaved(name, { path: written.path, spec });
@@ -123,7 +144,7 @@ export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }:
         setSaving(false);
       }
     },
-    [spec, file, saving, dev, name, onSaved],
+    [spec, file, saving, dirty, dev, name, onSaved],
   );
 
   // Files changed elsewhere (VS Code, git): take this dashboard's new content when nothing is unsaved; with unsaved
@@ -134,8 +155,9 @@ export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }:
     () =>
       dev.onChange((change) => {
         const mine = change.file === `dashboards/${name}.dash.json`;
+        if (!state.current.dirty && !mine) return false;
+        stale.current = true;
         if (!state.current.dirty) {
-          if (!mine) return false;
           void state.current.open({ kind: "info", text: "ファイルが書き換えられたので読み込み直しました" });
           return true;
         }
@@ -181,7 +203,12 @@ export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }:
     added.current = null;
   });
 
-  const close = () => (dirty ? setClosing(true) : onClose());
+  /** Leave the editor; the page reloads if files changed on disk while it was open. */
+  const finish = () => {
+    onClose();
+    if (stale.current) location.reload();
+  };
+  const close = () => (dirty ? setClosing(true) : finish());
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -269,10 +296,10 @@ export function DashboardEditor({ project, name, dev, theme, onSaved, onClose }:
         {closing && (
           <div className="devbi-ed-notice" data-kind="warn" role="alert">
             <span>保存していない変更があります。</span>
-            <button type="button" className="devbi-button devbi-button-primary" onClick={() => void save().then((ok) => ok && onClose())}>
+            <button type="button" className="devbi-button devbi-button-primary" onClick={() => void save().then((ok) => ok && finish())}>
               保存して閉じる
             </button>
-            <button type="button" className="devbi-button" onClick={onClose}>
+            <button type="button" className="devbi-button" onClick={finish}>
               保存せずに閉じる
             </button>
             <button type="button" className="devbi-button" onClick={() => setClosing(false)}>
