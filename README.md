@@ -2,13 +2,14 @@
 
 開発者がいる会社が自社アプリの中に置く BI。ダッシュボードは git のファイル、タイルは JSX に「昇格」でき、集計はブラウザ内の DuckDB-wasm。MIT。
 
-構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）と §5 の 2（埋め込みと読み取り API）ができました。GUI エディタはまだありません。
+構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）と §5 の 2（埋め込みと読み取り API）ができました。§5 の 3（GUI エディタ）は作っている途中で、いまはタイルの配置（動かす・大きさ・足す・消す）と新しいダッシュボードの作成までできます。
 
 ## 動かす
 
 ```sh
 pnpm install
 pnpm example:dev      # packages/* をビルドして、examples/sales を Vite の dev server で開く（http://localhost:5173）
+                      # 見出しの右の「編集」で GUI エディタ（タイルをドラッグで並べて dash.json に保存。ビルドには入らない）
 pnpm example:preview  # 静的ビルドしたものを開く（http://localhost:4173）
 pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost:8080）。DB 版のダッシュボードはサンプルの SQLite を API から読む。
                       # 「売上の日次集計」は、devbi-serve が毎朝 6:00（と起動したとき）に作るスナップショットを読む
@@ -31,6 +32,7 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `packages/devbi` | `devbi` | ファイル形式（metrics.yaml / dash.json の検証）、指標 → DuckDB SQL のコンパイラ、xlsx の読み書き（依存なし）、書式、`TileProps` などの型。ブラウザでも Node でも動く |
 | `packages/react` | `@devbi/react` | DuckDB-wasm のエンジン、Mosaic の Selection でのクロスフィルタ、組み込みタイル、`<Dashboard>` / `<DevbiApp>`、ほかのページへの埋め込み（`mountDashboard`、`startEmbed`） |
 | `packages/vite` | `@devbi/vite` | Vite プラグイン。`virtual:devbi` で dashboards/ と models/ と昇格タイルを渡し、ビルドで data/ をコピー。`embed: true` で埋め込み用の `devbi-embed.js` も作る |
+| `packages/editor` | `@devbi/editor` | GUI エディタ。Vite の開発サーバーでだけ動き、react-grid-layout でタイルを並べて、dash.json を手書きと同じ形で保存する（書き込み口は `@devbi/vite`）。ビルドには入らない |
 | `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL・SQL Server・Oracle・MySQL）、`devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出し、毎朝のスナップショットを作る）、`devbi-snapshot`（スナップショットをいま作る。タスクスケジューラ用）。DB への接続は ashiato のアダプタの作りを流用 |
 | `dotnet/` | （C#） | 読み取り API の ASP.NET の見本（SQL Server）。ASP.NET Core（.NET 10）の `MapDevBIApi` と、WebForms・MVC 5（.NET Framework 4.7.2 以降）の `DevBIHttpHandler`。SQL ファイルの読み方は `packages/server` と同じものをテストで確かめる。NuGet には未公開 |
 | `examples/nextjs` | （非公開） | `examples/sales` のダッシュボードを Next.js 16（App Router）のアプリに置いた見本。API とスナップショットは `app/devbi/[...path]/route.ts`（`@devbi/server` の `fetch`）、画面は `devbi-embed.js` |

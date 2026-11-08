@@ -1,6 +1,7 @@
 import { formatTime, type Filter, type TileSpec } from "devbi";
-import { useEffect, useInsertionEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useInsertionEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { DevbiProvider, fieldInfo, useDevbi, useSelectionVersion } from "./context.js";
+import type { DevServer, EditorModule, SavedDashboard } from "./dev.js";
 import type { SnapshotInfo } from "./engine.js";
 import { formatTimesOfDay, loadProject, snapshotTimesOf, viewsOf, type Project, type ProjectInput } from "./project.js";
 import { injectStyles } from "./styles.js";
@@ -149,12 +150,15 @@ export function Dashboard({
   back,
   theme,
   isolate,
+  actions,
 }: {
   project: Project;
   name: string;
   back?: string;
   theme?: Theme;
   isolate?: boolean;
+  /** Buttons at the end of the heading (DevbiApp's 編集 on the dev server). */
+  actions?: ReactNode;
 }) {
   useInsertionEffect(injectStyles, []);
   const root = { ...themeAttribute(theme), ...(isolate ? { "data-devbi-isolate": "" } : {}) };
@@ -181,6 +185,7 @@ export function Dashboard({
             <h1>{dashboard.title}</h1>
             {dashboard.description && <p>{dashboard.description}</p>}
             <SnapshotNote />
+            {actions && <div className="devbi-actions">{actions}</div>}
           </div>
           <ActiveFilters />
           <div
@@ -207,20 +212,75 @@ function useHash(): string {
   return hash;
 }
 
+/** Which dashboard the GUI editor has open, kept over the reloads the dev server makes (models/ changed). */
+const EDITING = "devbi:editing";
+
+function readEditing(): string | null {
+  try {
+    return sessionStorage.getItem(EDITING);
+  } catch {
+    return null;
+  }
+}
+
+function writeEditing(name: string | null) {
+  try {
+    if (name === null) sessionStorage.removeItem(EDITING);
+    else sessionStorage.setItem(EDITING, name);
+  } catch {
+    // no storage (a private window): the editor closes on reload
+  }
+}
+
+/** Loads the GUI editor (@devbi/editor) on first use; the dev server only. */
+function EditorHost({ dev, theme, children }: { dev: DevServer; theme?: Theme; children: (editor: EditorModule) => ReactNode }) {
+  const [state, setState] = useState<{ editor?: EditorModule; error?: Error }>({});
+  useEffect(() => {
+    let live = true;
+    dev.editor?.().then(
+      (editor) => live && setState({ editor }),
+      (e: unknown) => live && setState({ error: e instanceof Error ? e : new Error(String(e)) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [dev]);
+  if (state.editor) return <>{children(state.editor)}</>;
+  return (
+    <div className="devbi-root" {...themeAttribute(theme)}>
+      <div className="devbi-dashboard">
+        {state.error ? <pre className="devbi-error">GUI エディタを読み込めません: {state.error.message}</pre> : <p className="devbi-hint">エディタを読み込んでいます…</p>}
+      </div>
+    </div>
+  );
+}
+
 /**
  * A whole static site: a list of dashboards, and each dashboard at `#/<name>`.
- * With one dashboard it is shown directly.
+ * With one dashboard it is shown directly. On the dev server with `@devbi/editor` installed, each dashboard has
+ * an 編集 button (the GUI editor) and new dashboards can be made.
  */
 export function DevbiApp({ project: input, theme }: { project: ProjectInput; theme?: Theme }) {
   useInsertionEffect(injectStyles, []);
+  const dev = input.dev?.editor ? input.dev : undefined;
+  // The editor's saves, shown without reloading the page (the dev server reloads it for changes made elsewhere).
+  const [saved, setSaved] = useState<Record<string, SavedDashboard>>({});
+  const merged = useMemo(() => (Object.keys(saved).length ? { ...input, dashboards: { ...input.dashboards, ...saved } } : input), [input, saved]);
   const loaded = useMemo(() => {
     try {
-      return { project: loadProject(input), error: null };
+      return { project: loadProject(merged), error: null };
     } catch (e) {
       return { project: null, error: e as Error };
     }
-  }, [input]);
+  }, [merged]);
   const hash = useHash();
+  const [editing, setEditingState] = useState<string | null>(() => (dev ? readEditing() : null));
+  const [creating, setCreating] = useState(false);
+  const setEditing = useCallback((name: string | null) => {
+    writeEditing(name);
+    setEditingState(name);
+  }, []);
+  const onSaved = useCallback((name: string, file: SavedDashboard) => setSaved((s) => ({ ...s, [name]: file })), []);
   if (loaded.error || !loaded.project) {
     return (
       <div className="devbi-root" {...themeAttribute(theme)}>
@@ -231,14 +291,58 @@ export function DevbiApp({ project: input, theme }: { project: ProjectInput; the
   const project = loaded.project;
   const names = Object.keys(project.dashboards).sort();
   const current = decodeURIComponent(hash.replace(/^#\/?/, ""));
-  if (current && Object.hasOwn(project.dashboards, current)) {
-    return <Dashboard key={current} project={project} name={current} theme={theme} {...(names.length > 1 ? { back: "#/" } : {})} />;
+  const shown = current && Object.hasOwn(project.dashboards, current) ? current : names.length === 1 ? names[0]! : null;
+
+  if (dev && creating) {
+    return (
+      <EditorHost dev={dev} theme={theme}>
+        {(editor) => (
+          <editor.NewDashboard
+            project={project}
+            dev={dev}
+            theme={theme}
+            onCreated={(name, file) => {
+              onSaved(name, file);
+              setCreating(false);
+              setEditing(name);
+              location.hash = `#/${encodeURIComponent(name)}`;
+            }}
+            onCancel={() => setCreating(false)}
+          />
+        )}
+      </EditorHost>
+    );
   }
-  if (names.length === 1) return <Dashboard project={project} name={names[0]!} theme={theme} />;
+  if (dev && shown !== null && editing === shown) {
+    return (
+      <EditorHost dev={dev} theme={theme}>
+        {(editor) => <editor.DashboardEditor key={shown} project={project} name={shown} dev={dev} theme={theme} onSaved={onSaved} onClose={() => setEditing(null)} />}
+      </EditorHost>
+    );
+  }
+  const newButton = dev && (
+    <button type="button" className="devbi-button" onClick={() => setCreating(true)}>
+      ＋ 新しいダッシュボード
+    </button>
+  );
+  if (shown !== null) {
+    const actions = dev && (
+      <>
+        <button type="button" className="devbi-button devbi-button-primary" onClick={() => setEditing(shown)}>
+          編集
+        </button>
+        {newButton}
+      </>
+    );
+    return (
+      <Dashboard key={shown} project={project} name={shown} theme={theme} actions={actions || undefined} {...(names.length > 1 ? { back: "#/" } : {})} />
+    );
+  }
   return (
     <div className="devbi-root" {...themeAttribute(theme)}>
       <div className="devbi-index">
         <h1>ダッシュボード</h1>
+        {newButton && <p>{newButton}</p>}
         {names.length === 0 ? (
           <p className="devbi-hint">dashboards/ に *.dash.json を置くとここに並びます</p>
         ) : (

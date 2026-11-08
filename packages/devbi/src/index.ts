@@ -27,6 +27,7 @@ export {
   DashboardError,
   type Dashboard,
 } from "./dashboard.js";
+export { formatDashboardJson } from "./format-dash.js";
 export {
   compileQuery,
   compileTimeExtent,

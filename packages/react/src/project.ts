@@ -8,6 +8,7 @@ import {
   type TileProps,
 } from "devbi";
 import type { ComponentType } from "react";
+import type { DevServer } from "./dev.js";
 import type { DuckDBBundle } from "./engine.js";
 
 /** A promoted tile module: `export const query = {...}; export default function Tile(props: TileProps) {...}` */
@@ -37,6 +38,8 @@ export interface ProjectInput {
   snapshots?: Record<string, string[]>;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
+  /** Set by `@devbi/vite` on its dev server (the GUI editor and file change notices); never in a build. */
+  dev?: DevServer;
 }
 
 export interface Project {
@@ -49,6 +52,7 @@ export interface Project {
   snapshots: Record<string, string[]>;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
+  dev?: DevServer;
 }
 
 /** Validate a project's files. Throws with a Japanese message naming the file. */
@@ -69,6 +73,7 @@ export function loadProject(input: ProjectInput): Project {
     snapshots: input.snapshots ?? {},
     duckdb: input.duckdb,
     ...(input.extensionRepository ? { extensionRepository: input.extensionRepository } : {}),
+    ...(input.dev ? { dev: input.dev } : {}),
   };
 }
 

@@ -168,6 +168,12 @@ export const css = `
 .devbi-markdown h2 { font-size: 18px; } .devbi-markdown h3 { font-size: 15px; } .devbi-markdown h4 { font-size: 14px; }
 .devbi-markdown code { background: var(--devbi-accent-soft); padding: 0 4px; border-radius: 4px; }
 .devbi-markdown a { color: var(--devbi-accent); }
+.devbi-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+.devbi-button { border: 1px solid var(--devbi-border); background: var(--devbi-card); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 13px; line-height: 1.6; }
+.devbi-button:hover { border-color: var(--devbi-accent); }
+.devbi-button:disabled { opacity: 0.5; cursor: default; }
+.devbi-button.devbi-button-primary { background: var(--devbi-accent); border-color: var(--devbi-accent); color: #fff; }
+.devbi-button:focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 2px; }
 .devbi-index { padding: 24px 20px; max-width: 900px; margin: 0 auto; }
 .devbi-index h1 { font-size: 20px; }
 .devbi-index ul { list-style: none; padding: 0; display: grid; gap: 8px; }
