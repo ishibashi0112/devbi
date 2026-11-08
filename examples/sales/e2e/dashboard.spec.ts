@@ -264,6 +264,8 @@ test("印刷・PDF prints a copy of the dashboard: light, without the buttons, t
   await tile(page, "region").getByRole("button", { name: /関東/ }).click();
   await tile(page, "category").getByLabel("保守").check();
   await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+  // a project's own color, as the reference shows
+  await page.addStyleTag({ content: ".devbi-root { --devbi-accent: #0a7f6f; }" });
   await catchPrint(page);
   await page.getByRole("button", { name: "印刷・PDF" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { printed?: string }).printed)).toMatch(/^売上ダッシュボード_\d{8}$/);
@@ -285,6 +287,14 @@ test("印刷・PDF prints a copy of the dashboard: light, without the buttons, t
   // On paper: white, the time it was printed, no buttons.
   await page.emulateMedia({ media: "print", colorScheme: "dark" });
   await expect(copy).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  const accent = (root: typeof copy) => root.evaluate((el) => getComputedStyle(el).getPropertyValue("--devbi-accent").trim());
+  expect(await accent(copy)).toBe("#0a7f6f");
+  // The browser's own print of the page: light on white too, and the project's color where it is on the screen.
+  const root = page.locator(".devbi-root");
+  await expect(root).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(root).toHaveCSS("color", "rgb(29, 35, 48)");
+  await page.emulateMedia({ media: "print", colorScheme: "light" });
+  expect(await accent(root)).toBe("#0a7f6f");
   await expect(copy.locator(".devbi-printed")).toHaveText(/^\d{4}\/\d+\/\d+ \d+:\d\d の表示$/);
   await expect(copy.locator(".devbi-actions")).toBeHidden();
   await expect(copy.locator(".devbi-chip button")).toHaveCount(3);

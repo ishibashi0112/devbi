@@ -194,14 +194,24 @@ export const css = `
 .devbi-actions > .devbi-error { align-self: center; }
 .devbi-printed { display: none; }
 /* On paper (the 印刷・PDF button's copy of the dashboard, or the browser's own print of the page): light colors on white,
-   with the bars' and chips' colors kept, no buttons, and a tile kept on one page. The class twice: as specific as the
-   dark rules above, and after them. */
+   with the bars' and chips' colors kept, no buttons, and a tile kept on one page. Light colors only where the dark ones
+   would apply (the same selectors, after them), so a project's own colors (.devbi-root { --devbi-accent: … }) stay. */
 @media print {
-  .devbi-root.devbi-root {${LIGHT}  --devbi-bg: #ffffff;
-    color-scheme: light;
+  .devbi-root {
+    --devbi-bg: #ffffff;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  .devbi-root[data-theme="dark"] {${LIGHT}  --devbi-bg: #ffffff;
+    color-scheme: light;
+  }
+}
+@media print and (prefers-color-scheme: dark) {
+  .devbi-root:not([data-theme="light"]) {${LIGHT}  --devbi-bg: #ffffff;
+    color-scheme: light;
+  }
+}
+@media print {
   .devbi-root .devbi-actions, .devbi-root .devbi-back, .devbi-root .devbi-chip button, .devbi-root .devbi-clear-all,
   .devbi-root .devbi-clear, .devbi-root .devbi-filters .devbi-hint { display: none; }
   .devbi-root .devbi-filters:not(:has(.devbi-chip)) { display: none; }

@@ -10,6 +10,7 @@ const SETTLE_MS = 20_000;
 /** How long to wait for the copy's styles, images and fonts. */
 const LOAD_MS = 10_000;
 
+/** The frame printed last: removed when the next print starts (a browser may still be printing from it). */
 let previous: HTMLIFrameElement | undefined;
 
 // The page's frames, not the hidden frame's (a browser may hold back drawing a frame out of view).
@@ -31,7 +32,7 @@ function copyState(from: HTMLElement, to: HTMLElement) {
     const copy = b[i];
     if (!copy || copy.localName !== el.localName) return;
     if (isTag(el, "input") && isTag(copy, "input")) {
-      copy.value = el.value;
+      if (el.type !== "file") copy.value = el.value; // a chosen file cannot be set
       copy.checked = el.checked;
     } else if (isTag(el, "select") && isTag(copy, "select")) {
       copy.selectedIndex = el.selectedIndex;
@@ -66,9 +67,22 @@ function scrollOf(from: HTMLElement, to: HTMLElement): () => void {
 /**
  * The tiles of each grid in bands of rows that no tile crosses, each band a grid of its own kept on one page: the
  * browser then breaks pages only between bands (inside one grid, a tile on a page break is not reliably kept whole).
+ * In the narrow layout, where the tiles are one under another, each tile is a band.
  */
 function splitIntoBands(copy: HTMLElement) {
+  const narrow = copy.hasAttribute("data-devbi-narrow");
   for (const grid of copy.querySelectorAll<HTMLElement>(".devbi-grid")) {
+    if (narrow) {
+      if (grid.children.length < 2) continue;
+      for (const el of [...grid.children]) {
+        const part = grid.cloneNode(false) as HTMLElement;
+        part.classList.add("devbi-print-band");
+        part.append(el);
+        grid.before(part);
+      }
+      grid.remove();
+      continue;
+    }
     const tiles = [...grid.children].map((child) => {
       const el = child as HTMLElement;
       const start = Number.parseInt(el.style.gridRowStart, 10);
@@ -110,6 +124,47 @@ function loaded(el: HTMLLinkElement | HTMLImageElement): Promise<void> {
 
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
+/** A style sheet's rules as text, or undefined when they cannot be read (another site's sheet). */
+function rulesText(sheet: CSSStyleSheet): string | undefined {
+  try {
+    return Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The page's styles (DevBI's, the table's, the project's), in their order, into the frame's document. A `<style>`
+ * goes as the rules the browser holds, not its text: CSS-in-JS libraries (emotion, styled-components) add rules to an
+ * empty one. Returns the stylesheet links to wait for.
+ */
+function copyStyles(doc: Document): Promise<void>[] {
+  const waits: Promise<void>[] = [];
+  for (const node of document.querySelectorAll('style, link[rel~="stylesheet"]')) {
+    if (isTag(node, "style")) {
+      if (node.sheet?.disabled) continue;
+      const text = node.sheet ? rulesText(node.sheet) : undefined;
+      const copy = doc.importNode(node, text === undefined);
+      if (text !== undefined) copy.textContent = text;
+      doc.head.append(copy);
+    } else if (isTag(node, "link")) {
+      const copy = doc.importNode(node, true);
+      copy.href = node.href;
+      waits.push(loaded(copy));
+      doc.head.append(copy);
+    }
+  }
+  // sheets made in script (new CSSStyleSheet()), which come after the others
+  for (const sheet of document.adoptedStyleSheets ?? []) {
+    const text = rulesText(sheet);
+    if (text === undefined || sheet.disabled) continue;
+    const copy = doc.createElement("style");
+    copy.textContent = text;
+    doc.head.append(copy);
+  }
+  return waits;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /**
@@ -119,12 +174,22 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export async function printDashboard(root: HTMLElement, title: string, now = new Date()): Promise<void> {
   await settled(root);
   previous?.remove();
+  previous = undefined;
+  const frame = document.createElement("iframe");
+  try {
+    await printIn(frame, root, title, now);
+    previous = frame;
+  } catch (e) {
+    frame.remove();
+    throw e;
+  }
+}
+
+async function printIn(frame: HTMLIFrameElement, root: HTMLElement, title: string, now: Date): Promise<void> {
   const dashboard = root.querySelector<HTMLElement>(".devbi-dashboard") ?? root;
   const width = Math.max(1, Math.ceil(dashboard.getBoundingClientRect().width));
   const zoom = Math.min(1, PAGE_WIDTH / width);
 
-  const frame = document.createElement("iframe");
-  previous = frame;
   frame.setAttribute("aria-hidden", "true");
   frame.tabIndex = -1;
   frame.dataset.devbiPrintFrame = "";
@@ -137,16 +202,7 @@ export async function printDashboard(root: HTMLElement, title: string, now = new
   const win = frame.contentWindow;
   if (!doc || !win) throw new Error("印刷の準備ができませんでした");
 
-  // The page's styles (DevBI's, the table's, the project's), in their order.
-  const waits: Promise<void>[] = [];
-  for (const node of document.querySelectorAll('style, link[rel~="stylesheet"]')) {
-    const copy = doc.importNode(node, true) as HTMLElement;
-    if (isTag(node, "link") && isTag(copy, "link")) {
-      copy.href = node.href;
-      waits.push(loaded(copy));
-    }
-    doc.head.append(copy);
-  }
+  const waits = copyStyles(doc);
   const page = doc.createElement("style");
   page.textContent =
     `@page { size: landscape; margin: 10mm; }\n` +
@@ -167,9 +223,19 @@ export async function printDashboard(root: HTMLElement, title: string, now = new
   printed.className = "devbi-printed";
   printed.textContent = `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()} ${now.getHours()}:${pad(now.getMinutes())} の表示`;
   copy.querySelector(".devbi-head")?.append(printed);
-  doc.body.append(copy);
+  // Inside the element it is embedded in, with that element's data-devbi attributes: the page's rules that keep out
+  // of a dashboard (td:not([data-devbi] *)) keep out of the copy too.
+  const host = root.parentElement?.closest("[data-devbi]");
+  let parent: HTMLElement = doc.body;
+  if (host) {
+    parent = doc.createElement("div");
+    for (const { name, value } of host.attributes) if (name.startsWith("data-devbi")) parent.setAttribute(name, value);
+    doc.body.append(parent);
+  }
+  parent.append(copy);
   splitIntoBands(copy);
   for (const img of copy.querySelectorAll("img")) if (!img.complete) waits.push(loaded(img));
+  void copy.offsetHeight; // laid out, so the fonts it uses have started loading (fonts.ready waits for those)
 
   // Styles, images and fonts, but not forever (a stylesheet that never answers).
   await Promise.race([Promise.all([...waits, doc.fonts?.ready]), new Promise((r) => setTimeout(r, LOAD_MS))]);

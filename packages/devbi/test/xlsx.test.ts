@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { TABLE_STYLES, Workbook, addResultTable, isDateFormat, listSheets, readXlsx, resultCell, sheetRef, writeXlsx } from "../src/index.js";
-import { readZip, writeZip } from "../src/xlsx/zip.js";
+import { MAX_COLS, TABLE_STYLES, Workbook, addResultTable, isDateFormat, listSheets, readXlsx, resultCell, sheetRef, writeXlsx } from "../src/index.js";
+import { crc32, readZip, writeZip } from "../src/xlsx/zip.js";
 
 const fixture = readFileSync(new URL("./fixtures/openpyxl.xlsx", import.meta.url));
 
@@ -160,24 +160,50 @@ describe("Workbook (styles, number formats, frozen headers)", () => {
 
   it("names sheets as Excel allows: 31 characters, no []:*?/\\, each once", async () => {
     const book = new Workbook();
-    const names = ["地域 / 四半期", "a".repeat(40), "A".repeat(40), "[x]", "", "'q'"].map((n) => book.sheet(n).name);
-    expect(names).toEqual(["地域   四半期", "a".repeat(31), `${"A".repeat(27)} (2)`, "x", "Sheet", "q"]);
+    const names = ["地域 / 四半期", "a".repeat(40), "A".repeat(40), "[x]", "", "'q'", "😀".repeat(20), "売上(月)", "売上（月）"].map(
+      (n) => book.sheet(n).name,
+    );
+    expect(names).toEqual(["地域   四半期", "a".repeat(31), `${"A".repeat(27)} (2)`, "x", "Sheet", "q", "😀".repeat(15), "売上(月)", "売上（月） (2)"]);
     expect(await listSheets(await book.toBytes())).toEqual(names);
   });
 
-  it("links to other sheets, keeps long whole numbers as text and sizes the columns", async () => {
+  it("links to other sheets, writes numbers as numbers and sizes the columns", async () => {
     const book = new Workbook();
     const first = book.sheet("概要");
     const other = book.sheet("O'Neil");
-    first.add({ v: "見る", link: `${sheetRef(other.name)}!A1` }, { v: 1234567890123456789 }, { v: 12345678901234 });
+    first.add({ v: "見る", link: `${sheetRef(other.name)}!A1` }, { v: 1234567890123456 }, { v: 12345678901234 }, new Date("2026-04-01T00:00:00Z"));
     first.add({ v: "とても長い見出しの列です", noWidth: true }, { v: 1, text: "¥1,000,000,000" });
     const bytes = await book.toBytes();
     const s = await xml(bytes, "xl/worksheets/sheet1.xml");
     expect(s).toContain(`<hyperlink ref="A1" location="'O''Neil'!A1"/>`);
-    expect(s).toContain('<c r="B1" t="inlineStr"><is><t xml:space="preserve">1234567890123456800</t></is></c>');
+    expect(s).toContain('<c r="B1"><v>1234567890123456</v></c>');
     expect(s).toContain('<c r="C1"><v>12345678901234</v></c>');
-    // A: 見る (4 wide; the long text is left out), B: the 14 characters shown
-    expect(s).toContain('<col min="1" max="1" width="6" customWidth="1"/><col min="2" max="2" width="21" customWidth="1"/>');
+    // A: 見る (4 wide; the long text is left out), B: the 16 digits (wider than the 14 characters shown below it),
+    // D: the date as Excel shows it (2026/4/1), not as JavaScript writes it
+    expect(s).toContain(
+      '<col min="1" max="1" width="6" customWidth="1"/><col min="2" max="2" width="18" customWidth="1"/>' +
+        '<col min="3" max="3" width="16" customWidth="1"/><col min="4" max="4" width="12" customWidth="1"/>',
+    );
+    expect((await readXlsx(bytes)).columns[1]).toMatchObject({ type: "BIGINT" });
+  });
+
+  it("stops at Excel's 16,384 columns", () => {
+    const sheet = new Workbook().sheet("s");
+    expect(() => sheet.add(...Array.from({ length: MAX_COLS + 1 }, () => 1))).toThrow("16,384 列まで");
+    expect(sheet.rowCount).toBe(0);
+  });
+
+  it("writes a sheet's rows in batches (a sheet can be longer than one string can be)", async () => {
+    const book = new Workbook();
+    const sheet = book.sheet("s");
+    for (let i = 0; i < 30_000; i++) sheet.add(`行 ${i}`, i);
+    const bytes = await book.toBytes();
+    const t = await readXlsx(bytes);
+    expect(t.columns[1]!.values.length).toBe(29_999);
+    expect(t.columns[1]!.values.at(-1)).toBe(29_999);
+    const text = new TextEncoder().encode("hello, world");
+    expect(crc32(text.subarray(5), crc32(text.subarray(0, 5)))).toBe(crc32(text));
+    expect(crc32(text)).toBe(0xffab723a);
   });
 });
 
@@ -194,6 +220,9 @@ describe("resultCell and addResultTable (a query result in xlsx)", () => {
     expect(resultCell(new Date("2026-04-01T00:00:00Z"), { kind: "time", grain: "fiscal_year" }, 4)).toMatchObject({ s: { format: 'yyyy"年度"' } });
     expect(resultCell(new Date("2026-04-01T09:30:00Z"), { kind: "dimension" })).toMatchObject({ s: { format: "yyyy/m/d hh:mm" }, text: "2026/4/1 09:30" });
     expect(resultCell(true, { kind: "dimension" })).toMatchObject({ v: "はい" });
+    // an ID longer than Excel's 15 digits keeps them as text; a measure stays a number
+    expect(resultCell(1234567890123456, { kind: "dimension" })).toMatchObject({ v: "1234567890123456" });
+    expect(resultCell(1234567890123456, { kind: "measure" })).toMatchObject({ v: 1234567890123456 });
     expect(resultCell(null, { kind: "dimension" })).toEqual({ v: null, s: TABLE_STYLES.cell });
     // the same style object for the same format, so the workbook looks it up once
     expect(resultCell(1, { kind: "measure", format: "0.0" }).s).toBe(resultCell(2, { kind: "measure", format: "0.0" }).s);

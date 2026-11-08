@@ -57,6 +57,8 @@ describe("excelNumberFormat", () => {
     ['#,##0,,"百万円"', '#,##0,,"百万円"'],
     ["0;(0)", '0;"("0")"'],
     ['0;-0;"なし"', '0;"-"0;"なし"'],
+    // the text section (4th) is left out: formatNumber never shows it, and digits there are not a valid code
+    ["0;-0;0;0", '0;"-"0;0'],
     ["[$¥-411]#,##0;[Red]-[$¥-411]#,##0", '"¥"#,##0;"-¥"#,##0'],
     ["compact", "#,##0"],
     ["compact:¥", '"¥"#,##0'],

@@ -109,6 +109,9 @@ function patterns(format: string): NumberPattern[] {
 }
 
 const compact = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 });
+// Made once: a table (or an Excel export) formats 100,000s of numbers, and making a formatter takes longer than using it.
+const plain = [new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 }), new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 })];
+const formatters = new WeakMap<NumberPattern, Intl.NumberFormat>();
 
 /**
  * Format a number with a subset of Excel number formats:
@@ -119,7 +122,7 @@ const compact = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFra
 export function formatNumber(value: number, format?: string): string {
   if (!Number.isFinite(value)) return Number.isNaN(value) ? "" : value > 0 ? "∞" : "-∞";
   if (!format) {
-    return value.toLocaleString("ja-JP", { maximumFractionDigits: Number.isInteger(value) ? 0 : 2 });
+    return plain[Number.isInteger(value) ? 0 : 1]!.format(value);
   }
   if (format === "compact") return compact.format(value);
   if (format.startsWith("compact:")) {
@@ -142,12 +145,17 @@ export function formatNumber(value: number, format?: string): string {
   if (p.literal) return p.prefix;
   if (p.percent) v *= 100;
   v /= p.scale;
-  const body = v.toLocaleString("ja-JP", {
-    minimumFractionDigits: p.minFrac,
-    maximumFractionDigits: p.maxFrac,
-    useGrouping: p.group,
-    minimumIntegerDigits: Math.max(1, p.minInt),
-  });
+  let formatter = formatters.get(p);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat("ja-JP", {
+      minimumFractionDigits: p.minFrac,
+      maximumFractionDigits: p.maxFrac,
+      useGrouping: p.group,
+      minimumIntegerDigits: Math.max(1, p.minInt),
+    });
+    formatters.set(p, formatter);
+  }
+  const body = formatter.format(v);
   const rounded = Number(body.replace(/,/g, "")) === 0;
   return `${rounded ? "" : sign}${p.prefix}${body}${p.suffix}`;
 }
@@ -212,7 +220,8 @@ export function excelNumberFormat(format: string): string {
     return `${excelLiteral(pre, false)}#,##0${excelLiteral(post, false)}`;
   }
   return patterns(format)
-    .slice(0, 4)
+    // positive;negative;zero (a 4th section is for text, which formatNumber never shows)
+    .slice(0, 3)
     .map((p) => {
       if (p.literal) return excelLiteral(p.prefix, false);
       const int = p.group ? `#,##${"0".repeat(Math.max(1, p.minInt))}` : "0".repeat(Math.max(1, p.minInt));

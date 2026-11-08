@@ -4,6 +4,7 @@ import {
   checkQuery,
   componentProblem,
   formatValue,
+  MAX_COLS,
   MAX_ROWS,
   resolveComponent,
   resultCell,
@@ -87,27 +88,46 @@ function filtersText(view: MetricsView | undefined, fields: FieldInfo[], filters
     .join("、");
 }
 
-/** A pivot tile as on the dashboard: the cross table with its totals. False when it has no measure or column field. */
-async function addPivot(
+/**
+ * A pivot tile as on the dashboard: what writes its cross table with totals (the totals row and column only with row
+ * fields: without, the one row is its own total), and the rows that has. None when it has no measure or column field.
+ */
+async function pivotTable(
   ctx: DevbiContextValue,
-  sheet: Sheet,
   tile: TileSpec,
   query: Query,
   result: { rows: Row[]; fields: FieldInfo[] },
   filters: Filter[],
   fy: number,
-): Promise<boolean> {
+): Promise<{ rows: number; write: (sheet: Sheet) => void } | undefined> {
   const { m, colField, rowFields } = pivotFields(result.fields, typeof tile.options?.columns === "string" ? tile.options.columns : undefined);
-  if (!m || !colField) return false;
+  if (!m || !colField) return undefined;
   const totals = tile.options?.totals !== false;
   const run = async (keep: FieldInfo[]) => (await runQuery(ctx, totalQuery(query, m, keep), filters)).rows;
   const [rowTot, colTot, grand] = await Promise.all([
     totals && rowFields.length ? run(rowFields) : [],
-    totals ? run([colField]) : [],
+    totals && rowFields.length ? run([colField]) : [],
     totals && rowFields.length ? run([]) : [],
   ]);
   const model = pivotModel(result.rows, colField, rowFields, m, rowTot, colTot);
   const withTotals = totals && rowFields.length > 0;
+  const width = rowFields.length + model.colList.length + (withTotals ? 1 : 0);
+  if (width > MAX_COLS) {
+    throw new Error(`${colField.label} が ${model.colList.length.toLocaleString()} 通りあり、Excel の列数の上限（${MAX_COLS.toLocaleString()}）を超えます`);
+  }
+  return { rows: model.rowList.length, write: (sheet) => writePivot(sheet, model, m, colField, rowFields, withTotals, grand, fy) };
+}
+
+function writePivot(
+  sheet: Sheet,
+  model: ReturnType<typeof pivotModel>,
+  m: FieldInfo,
+  colField: FieldInfo,
+  rowFields: FieldInfo[],
+  withTotals: boolean,
+  grand: Row[],
+  fy: number,
+) {
   const header = sheet.add(
     ...rowFields.map((f) => ({ v: f.label, s: S.header })),
     ...model.colList.map(([, v]) => ({ v: formatValue(v, colField, fy), s: S.header })),
@@ -128,7 +148,6 @@ async function addPivot(
     );
   }
   sheet.freeze = { rows: header + 1, cols: rowFields.length };
-  return true;
 }
 
 /** One tile's sheet: its title, the filters its data went through, and the data as the tile shows it. */
@@ -142,15 +161,17 @@ async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
   const result = await runQuery(ctx, query, filters);
   const cut = result.rows.length > MAX_ROWS - ROOM;
   if (cut) result.rows = result.rows.slice(0, MAX_ROWS - ROOM);
+  // before the sheet: a pivot too wide for Excel has none
+  const pivot = tile.type === "pivot" ? await pivotTable(ctx, tile, query, result, filters, fy) : undefined;
 
   const name = tile.title ?? tile.id;
   const sheet = book.sheet(name);
   sheet.add({ v: name, s: S.heading, noWidth: true });
   sheet.add({ v: `絞り込み: ${filtersText(view, result.fields, [...(query.filters ?? []), ...filters])}`, s: S.note, noWidth: true });
   sheet.skip();
-  const pivot = tile.type === "pivot" && (await addPivot(ctx, sheet, tile, query, result, filters, fy));
-  if (!pivot) addResultTable(sheet, result.rows, result.fields, { fiscalYearStart: fy });
-  return { tile, sheet, rows: result.rows.length, ...(cut ? { note: "Excel の行数の上限までです" } : {}) };
+  if (pivot) pivot.write(sheet);
+  else addResultTable(sheet, result.rows, result.fields, { fiscalYearStart: fy });
+  return { tile, sheet, rows: pivot?.rows ?? result.rows.length, ...(cut ? { note: "Excel の行数の上限までです" } : {}) };
 }
 
 /**
@@ -172,6 +193,8 @@ export async function dashboardWorkbook(ctx: DevbiContextValue, now = new Date()
     } catch (e) {
       results.push({ tile, note: `エラー: ${message(e)}` });
     }
+    // let the page draw between tiles (a table of 100,000 rows takes a few seconds)
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   let view: MetricsView | undefined;

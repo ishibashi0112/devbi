@@ -1,4 +1,4 @@
-import { writeZip } from "./zip.js";
+import { type TextParts, writeZip } from "./zip.js";
 
 /**
  * A small .xlsx writer with styles: inline-string / number / boolean / date cells, number formats, fonts, fills,
@@ -50,6 +50,7 @@ export interface Cell {
 
 /** Excel's limits. */
 export const MAX_ROWS = 1_048_576;
+export const MAX_COLS = 16_384;
 const MAX_TEXT = 32_767;
 /** Widest column the widths computed from the content go. */
 const MAX_WIDTH = 60;
@@ -83,8 +84,9 @@ export class Sheet {
 
   /** Appends a row; returns its zero-based index. */
   add(...cells: (Cell | CellValue)[]): number {
+    if (this.rowCount >= MAX_ROWS) throw new Error(`Excel のシートは ${MAX_ROWS.toLocaleString()} 行までです`);
+    if (cells.length > MAX_COLS) throw new Error(`Excel のシートは ${MAX_COLS.toLocaleString()} 列までです`);
     const r = this.rowCount++;
-    if (r >= MAX_ROWS) throw new Error(`Excel のシートは ${MAX_ROWS.toLocaleString()} 行までです`);
     const out: string[] = [];
     cells.forEach((c, col) => {
       const cell = isCell(c) ? c : { v: c };
@@ -93,7 +95,7 @@ export class Sheet {
       const style = cell.v instanceof Date && !cell.s?.format ? { ...cell.s, format: defaultDateFormat(cell.v) } : cell.s;
       out.push(cellXml(ref, cell.v, style ? ` s="${this.styles.id(style)}"` : ""));
       if (cell.link) this.links.push(`<hyperlink ref="${ref}" location="${esc(cell.link)}"/>`);
-      if (!cell.noWidth && cell.v !== null && cell.v !== undefined) this.measure(col, cell.text ?? String(cell.v), cell.s);
+      if (!cell.noWidth && cell.v !== null && cell.v !== undefined) this.measure(col, cell.text ?? asText(cell.v), cell.s);
     });
     if (out.length) this.rowsXml.push(`<row r="${r + 1}">${out.join("")}</row>`);
     return r;
@@ -127,19 +129,16 @@ export class Workbook {
   /** Adds a sheet. The name is made valid and unique (31 characters, no `[]:*?/\`). */
   sheet(name: string): Sheet {
     let base =
-      name
-        .replace(/[[\]:*?/\\\x00-\x1f]/g, " ")
-        .trim()
-        .slice(0, 31)
+      upTo(name.replace(/[[\]:*?/\\\x00-\x1f]/g, " ").trim(), 31)
         .replace(/^'+|'+$/g, "")
         .trim() || "Sheet";
     let unique = base;
-    for (let n = 2; this.names.has(unique.toLowerCase()); n++) {
+    for (let n = 2; this.names.has(nameKey(unique)); n++) {
       const suffix = ` (${n})`;
-      base = base.slice(0, 31 - suffix.length);
+      base = upTo(base, 31 - suffix.length);
       unique = `${base}${suffix}`;
     }
-    this.names.add(unique.toLowerCase());
+    this.names.add(nameKey(unique));
     const sheet = new Sheet(unique, this.styles);
     this.sheets.push(sheet);
     return sheet;
@@ -148,7 +147,7 @@ export class Workbook {
   /** The .xlsx file. */
   toBytes(): Promise<Uint8Array> {
     if (this.sheets.length === 0) this.sheet("Sheet");
-    const entries: { name: string; data: string }[] = [];
+    const entries: { name: string; data: TextParts }[] = [];
     const overrides: string[] = [];
     const definedNames: string[] = [];
 
@@ -218,7 +217,30 @@ const isCell = (c: Cell | CellValue): c is Cell => typeof c === "object" && c !=
 
 const defaultDateFormat = (d: Date) => (d.getTime() % DAY === 0 ? "yyyy/m/d" : "yyyy/m/d h:mm");
 
-function sheetXml(sheet: Sheet, selected: boolean): string {
+/** A value as text, for the column width: a date as about as wide as Excel shows it. */
+function asText(v: string | number | boolean | Date): string {
+  if (!(v instanceof Date)) return String(v);
+  if (!Number.isFinite(v.getTime())) return "";
+  const iso = v.toISOString();
+  return v.getTime() % DAY === 0 ? iso.slice(0, 10) : iso.slice(0, 19).replace("T", " ");
+}
+
+/** The first characters of `s` that fit in `max` UTF-16 units (a character outside the BMP is not cut in two). */
+function upTo(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let out = "";
+  for (const ch of s) {
+    if (out.length + ch.length > max) break;
+    out += ch;
+  }
+  return out;
+}
+
+/** Sheet names Excel takes as the same: case, and full / half width (売上（月） and 売上(月)). */
+const nameKey = (name: string) => name.normalize("NFKC").toLowerCase();
+
+/** A sheet's XML, in parts: the rows one by one (all together they can be longer than a string can be). */
+function sheetXml(sheet: Sheet, selected: boolean): TextParts {
   const widths = sheet.measured;
   const colCount = Math.max(widths.size ? Math.max(...widths.keys()) + 1 : 0, ...Object.keys(sheet.widths).map((k) => Number(k) + 1));
   const cols: string[] = [];
@@ -237,19 +259,21 @@ function sheetXml(sheet: Sheet, selected: boolean): string {
       `<selection pane="${active}" activeCell="${top}" sqref="${top}"/>`;
   }
   const filter = sheet.filter ? `<autoFilter ref="A${sheet.filter[0] + 1}:${colName(sheet.filter[2] - 1)}${sheet.filter[1] + 1}"/>` : "";
-  return (
+  return [
     `${XML}<worksheet xmlns="${NS.main}" xmlns:r="${NS.r}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>` +
-    `<sheetViews><sheetView workbookViewId="0"${selected ? ` tabSelected="1"` : ""}>${pane}</sheetView></sheetViews>` +
-    `<sheetFormatPr defaultRowHeight="${ROW_HEIGHT_PT}"/>` +
-    (cols.length ? `<cols>${cols.join("")}</cols>` : "") +
-    `<sheetData>${sheet.rowsXml.join("")}</sheetData>${filter}` +
-    (sheet.links.length ? `<hyperlinks>${sheet.links.join("")}</hyperlinks>` : "") +
-    `<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>` +
-    // printed on A4 landscape, as wide as the page
-    `<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>` +
-    `<headerFooter><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter>` +
-    `</worksheet>`
-  );
+      `<sheetViews><sheetView workbookViewId="0"${selected ? ` tabSelected="1"` : ""}>${pane}</sheetView></sheetViews>` +
+      `<sheetFormatPr defaultRowHeight="${ROW_HEIGHT_PT}"/>` +
+      (cols.length ? `<cols>${cols.join("")}</cols>` : "") +
+      `<sheetData>`,
+    ...sheet.rowsXml,
+    `</sheetData>${filter}` +
+      (sheet.links.length ? `<hyperlinks>${sheet.links.join("")}</hyperlinks>` : "") +
+      `<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>` +
+      // printed on A4 landscape, as wide as the page
+      `<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>` +
+      `<headerFooter><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter>` +
+      `</worksheet>`,
+  ];
 }
 
 function cellXml(ref: string, v: CellValue, s: string): string {
@@ -260,10 +284,7 @@ function cellXml(ref: string, v: CellValue, s: string): string {
     return Number.isFinite(serial) ? `<c r="${ref}"${s}><v>${serial}</v></c>` : `<c r="${ref}"${s}/>`;
   }
   if (typeof v === "number") {
-    if (!Number.isFinite(v)) return `<c r="${ref}"${s}/>`;
-    // Excel keeps 15 significant digits: a whole number longer than that (an ID) would lose its last digits, so it
-    // goes in as text. Fractions (1.0614167144132196) are rounded by Excel as by any calculation.
-    if (!(Number.isInteger(v) && Math.abs(v) >= 1e15)) return `<c r="${ref}"${s}><v>${v}</v></c>`;
+    return Number.isFinite(v) ? `<c r="${ref}"${s}><v>${v}</v></c>` : `<c r="${ref}"${s}/>`;
   }
   return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${cellText(String(v))}</t></is></c>`;
 }

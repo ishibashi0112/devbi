@@ -25,7 +25,8 @@ type FieldFormat = Pick<FieldInfo, "format" | "grain" | "kind">;
 /**
  * A result value as an xlsx cell, shown in Excel as the dashboard shows it: numbers stay numbers with the field's
  * format (`¥1,200`, `12.3%`), dates stay dates labeled by the time grain (`2026年4月`). A quarter, which Excel has no
- * format for, and true / false (はい / いいえ) are written as their text.
+ * format for, true / false (はい / いいえ) and a whole number of 16 digits or more that is not a measure (an ID) are
+ * written as their text.
  */
 export function resultCell(value: unknown, field: FieldFormat | undefined, fiscalYearStart = 1, style: CellStyle = TABLE_STYLES.cell): Cell {
   if (value === null || value === undefined) return { v: null, s: style };
@@ -36,6 +37,9 @@ export function resultCell(value: unknown, field: FieldFormat | undefined, fisca
   }
   const n = typeof value === "bigint" && Number.isSafeInteger(Number(value)) ? Number(value) : value;
   if (typeof n === "number") {
+    // A code longer than the 15 digits Excel keeps (a 16-digit ID) would lose its last ones: text. A measure stays a
+    // number, to add up.
+    if (field?.kind !== "measure" && Number.isSafeInteger(n) && Math.abs(n) >= 1e15) return { v: String(n), s: style };
     const format = field?.format ? excelNumberFormat(field.format) : Number.isInteger(n) ? "#,##0" : "#,##0.0#";
     // compact (1.2億) is shown in full in Excel: as wide as that
     const [compact, pre = "", post = ""] = field?.format?.split(":") ?? [];
