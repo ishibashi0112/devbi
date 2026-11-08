@@ -1,0 +1,992 @@
+{
+  "statements": [
+    {
+      "text": "SELECT 1",
+      "statements": [
+        {
+          "sql": "SELECT 1",
+          "title": "",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "text": "﻿-- 受注\r\n-- 二行目\r\nSELECT * FROM t;\r\n",
+      "statements": [
+        {
+          "sql": "SELECT * FROM t",
+          "title": "受注\n二行目",
+          "line": 3
+        }
+      ]
+    },
+    {
+      "text": "-- 上\n\n-- 説明\nSELECT a FROM t\nGO\nSELECT b FROM t\ngo 2\n/\nSELECT c",
+      "statements": [
+        {
+          "sql": "SELECT a FROM t",
+          "title": "説明",
+          "line": 4
+        },
+        {
+          "sql": "SELECT b FROM t",
+          "title": "",
+          "line": 6
+        },
+        {
+          "sql": "SELECT c",
+          "title": "",
+          "line": 9
+        }
+      ]
+    },
+    {
+      "text": "/* 見出し\n * 二行目\n */\nSELECT 1 /* 中 */ ; -- 後ろ\n",
+      "statements": [
+        {
+          "sql": "SELECT 1 /* 中 */",
+          "title": "見出し\n二行目",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "text": "SELECT 'a;b', N'c''d;', [e;]]f], \"g;h\" FROM t;",
+      "statements": [
+        {
+          "sql": "SELECT 'a;b', N'c''d;', [e;]]f], \"g;h\" FROM t",
+          "title": "",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "text": "SELECT 1 -- 終わらない 'x\n; SELECT 'open",
+      "statements": [
+        {
+          "sql": "SELECT 1 -- 終わらない 'x",
+          "title": "",
+          "line": 1
+        },
+        {
+          "sql": "SELECT 'open",
+          "title": "",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "text": "SELECT 1\r\nGO\r\n\r\nSELECT 2\rGO\r",
+      "statements": [
+        {
+          "sql": "SELECT 1",
+          "title": "",
+          "line": 1
+        },
+        {
+          "sql": "SELECT 2",
+          "title": "",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "text": "  GO  \nSELECT 1\n  /  \n",
+      "statements": [
+        {
+          "sql": "SELECT 1",
+          "title": "",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "text": "-- a\nSELECT 1\n-- b\n;\n-- c\n",
+      "statements": [
+        {
+          "sql": "SELECT 1\n-- b",
+          "title": "a",
+          "line": 2
+        }
+      ]
+    },
+    {
+      "text": "SELECT /* 終わらない",
+      "statements": [
+        {
+          "sql": "SELECT /* 終わらない",
+          "title": "",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "text": "SELECT 'GO\nGO\n' AS a\nGO -- 区切りではない\nSELECT 2",
+      "statements": [
+        {
+          "sql": "SELECT 'GO\nGO\n' AS a\nGO -- 区切りではない\nSELECT 2",
+          "title": "",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "text": "/* /* 入れ子 */ SELECT 1 */ SELECT 2",
+      "statements": [
+        {
+          "sql": "SELECT 1 */ SELECT 2",
+          "title": "/* 入れ子",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "text": "SELECT 1 -- 行の区切り? FROM t",
+      "statements": [
+        {
+          "sql": "SELECT 1 -- 行の区切り? FROM t",
+          "title": "",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "text": "\n\n  -- 説明\n  SELECT 1 ;;; SELECT 2\n",
+      "statements": [
+        {
+          "sql": "SELECT 1",
+          "title": "説明",
+          "line": 4
+        },
+        {
+          "sql": "SELECT 2",
+          "title": "",
+          "line": 4
+        }
+      ]
+    },
+    {
+      "text": "SELECT x AS \"a\"\"b;\" FROM t",
+      "statements": [
+        {
+          "sql": "SELECT x AS \"a\"\"b;\" FROM t",
+          "title": "",
+          "line": 1
+        }
+      ]
+    }
+  ],
+  "problems": [
+    {
+      "sql": "SELECT * FROM t",
+      "problem": null
+    },
+    {
+      "sql": "WITH a AS (SELECT 1 AS x) SELECT * FROM a",
+      "problem": null
+    },
+    {
+      "sql": "DELETE FROM t",
+      "problem": {
+        "code": "not-select",
+        "word": "DELETE"
+      }
+    },
+    {
+      "sql": "select * into copy from t",
+      "problem": {
+        "code": "writes",
+        "word": "INTO"
+      }
+    },
+    {
+      "sql": "SELECT id AS [update], 'delete' AS s, \"insert\" FROM t",
+      "problem": null
+    },
+    {
+      "sql": "SELECT o.update_date, o.[drop] FROM orders o",
+      "problem": null
+    },
+    {
+      "sql": "SELECT * FROM t WITH (UPDLOCK)",
+      "problem": {
+        "code": "writes",
+        "word": "UPDLOCK"
+      }
+    },
+    {
+      "sql": "SELECT * FROM t WITH (NOLOCK)",
+      "problem": null
+    },
+    {
+      "sql": "SELECT NEXT VALUE FOR seq",
+      "problem": {
+        "code": "sequence",
+        "word": "NEXT VALUE FOR"
+      }
+    },
+    {
+      "sql": "SELECT * FROM t FOR UPDATE",
+      "problem": {
+        "code": "writes",
+        "word": "UPDATE"
+      }
+    },
+    {
+      "sql": "SELECT * FROM t FOR SHARE",
+      "problem": {
+        "code": "locks",
+        "word": "FOR SHARE"
+      }
+    },
+    {
+      "sql": "SELECT * FROM t FOR JSON PATH",
+      "problem": null
+    },
+    {
+      "sql": "SELECT 1; SELECT 2",
+      "problem": {
+        "code": "several",
+        "word": null
+      }
+    },
+    {
+      "sql": "SELECT 'a';",
+      "problem": {
+        "code": "several",
+        "word": null
+      }
+    },
+    {
+      "sql": "(SELECT 1)",
+      "problem": null
+    },
+    {
+      "sql": "",
+      "problem": {
+        "code": "not-select",
+        "word": null
+      }
+    },
+    {
+      "sql": "EXEC sp_who",
+      "problem": {
+        "code": "not-select",
+        "word": "EXEC"
+      }
+    },
+    {
+      "sql": "SELECT * FROM OPENROWSET('x', 'y')",
+      "problem": {
+        "code": "writes",
+        "word": "OPENROWSET"
+      }
+    },
+    {
+      "sql": "SELECT 受注番号, 地域 FROM 受注 WHERE 地域 = :地域",
+      "problem": null
+    },
+    {
+      "sql": "SELECT a::date, ':skip', [col:x], \"q:y\" FROM t -- :nope\nWHERE d >= :from AND d < :to AND x = :FROM /* :no */",
+      "problem": null
+    },
+    {
+      "sql": "SELECT :a1, :_b, :1, ::c, :ä, x:y FROM t",
+      "problem": null
+    },
+    {
+      "sql": "SELECT * FROM t WHERE name = :name_that_is_long_and_has_digits_123",
+      "problem": null
+    },
+    {
+      "sql": "SELECT 　* FROM t WHERE a = :a　AND b = :b",
+      "problem": null
+    },
+    {
+      "sql": "SELECT e.@x, #tmp.a, $y FROM #tmp",
+      "problem": null
+    },
+    {
+      "sql": "WITH FUNCTION f() RETURNS INT BEGIN RETURN 1 END SELECT f()",
+      "problem": {
+        "code": "writes",
+        "word": "FUNCTION"
+      }
+    },
+    {
+      "sql": "SELECT * FROM t WHERE x IN (SELECT y FROM u FOR XML PATH(''))",
+      "problem": null
+    },
+    {
+      "sql": "SELECT [a]]b], [c:d] FROM t WHERE x = :p",
+      "problem": null
+    },
+    {
+      "sql": "SELECT\t:a\u000b:b :c FROM t WHERE （:受注日） = :受注日",
+      "problem": null
+    },
+    {
+      "sql": "SELECT 1 FROM t -- 終わり",
+      "problem": null
+    },
+    {
+      "sql": "SELECT n.nextval, NEXTVAL FROM t",
+      "problem": {
+        "code": "writes",
+        "word": "NEXTVAL"
+      }
+    },
+    {
+      "sql": "SELECT 1 FROM t WITH (TABLOCKX, HOLDLOCK)",
+      "problem": {
+        "code": "writes",
+        "word": "TABLOCKX"
+      }
+    },
+    {
+      "sql": "SELECT * FROM t FOR NO KEY UPDATE",
+      "problem": {
+        "code": "locks",
+        "word": "FOR NO"
+      }
+    },
+    {
+      "sql": "SELECT * FROM t FOR KEY SHARE",
+      "problem": {
+        "code": "locks",
+        "word": "FOR KEY"
+      }
+    },
+    {
+      "sql": "SELECT o.[into], [o].exec FROM o",
+      "problem": null
+    },
+    {
+      "sql": "SELECT a FROM t\nWHERE a = N'x'''';DROP TABLE t--'",
+      "problem": null
+    },
+    {
+      "sql": "SELECT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, update_x, x_update, \"bbbbbbbbbb\" FROM t",
+      "problem": null
+    }
+  ],
+  "parameters": [
+    {
+      "sql": "SELECT * FROM t",
+      "parameters": []
+    },
+    {
+      "sql": "WITH a AS (SELECT 1 AS x) SELECT * FROM a",
+      "parameters": []
+    },
+    {
+      "sql": "DELETE FROM t",
+      "parameters": []
+    },
+    {
+      "sql": "select * into copy from t",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT id AS [update], 'delete' AS s, \"insert\" FROM t",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT o.update_date, o.[drop] FROM orders o",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t WITH (UPDLOCK)",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t WITH (NOLOCK)",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT NEXT VALUE FOR seq",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t FOR UPDATE",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t FOR SHARE",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t FOR JSON PATH",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT 1; SELECT 2",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT 'a';",
+      "parameters": []
+    },
+    {
+      "sql": "(SELECT 1)",
+      "parameters": []
+    },
+    {
+      "sql": "",
+      "parameters": []
+    },
+    {
+      "sql": "EXEC sp_who",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM OPENROWSET('x', 'y')",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT 受注番号, 地域 FROM 受注 WHERE 地域 = :地域",
+      "parameters": [
+        {
+          "name": "地域",
+          "start": 35,
+          "end": 38
+        }
+      ]
+    },
+    {
+      "sql": "SELECT a::date, ':skip', [col:x], \"q:y\" FROM t -- :nope\nWHERE d >= :from AND d < :to AND x = :FROM /* :no */",
+      "parameters": [
+        {
+          "name": "from",
+          "start": 67,
+          "end": 72
+        },
+        {
+          "name": "to",
+          "start": 81,
+          "end": 84
+        },
+        {
+          "name": "FROM",
+          "start": 93,
+          "end": 98
+        }
+      ]
+    },
+    {
+      "sql": "SELECT :a1, :_b, :1, ::c, :ä, x:y FROM t",
+      "parameters": [
+        {
+          "name": "a1",
+          "start": 7,
+          "end": 10
+        },
+        {
+          "name": "_b",
+          "start": 12,
+          "end": 15
+        },
+        {
+          "name": "ä",
+          "start": 26,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "sql": "SELECT * FROM t WHERE name = :name_that_is_long_and_has_digits_123",
+      "parameters": [
+        {
+          "name": "name_that_is_long_and_has_digits_123",
+          "start": 29,
+          "end": 66
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 　* FROM t WHERE a = :a　AND b = :b",
+      "parameters": [
+        {
+          "name": "a　AND",
+          "start": 27,
+          "end": 33
+        },
+        {
+          "name": "b",
+          "start": 38,
+          "end": 40
+        }
+      ]
+    },
+    {
+      "sql": "SELECT e.@x, #tmp.a, $y FROM #tmp",
+      "parameters": []
+    },
+    {
+      "sql": "WITH FUNCTION f() RETURNS INT BEGIN RETURN 1 END SELECT f()",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t WHERE x IN (SELECT y FROM u FOR XML PATH(''))",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT [a]]b], [c:d] FROM t WHERE x = :p",
+      "parameters": [
+        {
+          "name": "p",
+          "start": 38,
+          "end": 40
+        }
+      ]
+    },
+    {
+      "sql": "SELECT\t:a\u000b:b :c FROM t WHERE （:受注日） = :受注日",
+      "parameters": [
+        {
+          "name": "a",
+          "start": 7,
+          "end": 9
+        },
+        {
+          "name": "b ",
+          "start": 10,
+          "end": 13
+        },
+        {
+          "name": "c",
+          "start": 13,
+          "end": 15
+        },
+        {
+          "name": "受注日",
+          "start": 38,
+          "end": 42
+        }
+      ]
+    },
+    {
+      "sql": "SELECT 1 FROM t -- 終わり",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT n.nextval, NEXTVAL FROM t",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT 1 FROM t WITH (TABLOCKX, HOLDLOCK)",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t FOR NO KEY UPDATE",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t FOR KEY SHARE",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT o.[into], [o].exec FROM o",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT a FROM t\nWHERE a = N'x'''';DROP TABLE t--'",
+      "parameters": []
+    },
+    {
+      "sql": "SELECT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, update_x, x_update, \"bbbbbbbbbb\" FROM t",
+      "parameters": []
+    }
+  ],
+  "datasets": [
+    {
+      "name": "orders",
+      "text": "-- 受注の明細\n-- connection: erp\nSELECT * FROM orders WHERE d >= :from;\n",
+      "header": {
+        "connection": "erp",
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "受注の明細",
+        "connection": "erp",
+        "snapshot": null,
+        "sql": "SELECT * FROM orders WHERE d >= :from",
+        "params": [
+          "from"
+        ]
+      }
+    },
+    {
+      "name": "daily",
+      "text": "-- 日ごと\n-- snapshot: 12:00、6:30, 06:30\n-- Connection : Sales-DB 2\n\nSELECT d, SUM(a) AS a FROM t WHERE d >= :From AND d < :to AND k = :from GROUP BY d",
+      "header": {
+        "connection": null,
+        "snapshot": [
+          "06:30",
+          "12:00"
+        ]
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": [
+          "06:30",
+          "12:00"
+        ],
+        "sql": "SELECT d, SUM(a) AS a FROM t WHERE d >= :From AND d < :to AND k = :from GROUP BY d",
+        "params": [
+          "From",
+          "to"
+        ]
+      }
+    },
+    {
+      "name": "bad_time",
+      "text": "-- snapshot: 24:00\nSELECT 1",
+      "header": {
+        "connection": null,
+        "snapshot": {
+          "error": "api/bad_time.sql: snapshot の時刻は 06:00 のように書きます（24:00）",
+          "status": 400
+        }
+      },
+      "dataset": {
+        "error": "api/bad_time.sql: snapshot の時刻は 06:00 のように書きます（24:00）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad_time2",
+      "text": "-- snapshot: 6時\nSELECT 1",
+      "header": {
+        "connection": null,
+        "snapshot": {
+          "error": "api/bad_time2.sql: snapshot の時刻は 06:00 のように書きます（6時）",
+          "status": 400
+        }
+      },
+      "dataset": {
+        "error": "api/bad_time2.sql: snapshot の時刻は 06:00 のように書きます（6時）",
+        "status": 400
+      }
+    },
+    {
+      "name": "no_time",
+      "text": "-- snapshot:\nSELECT 1",
+      "header": {
+        "connection": null,
+        "snapshot": {
+          "error": "api/no_time.sql: snapshot に時刻を書いてください（例: -- snapshot: 06:00）",
+          "status": 400
+        }
+      },
+      "dataset": {
+        "error": "api/no_time.sql: snapshot に時刻を書いてください（例: -- snapshot: 06:00）",
+        "status": 400
+      }
+    },
+    {
+      "name": "late",
+      "text": "SELECT 1\n-- connection: erp\n-- snapshot: 06:00",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT 1\n-- connection: erp\n-- snapshot: 06:00",
+        "params": []
+      }
+    },
+    {
+      "name": "empty",
+      "text": "-- 何もない\n",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/empty.sql: SELECT 文がありません",
+        "status": 400
+      }
+    },
+    {
+      "name": "two",
+      "text": "SELECT 1;\nSELECT 2",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/two.sql: 1 つのファイルに書ける SELECT 文は 1 つだけです（2 個あります）",
+        "status": 400
+      }
+    },
+    {
+      "name": "writes",
+      "text": "-- 書く\nUPDATE t SET a = 1",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/writes.sql: SELECT か WITH で始まる文だけ使えます（UPDATE で始まっています）",
+        "status": 400
+      }
+    },
+    {
+      "name": "into",
+      "text": "SELECT * INTO copy FROM orders",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/into.sql: INTO は使えません。読み取るだけの SELECT にしてください（列名なら引用符で囲みます）",
+        "status": 400
+      }
+    },
+    {
+      "name": "locks",
+      "text": "SELECT * FROM t WITH (XLOCK)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/locks.sql: XLOCK は使えません。読み取るだけの SELECT にしてください（列名なら引用符で囲みます）",
+        "status": 400
+      }
+    },
+    {
+      "name": "several",
+      "text": "SELECT 'a' + 'b;' FROM t WHERE x = ']'; DROP TABLE t",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/several.sql: 1 つのファイルに書ける SELECT 文は 1 つだけです（2 個あります）",
+        "status": 400
+      }
+    },
+    {
+      "name": "not_select",
+      "text": "-- 説明\n(SELECT 1)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "説明",
+        "connection": null,
+        "snapshot": null,
+        "sql": "(SELECT 1)",
+        "params": []
+      }
+    },
+    {
+      "name": "spaces",
+      "text": "　-- connection:　erp　\n -- snapshot:　07:00　08:00\nSELECT 1",
+      "header": {
+        "connection": "erp",
+        "snapshot": [
+          "07:00",
+          "08:00"
+        ]
+      },
+      "dataset": {
+        "description": "",
+        "connection": "erp",
+        "snapshot": [
+          "07:00",
+          "08:00"
+        ],
+        "sql": "SELECT 1",
+        "params": []
+      }
+    }
+  ],
+  "binds": [
+    {
+      "text": "SELECT * FROM t WHERE d >= :from AND d < :to AND x = :FROM",
+      "values": {
+        "to": "2024-05-01",
+        "from": "2024-04-01"
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= @p1 AND d < @p2 AND x = @p1",
+        "values": [
+          "2024-04-01",
+          "2024-05-01"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "A": 1
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          1
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": 1.5
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          1.5
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": -9007199254740991
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          -9007199254740991
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": 1e+300
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          1e+300
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": true
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          true
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": null
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          null
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": {
+          "x": 1
+        }
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター a の値は文字・数値・真偽・null のどれかにしてください",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": [
+          1
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター a の値は文字・数値・真偽・null のどれかにしてください",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {},
+      "bound": {
+        "error": "api/x.sql: パラメーター :a の値がありません。read_api('x', a = ...) と書きます",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": 1,
+        "b": 2
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター b はありません（使えるのは a）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
+        "a": 1,
+        "A": 2
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター A が 2 回あります",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT 1",
+      "values": {
+        "a": 1
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター a はありません（この SQL にはパラメーターがありません）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT '::a', :a, [:b], :b FROM t",
+      "values": {
+        "a": "x",
+        "b": "y"
+      },
+      "bound": {
+        "sql": "SELECT '::a', @p1, [:b], @p2 FROM t",
+        "values": [
+          "x",
+          "y"
+        ]
+      }
+    },
+    {
+      "text": "SELECT :地域, :ｘ FROM t",
+      "values": {
+        "地域": "関東",
+        "ｘ": 0
+      },
+      "bound": {
+        "sql": "SELECT @p1, @p2 FROM t",
+        "values": [
+          "関東",
+          0
+        ]
+      }
+    }
+  ]
+}

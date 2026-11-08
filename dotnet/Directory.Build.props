@@ -1,0 +1,14 @@
+<Project>
+  <!-- Settings every project here shares. -->
+  <PropertyGroup>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <Authors>ishibashi0112</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/ishibashi0112/devbi</RepositoryUrl>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

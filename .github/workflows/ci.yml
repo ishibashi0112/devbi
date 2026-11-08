@@ -90,3 +90,55 @@ jobs:
       - run: pnpm test
       - run: pnpm --filter devbi-example-sales exec playwright install --with-deps chromium
       - run: pnpm e2e
+
+  # The ASP.NET (C#) reference of the read-only API (dotnet/): its tests against SQL Server, then the sales
+  # example's dashboards on the ASP.NET Core sample instead of devbi-serve.
+  dotnet:
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: DevBI_test1
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DevBI_test1 -Q 'SELECT 1' -b"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+    env:
+      DEVBI_TEST_MSSQL: mssql://sa:DevBI_test1@localhost:1433/master
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      # .NET Framework's part (DevBI.Server.SystemWeb) builds here too, from reference assemblies.
+      - run: dotnet build dotnet/DevBI.sln
+      - run: dotnet test dotnet/DevBI.sln --no-build
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter devbi-example-sales build
+      - run: pnpm --filter devbi-example-sales copy-db "$DEVBI_TEST_MSSQL"
+      - run: pnpm --filter devbi-example-sales exec playwright install --with-deps chromium
+      - name: Start the ASP.NET Core sample on port 4179
+        env:
+          ConnectionStrings__DEVBI_DB: Server=tcp:localhost,1433;Database=master;User Id=sa;Password=DevBI_test1;TrustServerCertificate=true;Encrypt=false
+        run: |
+          dotnet run --no-build --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179 > "$RUNNER_TEMP/sample.log" 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:4179/api/schema > /dev/null && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/sample.log"
+          exit 1
+      # All but the tests of devbi-serve's own parts: the snapshots it makes, and its API under any path.
+      - run: pnpm --filter devbi-example-sales exec playwright test --trace off --grep-invert "the API lists its SQL files|reads the saved file, not the database|somewhere else \(in the host app\)"
+        env:
+          E2E_BASE_URL: http://127.0.0.1:4179
+      - if: failure()
+        run: cat "$RUNNER_TEMP/sample.log"
