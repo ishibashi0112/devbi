@@ -2,8 +2,8 @@ import { DevbiProvider, TileFrame, injectStyles, themeAttribute, useDevbi, type 
 import { TILE_TYPES, TILE_TYPE_NAMES, defineDashboard, formatDashboardJson, type BuiltinTileType, type Dashboard, type TileSpec } from "devbi";
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ReactGridLayout, useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
-import { EditorError, readDashboard, writeDashboard, type DashboardFile } from "./api.js";
-import { viewFor } from "./edit.js";
+import { EditorError, readDashboard, writeDashboard, writeTileFile, type DashboardFile, type TileFile } from "./api.js";
+import { metricsNameOf, promoteTile, updateTile, viewFor } from "./edit.js";
 import { boxesOf, newTile, placeTiles, type Box, type RawDashboard } from "./layout.js";
 import { Panel, type Flush } from "./Panel.js";
 import { injectEditorStyles } from "./styles.js";
@@ -126,10 +126,12 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
     setFuture((f) => f.slice(1));
   }, [spec, future]);
 
+  /** Write the dashboard (`next`: this content, which the editor has just changed to, rather than what it shows). */
   const save = useCallback(
-    async (overwrite = false): Promise<boolean> => {
+    async (overwrite = false, next?: RawDashboard): Promise<boolean> => {
+      const target = next ?? spec;
       // Nothing changed: no write (it would rewrite a hand-written file in the editor's style).
-      if (!spec || !file || saving || (!overwrite && !dirty)) return false;
+      if (!target || !file || saving || (!overwrite && !next && !dirty)) return false;
       setSaving(true);
       try {
         // Overwrite: write over whatever is on disk now (after a conflict the user chose to keep their version),
@@ -144,9 +146,9 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
               },
             )
           : file.version;
-        const written = await writeDashboard(dev, name, spec, version);
+        const written = await writeDashboard(dev, name, target, version);
         setFile(written);
-        onSaved(name, { path: written.path, spec });
+        onSaved(name, { path: written.path, spec: target });
         setNotice({ kind: "info", text: `保存しました（${written.path.slice(1)}）` });
         return true;
       } catch (e) {
@@ -158,6 +160,44 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
       }
     },
     [spec, file, saving, dirty, dev, name, onSaved],
+  );
+
+  /** The latest state, for a change made after waiting for the dev server. */
+  const latest = useRef({ spec, change, save });
+  latest.current = { spec, change, save };
+
+  /**
+   * "コードにする": the dev server writes the tile out as a .tsx file, then the tile names it and the dashboard is
+   * saved (with any other unsaved change): a page reload, which an edit to the new file makes, loses nothing. Undo
+   * puts the built-in tile back (save to keep that); the file stays, and the same tile written again uses it.
+   */
+  const promote = useCallback(
+    async (id: string): Promise<boolean> => {
+      const tile = spec?.tiles.find((t) => t.id === id);
+      if (!spec || !tile) return false;
+      let written: TileFile;
+      try {
+        written = await writeTileFile(dev, name, tile, metricsNameOf(project.metrics, spec, tile));
+      } catch (e) {
+        setNotice({ kind: "error", text: (e as Error).message });
+        return false;
+      }
+      // The page loaded before the file was there: the tiles here, and the page once the editor closes, load it so.
+      project.components[written.path] ??= () => dev.importTile(written.path);
+      const now = latest.current;
+      if (!now.spec) return false;
+      const next = updateTile(now.spec, id, (t) => promoteTile(t, written.component));
+      now.change(next);
+      // When the save fails, its notice says why (the file changed on disk, for one); the tile is changed, unsaved.
+      if (!(await now.save(false, next))) return true;
+      const file = written.path.slice(1);
+      setNotice({
+        kind: "info",
+        text: `${written.created ? `${file} に書き出して` : `前に書き出した ${file} を使うようにして`}、保存しました。このタイルのデータと描き方は、これからはこのファイルで変えます`,
+      });
+      return true;
+    },
+    [spec, dev, name, project],
   );
 
   // Files changed elsewhere (VS Code, git): take this dashboard's new content when nothing is unsaved; with unsaved
@@ -348,6 +388,8 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
           onChange={change}
           onRemove={remove}
           registerFlush={registerFlush}
+          onPromote={promote}
+          dirty={dirty}
         />
       </div>
     </div>
@@ -364,6 +406,8 @@ type BodyProps = {
   onChange(next: RawDashboard, merge?: string): void;
   onRemove(id: string): void;
   registerFlush(flush: Flush | null): void;
+  onPromote(id: string): Promise<boolean>;
+  dirty: boolean;
 };
 
 /** The grid and the property panel, with the tiles' data while the dashboard is valid. */
@@ -396,6 +440,8 @@ function Body(props: BodyProps) {
       onRemove={props.onRemove}
       clearSelection={clearSelection}
       registerFlush={props.registerFlush}
+      onPromote={props.onPromote}
+      dirty={props.dirty}
     />
   );
   return (

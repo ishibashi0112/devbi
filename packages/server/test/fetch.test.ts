@@ -35,7 +35,10 @@ describe("createApiHandler: fetch (the web's Request / Response) and handle (Nod
     const db = new DatabaseSync(path.join(dir, "db", "shop.sqlite"));
     db.exec("CREATE TABLE orders (order_date DATE, region TEXT, amount REAL)");
     const insert = db.prepare("INSERT INTO orders VALUES (?, ?, ?)");
+    // One transaction: row by row, each insert waits for the disk (seconds on a busy CI machine, past the hook's 10 s).
+    db.exec("BEGIN");
     for (let i = 0; i < 3000; i++) insert.run(`2026-04-${String((i % 28) + 1).padStart(2, "0")}`, ["関東", "近畿", "九州"][i % 3]!, i);
+    db.exec("COMMIT");
     db.close();
     writeFileSync(path.join(dir, "api", "orders.sql"), "-- 受注\nSELECT order_date, region, amount FROM orders WHERE order_date >= :from\n");
     writeFileSync(path.join(dir, "api", "daily.sql"), "-- snapshot: 06:00\nSELECT order_date, region, amount FROM orders WHERE order_date >= :from\n");

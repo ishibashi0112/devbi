@@ -7,6 +7,7 @@ import {
   idProblem,
   metricsNameOf,
   moveUp,
+  promoteTile,
   rowFilter,
   setDashboardKey,
   setOption,
@@ -120,6 +121,14 @@ describe("changeType", () => {
     expect(back).not.toHaveProperty("options");
     expect(changeType(spec, tile(), "date-range", metrics).options).toEqual({ default: "latest_fiscal_year" });
   });
+});
+
+it("points a tile written out as code at its file, keeping its name, place, size and title", () => {
+  const pivot = tile({ type: "pivot", title: "地域", query: { measures: ["revenue"] }, options: { totals: false } });
+  const promoted = promoteTile(pivot, "./sales/T.tsx");
+  expect(promoted).toEqual({ id: "t", x: 0, y: 0, w: 6, h: 4, component: "./sales/T.tsx", title: "地域" });
+  expect(Object.keys(promoted)).toEqual(["id", "x", "y", "w", "h", "component", "title"]);
+  expect(formatDashboardJson({ tiles: [promoted] })).toContain(`"component": "./sales/T.tsx",\n      "title": "地域"`);
 });
 
 it("lists the time column, then the dimensions", () => {

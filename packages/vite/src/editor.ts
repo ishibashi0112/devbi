@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import path from "node:path";
-import { DashboardError, defineDashboard, formatDashboardJson, type Dashboard } from "devbi";
+import { DashboardError, TILE_TYPES, defineDashboard, defineMetricsView, formatDashboardJson, type BuiltinTileType, type Dashboard, type MetricsView } from "devbi";
+import { parse as parseYaml } from "yaml";
+import { componentName, promotedTileSource, type PromotedTile } from "./promote.js";
 
 /** Where the GUI editor reads and writes dash.json files on the dev server (after Vite's base). */
 export const EDITOR_PATH = "__devbi/editor/";
@@ -68,6 +70,40 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** The tile to write out as code: a built-in one, checked as dash.json is (its query, its options). */
+function tileToPromote(v: unknown): PromotedTile {
+  if (!isObj(v)) throw new HttpError(400, "tile がありません");
+  if (typeof v.type !== "string" || !Object.hasOwn(TILE_TYPES, v.type)) {
+    throw new HttpError(400, `コードにできるのは組み込みのタイルだけです（${typeof v.type === "string" ? v.type : "type なし"}）`);
+  }
+  try {
+    defineDashboard({ tiles: [{ ...v, x: 0, y: 0, w: 1, h: 1 }] }, "tile");
+  } catch (e) {
+    if (e instanceof DashboardError) throw new HttpError(422, e.issues.map((i) => i.message).join("\n"));
+    throw e;
+  }
+  const tile = v as unknown as PromotedTile;
+  return {
+    id: tile.id,
+    type: tile.type as BuiltinTileType,
+    ...(tile.title ? { title: tile.title } : {}),
+    ...(isObj(tile.query) ? { query: tile.query } : {}),
+    ...(isObj(tile.options) ? { options: tile.options } : {}),
+  };
+}
+
+/** A metrics file, for the labels in a promoted tile's notes; none when it cannot be read. */
+async function readView(dir: string, name: string | undefined): Promise<MetricsView | undefined> {
+  if (!name || !plainName(name)) return undefined;
+  try {
+    return defineMetricsView(parseYaml(await readFile(path.join(dir, "models", `${name}.metrics.yaml`), "utf8")), name);
+  } catch {
+    return undefined;
+  }
+}
+
 function send(res: ServerResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -80,6 +116,10 @@ function send(res: ServerResponse, status: number, body: unknown) {
  * (`{ spec, version }`), `PUT` with `{ spec, version }` checks it like the build does and writes it in the
  * hand-written style. `version: null` creates a new file. Only from this computer, only from the dev server's own
  * pages, and only `dashboards/<name>.dash.json`.
+ *
+ * `POST …/dashboards/<name>/tiles` with `{ tile, metrics? }` writes a built-in tile out as code ("コードにする"):
+ * `dashboards/<name>/<Name>.tsx`, a new file named after the tile (or the same content already there). It answers
+ * with the file's path and the `component` the tile then names; the editor changes the tile, and the save writes it.
  */
 export function createEditorHandler(options: EditorOptions) {
   const dashDir = path.join(options.dir, "dashboards");
@@ -106,7 +146,7 @@ export function createEditorHandler(options: EditorOptions) {
       } else if (origin === "null") {
         throw new HttpError(403, "ほかのサイトからは書き込めません");
       }
-      const match = /^dashboards\/([^/]+)$/.exec(route);
+      const match = /^dashboards\/([^/]+)(\/tiles)?$/.exec(route);
       if (!match) throw new HttpError(404, "ありません");
       let name: string;
       try {
@@ -117,6 +157,55 @@ export function createEditorHandler(options: EditorOptions) {
       if (!plainName(name)) throw new HttpError(400, `ダッシュボードの名前に使えない文字があります: ${name}`);
       const rel = `dashboards/${name}.dash.json`;
       const file = path.join(dashDir, `${name}.dash.json`);
+      const client = typeof req.headers["x-devbi-client"] === "string" ? req.headers["x-devbi-client"] : undefined;
+      if (match[2]) {
+        if (req.method !== "POST") {
+          res.setHeader("Allow", "POST");
+          throw new HttpError(405, `${req.method} は使えません`);
+        }
+        if (!/^application\/json\b/.test(req.headers["content-type"] ?? "")) throw new HttpError(415, "Content-Type は application/json にしてください");
+        const body = await readBody(req);
+        if (!isObj(body)) throw new HttpError(400, "tile がありません");
+        const tile = tileToPromote(body.tile);
+        if (!existsSync(file)) throw new HttpError(404, `${rel} がありません`);
+        const metrics = typeof body.metrics === "string" ? body.metrics : undefined;
+        const view = await readView(options.dir, metrics);
+        const folder = path.join(dashDir, name);
+        const base = componentName(tile.id, tile.type);
+        for (let n = 1; n <= 100; n++) {
+          const component = n === 1 ? base : `${base}${n}`;
+          const source = promotedTileSource(tile, { name: component, ...(view ? { view } : {}), ...(metrics ? { metrics } : {}) });
+          const target = path.join(folder, `${component}.tsx`);
+          const answer = (created: boolean) => {
+            send(res, 200, { path: `/dashboards/${name}/${component}.tsx`, component: `./${name}/${component}.tsx`, created });
+            return true;
+          };
+          if (existsSync(target)) {
+            // Written before (then undone in the editor): the same tile uses the same file again.
+            if ((await readFile(target, "utf8")) === source) return answer(false);
+            continue;
+          }
+          if (existsSync(path.join(folder, `${component}.jsx`))) continue;
+          await mkdir(folder, { recursive: true });
+          const tmp = path.join(folder, `.${component}.tsx.${process.pid}-${Date.now()}.tmp`);
+          try {
+            await writeFile(tmp, source);
+            options.onWrite?.(target, versionOf(source), client);
+            // A link, not a rename: never over a file that appeared meanwhile, and never half a file for the dev server.
+            const made = await link(tmp, target).then(
+              () => true,
+              (e: NodeJS.ErrnoException) => {
+                if (e.code === "EEXIST") return false;
+                throw e;
+              },
+            );
+            if (made) return answer(true);
+          } finally {
+            await rm(tmp, { force: true });
+          }
+        }
+        throw new HttpError(409, `dashboards/${name}/ に、${base}.tsx から ${base}100.tsx までがもうあります`);
+      }
       if (req.method === "GET") {
         if (!existsSync(file)) throw new HttpError(404, `${rel} がありません`);
         const text = await readFile(file);
@@ -162,7 +251,7 @@ export function createEditorHandler(options: EditorOptions) {
           await mkdir(dashDir, { recursive: true });
           await writeFile(tmp, text);
           const version = versionOf(text);
-          options.onWrite?.(file, version, typeof req.headers["x-devbi-client"] === "string" ? req.headers["x-devbi-client"] : undefined);
+          options.onWrite?.(file, version, client);
           await rename(tmp, file);
           send(res, 200, { name, path: `/${rel}`, version });
         } finally {

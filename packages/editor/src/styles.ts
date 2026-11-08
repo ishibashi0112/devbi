@@ -66,6 +66,8 @@ export const editorCss = `
 .devbi-ed-filter { border: 1px solid var(--devbi-border); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
 .devbi-ed-values { max-height: 200px; overflow: auto; display: grid; gap: 2px; }
 .devbi-ed-warn { color: var(--devbi-down); }
+.devbi-ed-promote { display: grid; gap: 8px; }
+.devbi-ed-promote > .devbi-button { justify-self: start; }
 .devbi-ed-danger { justify-self: start; margin-top: 4px; }
 .devbi-ed-danger:hover { border-color: var(--devbi-down); color: var(--devbi-down); }
 @media (max-width: 1180px) { .devbi-ed-body { grid-template-columns: minmax(0, 1fr) 260px; } }

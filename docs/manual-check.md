@@ -1,6 +1,6 @@
 # 動作チェックの手順
 
-手元の Mac（または Windows / Linux）で DevBI のランタイムを動かして、画面を触って確かめるための手順です。所要時間は 25〜30 分ほど。
+手元の Mac（または Windows / Linux）で DevBI のランタイムを動かして、画面を触って確かめるための手順です。所要時間は 30〜35 分ほど。
 
 ## 1. 準備（最初の一回だけ）
 
@@ -232,6 +232,18 @@ WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだ�
 | 86 | ⌘S。ターミナルで `git diff examples/sales/dashboards` | 変えたキーだけが差分に出る（`"title"`、`"type"`、`"query"`、`"options"` の行）。足したキーは手で書くときと同じ場所（例: `query` の `"filters"` は `"dimensions"` の後） |
 | 87 | ターミナルで `git checkout examples/sales/dashboards` | ページが読み込み直され、元のダッシュボードに戻る |
 
+#### コードにする
+
+続けて `pnpm example:dev` で <http://localhost:5173/#/sales> を開き、「編集」を押します。最後の 92 で元に戻します。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 88 | 「地域 × 四半期」を押し、設定欄のいちばん下の「コードにする…」を押す | 「dashboards/sales/ に .tsx ファイルを書き出し、このタイルはそのファイルで描くようにして、ダッシュボードを保存します」と、「書き出す」「やめる」が出る |
+| 89 | 「書き出す」 | ページの上のほう（帯の下）に「dashboards/sales/RegionQuarter.tsx に書き出して、保存しました」と出る。タイルは同じ表のままで、名札が「region-quarter · ./sales/RegionQuarter.tsx」になる。設定欄は見出しと名前だけになる。ページは読み込み直されない |
+| 90 | ターミナルで `git diff examples/sales/dashboards` と `cat examples/sales/dashboards/sales/RegionQuarter.tsx` | dash.json は「地域 × 四半期」の `"type"`・`"query"`・`"options"` の行が消え、`"component": "./sales/RegionQuarter.tsx"` が入っただけ。.tsx には `export const query = defineQuery({ measures: ["revenue"], dimensions: ["region"], time: "quarter" })`、`const options = { columns: "受注日" }`、自分で描くときの例（コメント）がある |
+| 91 | 「閉じる」。VS Code で RegionQuarter.tsx を開き、例の 7 行（`//   return (` から `//   );` まで）の先頭の `//` を外し、いちばん下の `return <Builtin … />;` の行を消して保存 | ページが読み込み直され、「地域 × 四半期」が「2026年Q2 ¥8,530,630」のような箇条書きになる。ほかのタイルで地域を選ぶと、箇条書きも絞られる |
+| 92 | ターミナルで `git checkout examples/sales/dashboards && rm examples/sales/dashboards/sales/RegionQuarter.tsx` | ページが読み込み直され、元の表に戻る |
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -266,7 +278,8 @@ dotnet test dotnet/DevBI.sln   # C# の見本（.NET 10 SDK があるとき）
 
 ## いまの制限（v0）
 
-- GUI エディタは、いまはタイルの配置と設定欄（種類・見出し・データ・表示、ダッシュボードの見出しなど）、新しいダッシュボードまでです。自作タイル（JSX）に書き出す「コードにする」は次の版です。編集は、開発サーバーを動かしているパソコンのブラウザで、タイルを並べる部分の幅が 640px 以上あるときにできます
+- GUI エディタでは、タイルの配置、設定欄（種類・見出し・データ・表示、ダッシュボードの見出しなど）、新しいダッシュボード、組み込みのタイルを .tsx に書き出す「コードにする」ができます。編集は、開発サーバーを動かしているパソコンのブラウザで、タイルを並べる部分の幅が 640px 以上あるときにできます
+- 自作タイルのファイル（`export const query` のあるもの）を直すと、ページ全体を読み込み直します（そのタイルだけの差し替えにはなりません）
 
 - グラフの棒や点はマウス・タップでしか選べません（キーボード操作は未対応。リストとチップはキーボードで操作でき、表はセルを矢印キーで動かして Enter かスペースで選べます）
 - 初回の読み込みが重めです。重いのは DuckDB-wasm（約 34MB、圧縮して 8.5MB）で、2 回目以降はブラウザのキャッシュから読みます。画面の JavaScript は最初に約 440KB を読み、グラフ（約 280KB）、表（約 225KB と CSS 約 73KB）、DuckDB を動かす部分（約 220KB）は使うときに別のファイルとして読みます

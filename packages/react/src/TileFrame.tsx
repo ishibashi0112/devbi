@@ -1,4 +1,4 @@
-import { checkQuery, componentProblem, resolveComponent, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
+import { checkQuery, componentProblem, resolveComponent, type BuiltinTileType, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
 import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { makeFormatters, useDevbi, useDevbiQuery, useSelectionVersion } from "./context.js";
 import type { TileModule } from "./project.js";
@@ -60,7 +60,7 @@ function useTileModule(tile: TileSpec, dashboardPath: string) {
 /** One grid cell: title, loading state, errors, and the tile component with {@link TileProps}. */
 export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSProperties }) {
   const ctx = useDevbi();
-  const builtin = tile.type && Object.hasOwn(builtinTiles, tile.type) ? builtinTiles[tile.type] : undefined;
+  const builtin = tile.type && Object.hasOwn(builtinTiles, tile.type) ? builtinTiles[tile.type as BuiltinTileType] : undefined;
   const mod = useTileModule(tile, ctx.dashboard.path);
   // A promoted tile's `query` export is checked here; a bad one is this tile's error, not the dashboard's.
   const { query, queryError } = useMemo((): { query: Query | null; queryError: Error | null } => {

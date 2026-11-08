@@ -245,7 +245,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 
 ## 自作タイル（JSX）
 
-`dashboards/` の中に `.tsx` か `.jsx` を置き、dash.json の `component` で指します。
+`dashboards/` の中に `.tsx` か `.jsx` を置き、dash.json の `component` で指します。GUI エディタの「[コードにする](#コードにする)」で、組み込みのタイルから同じ見た目のファイルを書き出して始めることもできます。
 
 ```tsx
 import { defineQuery, type RowOf, type TileProps } from "devbi";
@@ -375,7 +375,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | `embed` | `true` で、ビルドのときに `devbi-embed.js` も作る（[ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)）。`base` は `"./"` にしておく（`/` で始まると警告）。既定は `false` |
 
 - `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
-- 開発サーバーでは、dash.json・metrics.yaml・data/・api/ のファイルを保存するとページを読み込み直します（GUI エディタで編集中は[別の動き](#ほかで書き換えたとき)）。
+- 開発サーバーでは、dash.json・metrics.yaml・data/・api/ のファイルを保存したときと、`dashboards/` に自作タイルのファイル（`.tsx`・`.jsx`）を足したり消したりしたときに、ページを読み込み直します（GUI エディタで編集中は[別の動き](#ほかで書き換えたとき)）。自作タイルのファイルを直したときは、Vite（React）の決まりどおりです（`export const query` のあるファイルは、ページを読み込み直します）。
 - プロジェクトに `@devbi/editor` が入っていると、開発サーバーでだけ [GUI エディタ](#gui-エディタdevbieditor)を付けます（`vite.config.ts` や `main.tsx` は変えなくてよい）。ビルド、`vite preview` には入りません。
 - 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
@@ -395,7 +395,7 @@ pnpm add -D @devbi/editor
 
 入れると、`@devbi/vite` が開発サーバーでだけ読み込み、`<DevbiApp>` の見出しの右に「編集」と「＋ 新しいダッシュボード」が出ます。設定は要りません。
 
-タイルを押すと、右の設定欄（プロパティパネル）に、そのタイルの種類・見出し・データ（指標・軸・期間の単位・絞り込み・並び順・件数）・表示の設定が出ます。何も選んでいないときは、ダッシュボードの見出し・説明・指標ファイルです。自作タイル（JSX）に書き出す「コードにする」は次の版です。
+タイルを押すと、右の設定欄（プロパティパネル）に、そのタイルの種類・見出し・データ（指標・軸・期間の単位・絞り込み・並び順・件数）・表示の設定が出ます。何も選んでいないときは、ダッシュボードの見出し・説明・指標ファイルです。組み込みのタイルで足りない表示は、設定欄の「[コードにする](#コードにする)」で `.tsx` のファイルに書き出し、React で描けます。
 
 ### できること
 
@@ -407,6 +407,7 @@ pnpm add -D @devbi/editor
 | タイルを消す | タイルの右上の ×。またはタイルを押して選び、Delete（設定欄やボタンを押したあとの Delete では消さない）。設定欄の「このタイルを消す」でも |
 | タイルの設定を変える | タイルを押す。右の設定欄で変えると、そのタイルにすぐ出る（[設定欄](#設定欄プロパティパネル)） |
 | ダッシュボードの設定を変える | タイルの間を押すか、設定欄の「ダッシュボード全体」。見出し・説明・指標ファイル |
+| コードにする | タイルを押し、設定欄の「コードにする…」→「書き出す」。`dashboards/<ダッシュボード>/<名前>.tsx` に書き出し、タイルはそのファイルで描く（[コードにする](#コードにする)） |
 | 元に戻す / やり直す | ボタンか ⌘Z / ⇧⌘Z（Windows は Ctrl+Z / Ctrl+Y）。100 回まで |
 | 保存 | 「保存」か ⌘S（Windows は Ctrl+S） |
 | 閉じる | 「閉じる」。保存していない変更があれば、保存するか捨てるかを聞く |
@@ -438,6 +439,48 @@ pnpm add -D @devbi/editor
 - タイルにデータが出ないとき（指標も軸もない、名前が指標ファイルにない、など）は、そのわけを設定欄の「データ」の下にも出します。指標も軸も外したときは `"query": {}` を残します（タイルがわけを出すように）。
 - 自作タイル（`component`）は、見出しと名前だけ変えられます（中身とデータの指定は、そのファイルで変えます）。
 
+### コードにする
+
+組み込みのタイルを、[自作タイル（JSX）](#自作タイルjsx)のファイルに書き出します。書き出した直後は組み込みのタイルで描くので、見た目は変わりません。そこから、そのファイルを VS Code や Claude Code で書き換えて、組み込みのタイルにない表示にします。
+
+```tsx
+// 「地域 × 四半期」のタイル。GUI エディタの「コードにする」で、組み込みのクロス集計から書き出したもの。
+// このタイルのデータと描き方は、このファイルで変える（GUI で変えられるのは、位置・大きさ・見出し・名前）。
+// 自作タイルの書き方: https://github.com/ishibashi0112/devbi/blob/main/docs/reference.md#自作タイルjsx
+import { builtinTiles } from "@devbi/react";
+import { defineQuery, type RowOf, type TileProps } from "devbi";
+
+// 何を出すか（SQL は書かない）。指標と軸の名前は models/sales.metrics.yaml のもの
+export const query = defineQuery({ measures: ["revenue"], dimensions: ["region"], time: "quarter" });
+
+// クロス集計の設定（dash.json の "options" に書いていたもの）
+const options = { columns: "受注日" };
+
+// いまは組み込みのクロス集計で描いている
+const Builtin = builtinTiles.pivot.component;
+
+export default function RegionQuarter(props: TileProps<RowOf<typeof query>>) {
+  // 自分で描くときは、下の return を書き換える。props.rows が集計済みの行（ほかのタイルの選択で絞ったもの）で、
+  // 列は 受注日（四半期ごと）、region（地域）、revenue（売上）。例:
+  //   return (
+  //     <ul>
+  //       {props.rows.map((r, i) => (
+  //         <li key={i}>{props.format(r.受注日, "受注日")} {props.format(r.revenue, "revenue")}</li>
+  //       ))}
+  //     </ul>
+  //   );
+  // 値の書式は props.format、クリックでほかのタイルを絞るのは props.select。
+  return <Builtin {...props} tile={{ ...props.tile, options }} />;
+}
+```
+
+- ファイルは `dashboards/<ダッシュボードのファイル名>/` に、タイルの名前（id）を PascalCase にした名前で書きます（`region-quarter` → `RegionQuarter.tsx`。英数字がない名前は `KpiTile.tsx` のように種類から）。同じ名前のファイルがあれば `RegionQuarter2.tsx` のように次の名前にし、ほかのファイルを上書きすることはありません。
+- dash.json のタイルは、`type`・`query`・`options` を消して `"component": "./<ダッシュボード>/<名前>.tsx"` を書きます。`id`・位置と大きさ・`title` はそのまま残り、GUI で変えられます。`query` と `options` はファイルに移ります（`query` は `defineQuery` で書くので、名前の補完と `rows` の型が付きます）。
+- 書き出したら、そのままダッシュボードを保存します（保存していないほかの変更も、いっしょに保存します）。ページは読み込み直しません。保存してあるので、このあとファイルを直してページが読み込み直されても、なくなる変更はありません。
+- 「元に戻す」で組み込みのタイルに戻ります（保存するまで dash.json は戻りません）。書き出したファイルは残り、同じタイルをもう一度書き出すと、内容が同じならそのファイルを使います。
+- データを使わない種類（`date-range`、`markdown`）は、`query` のないファイルになります。データが要るときは `useDevbiQuery` で集計します。
+- 書き出したファイルは、10 種類すべてで型チェック（`tsc`）が通る形です。
+
 ### 保存のしかた（git の差分）
 
 手で書いたときと同じ形で書くので、タイルを 1 つ動かすと、そのタイルの 1 行だけが変わります。
@@ -463,7 +506,8 @@ pnpm add -D @devbi/editor
 | 変わったもの | 保存していない変更がないとき | あるとき |
 | --- | --- | --- |
 | 編集中の dash.json（VS Code、git など） | 読み込み直して「読み込み直しました」 | 知らせて、「ファイルの内容を読み込む（ここでの変更は捨てる）」か「ここでの内容で上書きする」を選ぶ。そのまま「保存」しても断られる |
-| metrics.yaml・data/・api/・ほかの dash.json | ページを読み込み直し、エディタが開き直る | 知らせるだけ（閉じるとページを読み込み直して反映される） |
+| metrics.yaml・data/・api/・ほかの dash.json、`dashboards/` に足した・消した自作タイルのファイル | ページを読み込み直し、エディタが開き直る | 知らせるだけ（閉じるとページを読み込み直して反映される） |
+| 自作タイルのファイルの中身 | Vite（React）の決まりどおり。`export const query` のあるファイルは、ページを読み込み直し、エディタが開き直る | ページを読み込み直す前に、ブラウザが「このページを離れますか」と聞く（離れると、保存していない変更はなくなる） |
 
 - エディタで保存したファイルの変更では、保存したページは読み込み直しません（同じダッシュボードを開いているほかのタブは読み込み直します）。
 - 編集中にファイルから読み込み直したときは、エディタを閉じるとページも読み込み直します。
@@ -473,13 +517,14 @@ pnpm add -D @devbi/editor
 
 ### 書き込み口の守り
 
-エディタは開発サーバーの `…/__devbi/editor/dashboards/<名前>` で dash.json を読み書きします。
+エディタは開発サーバーの `…/__devbi/editor/dashboards/<名前>` で dash.json を読み書きし、`…/__devbi/editor/dashboards/<名前>/tiles`（POST）で「コードにする」のファイルを書きます。
 
 - 開発サーバー（`vite`）にだけあります。`vite preview`、`devbi-serve`、ビルドしたサイトにはありません
 - 開発サーバーを動かしているパソコンからの要求にだけ答えます。`vite --host` でほかのパソコンやスマホから開いたページでは、見ることはできても保存できません（ブラウザと開発サーバーが別のパソコンになる Codespaces なども同じ）
 - ほかのサイトからは書けません（専用のヘッダー `X-DevBI-Editor`、`Origin` がこの開発サーバーであること、`Host` が IP・localhost・Vite の `server.allowedHosts` の名前であることを見ます。HTTPS の開発サーバーでは、Vite と同じく `Host` は見ません）
 - 書くのは `dashboards/<名前>.dash.json` だけで、ビルドと同じ検証（重なり、列数、指標ファイルと自作タイルのファイルがあるか）を通らないものは書きません。書くときは隣に一時ファイルを書いて置き換えるので、途中までのファイルを開発サーバーや VS Code が読むことはありません
 - 開いたあとにファイルが変わっていたら、上書きせずに断ります（409）
+- 「コードにする」で書くのは、`dashboards/<名前>/` の新しい `.tsx` だけです。中身は送られた組み込みのタイル（dash.json と同じ検証を通ったもの）から開発サーバーが作り、送られたコードを書くことはありません。あるファイルは上書きしません
 
 ## データベースから読む（@devbi/server）
 
@@ -1001,7 +1046,7 @@ function DevbiDashboard({ name }: { name: string }) {
 | `<Dashboard project={…} name="sales" back?="#/" theme? isolate? actions? />` | ダッシュボード 1 つ。`actions` は見出しの右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
 | `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
 | `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
-| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタとファイルの変更の知らせ。型は `DevServer`） |
+| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`。型は `DevServer`） |
 | `themeAttribute(theme)` / `injectStyles()` | `.devbi-root` に付ける `data-theme` / DevBI の CSS をページに入れる（`<Dashboard>` は自分で入れる）。GUI エディタが使う |
 | `snapshotTimesOf(project, dashboard)` | そのダッシュボードが読むスナップショットの時刻（`["06:00"]` など。なければ空）。一覧の「毎日 6:00 の時点のデータ」に使っている |
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
@@ -1009,7 +1054,7 @@ function DevbiDashboard({ name }: { name: string }) {
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
 | `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, snapshots?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view, { apiUrl?, fetch? })` を持つ（`loadView` に渡すと、そのビューだけほかの API から読む。同じエンジンで、API ごとに別の表になる。`useDevbi().engine` の `loadView(view)` は、そのダッシュボードの API と `fetch` で読む）。`snapshots` は[スナップショット](#毎朝のスナップショット)から読む SQL の名前と時刻で、`snapshotsOf(view)` はそのビューが読んだスナップショットと、作られた時刻を返す。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
-| `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない） |
+| `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`。キーは組み込みの種類の名前だけなので `builtinTiles.bar.component` と書ける）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない。自作タイルは、もとから `<Suspense>` の中）。「[コードにする](#コードにする)」で書き出したファイルが使う |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |
 
 DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを切り替えても、API の場所が違うダッシュボードを並べても使い回します。同じ SQL の結果はページを開いている間キャッシュします。
