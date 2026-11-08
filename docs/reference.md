@@ -11,6 +11,8 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [書式](#書式)
 - [@devbi/vite](#devbivite)
 - [データベースから読む（@devbi/server）](#データベースから読むdevbiserver)
+- [ASP.NET（C#）で API を出す](#aspnetcで-api-を出す)
+- [Next.js に置く](#nextjs-に置く)
 - [ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)
 - [@devbi/react](#devbireact)
 - [devbi（コア）](#devbiコア)
@@ -588,7 +590,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。
 - ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
 
-`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。`run(name, params)` で SQL を 1 つ実行し、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。`run(name, params)` で SQL を 1 つ実行し、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
 ## ASP.NET（C#）で API を出す
 
@@ -683,6 +685,83 @@ protected void Application_Start(object sender, EventArgs e)
 - スナップショットは作りません。`api/schema` の `snapshots` はいつも空です。`-- snapshot:` の行がある SQL のダッシュボードは、`devbi-snapshot`（Node）でサイトの `snapshots/` に作ったファイルがあればそれを、なければ API を読みます。
 - 知らないホスト名を断る仕組み（DNS リバインディングの対策）は持ちません。ASP.NET Core では `AllowedHosts`（appsettings.json）、IIS ではサイトのバインドにホスト名を書きます。
 - パスの前に何が付いても答える `devbi-serve` と違い、`MapDevBIApi` に渡した場所（WebForms では `web.config` の `location`）でだけ答えます。
+
+## Next.js に置く
+
+Next.js（App Router、16 で確かめています）のアプリに、ダッシュボードと API を足す形です。見本は `examples/nextjs` です。API は `route.ts` 1 つで、`createApiHandler` の `fetch(request)` が答えます。ダッシュボードは `devbi-embed.js` で出すので、アプリの React の版や、Turbopack・webpack の設定とは関係ありません。
+
+```
+アプリ/
+  public/devbi/                    DevBI のプロジェクトの dist/ を写したもの（devbi-embed.js、assets/、data/。snapshots/ は写さない）
+  app/devbi/[...path]/route.ts     /devbi/api/schema、/devbi/api/query、/devbi/snapshots/<ファイル>
+  lib/devbi.ts                     createApiHandler（サーバー全体で 1 つ）
+  instrumentation.ts               起動したときと毎朝の時刻に、スナップショットを作る
+  components/devbi-dashboard.tsx   ダッシュボードを出す部品（"use client"）
+```
+
+アプリに `@devbi/server`（Node 22.16 以上）と、使うデータベースのドライバ（`mssql` など。[接続先](#接続先)）を入れます。`@devbi/server` は npm にまだ出していないので、いまはこのリポジトリの `packages/server` をビルドして使います（見本は pnpm のワークスペースでつないでいる）。
+
+```ts
+// next.config.ts: node_modules の @devbi/server をバンドルせず、Node でそのまま動かす
+const config: NextConfig = { serverExternalPackages: ["@devbi/server"] };
+```
+
+```ts
+// lib/devbi.ts
+import path from "node:path";
+import { createApiHandler, loadEnv, type ApiHandler } from "@devbi/server";
+
+// DevBI のプロジェクト（api/*.sql、models/、DEVBI_DB の書いてある .env）
+const dir = path.resolve(/* turbopackIgnore: true */ process.env.DEVBI_DIR ?? "../reports");
+const shared = globalThis as typeof globalThis & { devbi?: ApiHandler };
+export const devbi = (shared.devbi ??= createApiHandler({
+  dir,
+  env: loadEnv(dir),
+  snapshotDir: path.resolve(/* turbopackIgnore: true */ "snapshots"),
+  log: (line) => console.log(`[devbi] ${line}`),
+}));
+```
+
+```ts
+// app/devbi/[...path]/route.ts
+import { isHostAllowed } from "@devbi/server";
+import { devbi } from "@/lib/devbi";
+
+const allowedHosts = (process.env.DEVBI_ALLOWED_HOSTS ?? "").split(",").filter(Boolean);
+
+async function answer(request: Request): Promise<Response> {
+  if (!isHostAllowed(request.headers.get("host") ?? undefined, allowedHosts)) {
+    return Response.json({ error: "このホスト名では開けません" }, { status: 403 });
+  }
+  // アプリのログインの確かめ方をここに（ほかの route と同じもの）
+  return (await devbi.fetch(request)) ?? Response.json({ error: "見つかりません" }, { status: 404 });
+}
+
+export { answer as GET, answer as HEAD, answer as POST };
+```
+
+```ts
+// instrumentation.ts
+export async function register() {
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const { devbi } = await import("./lib/devbi");
+  devbi.snapshots.schedule();
+  void devbi.snapshots.catchUp().catch((e: Error) => console.error(`[devbi] スナップショット: ${e.message}`));
+}
+```
+
+部品は、[React のアプリに置く](#react-のアプリに置く)の `DevbiDashboard` と同じで、URL を `/devbi/devbi-embed.js` にし、ファイルの先頭に `"use client";` を書きます（`import()` には `/* webpackIgnore: true */ /* turbopackIgnore: true */` を付けます）。ページでは `<DevbiDashboard name="sales" />` のように置きます。
+
+- `dist/` は `public/devbi/` に、`next build` の前に写します（見本は `prebuild` で写す）。ダッシュボードの API の既定の場所は `devbi-embed.js` と同じ場所の `api/`（`/devbi/api/`）なので、`data-devbi-api` は要りません。`public/` のファイルは route より先に配られ、残りの `/devbi/…` に route が答えます。
+- `dist/snapshots/` は写しません（`devbi-snapshot` の既定の置き場所なので、あることがあります）。写すと、route より先に `public/` の古いファイルが配られます。`dist/index.html` も、DevBI だけのページなので要りません（見本は写さない）。
+- スナップショットは `public/` に置きません（`next start` は、動き始めたあとで `public/` に足したファイルを配りません）。サーバーのフォルダ（`snapshotDir`）に作り、route が返します。まだなければ作ってから返し、`If-Modified-Since` に `304` で答えるのは `devbi-serve` と同じです。いつも動いているサーバーがない置き方では、`instrumentation.ts` の代わりに `devbi-snapshot --dir <プロジェクト> --out <フォルダ>` をタスクスケジューラや cron で動かし、`snapshotDir` を `<フォルダ>/snapshots` にします。
+- `fetch` は gzip で返しません。Next.js は route の答えの `Content-Encoding` を消してしまい、Arrow の型（`application/vnd.apache.arrow.stream`）は自分では圧縮しないためです。行が多いときは、前に置く IIS や nginx で、この型も圧縮させます（nginx なら `gzip_types` に足す）。
+- ログイン: 同じオリジンなので、アプリの Cookie はそのまま API に届きます。route の中で、アプリのほかの route と同じように確かめます。ただし `public/devbi/` のファイル（`devbi-embed.js`、`data/` の Excel や CSV など）は route を通らずに配られます。データのファイルもログインで守るときは、`proxy.ts` の `matcher` に `/devbi/:path*` を入れます（`proxy.ts` は `public/` のファイルの前にも動きます）。
+- ホスト名: `devbi-serve` と同じく、IP アドレスと `localhost` のほかは `DEVBI_ALLOWED_HOSTS`（カンマ区切り。`.corp.local` はその下の名前すべて）に書いた名前だけを通します。IP アドレスでは開けるので、手元で試すときは `next dev --hostname 127.0.0.1` のように、このコンピューターだけで待ち受けます（見本の `dev` と `start` はそうしている。Next.js の既定はすべてのネットワークから）。
+- バンドル: `serverExternalPackages` は、`node_modules` にある `@devbi/server` にだけ効きます。ワークスペースでつないだもの（見本）はバンドルされますが、データベースのドライバは `import()` を Node に任せて読むので、どちらでも動きます。ドライバはアプリの `node_modules` から探します。
+- Next.js は、`next build` と `next dev` のたびに、匿名の利用データを Vercel に送ります（既定でそうなっている）。社外に出さないときは、アプリの `.env` に `NEXT_TELEMETRY_DISABLED=1` を書きます（見本はそうしている）。
+- `lib/devbi.ts` で `globalThis` に置くのは、`next dev` がファイルを直すたびに読み込み直しても、データベースの接続を作り直さないためです。`next dev` でもそのまま動きます。
+- `path.resolve` の `/* turbopackIgnore: true */` は、「サーバーが動いてから読むフォルダで、ビルドに含めるファイルではない」という印です。付けないと、`next build` が「プロジェクト全体をたどる」警告を出します。
 
 ## ほかのアプリの画面に埋め込む
 
@@ -793,7 +872,7 @@ const project = loadProject(input);
 <Dashboard project={project} name="sales" theme="light" isolate />
 ```
 
-ほかの React のアプリ（Vite でない、React 18 など）では、`devbi-embed.js` を使います。DevBI は自分の React で動くので、アプリの React の版は関係ありません。URL は変数にして `import()` に渡します（文字列をそのまま書くと、TypeScript やバンドラーがそのファイルを探しに行きます）。
+ほかの React のアプリ（Vite でない、React 18 など）では、`devbi-embed.js` を使います（Next.js は [Next.js に置く](#nextjs-に置く)）。DevBI は自分の React で動くので、アプリの React の版は関係ありません。URL は変数にして `import()` に渡します（文字列をそのまま書くと、TypeScript やバンドラーがそのファイルを探しに行きます）。
 
 ```tsx
 const DEVBI = "/Scripts/devbi/devbi-embed.js";
@@ -898,11 +977,13 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm example:dev` | パッケージをビルドして、サンプルの開発サーバーを開く（<http://localhost:5173>） |
 | `pnpm example:preview` | サンプルを静的ビルドして開く（<http://localhost:4173>） |
 | `pnpm example:serve` | サンプルをビルドして、`devbi-serve` で開く（<http://localhost:8080>）。「売上ダッシュボード（DB から）」はサンプルの SQLite を API から読み、「売上の日次集計」は起動したときに作ったスナップショットを読む |
+| `pnpm example:nextjs` | サンプルのダッシュボードを、Next.js のアプリ（`examples/nextjs`）に置いて開く（<http://127.0.0.1:3000>）。API は `app/devbi/[...path]/route.ts`。`DEVBI_DB` を付けて起動すると、そのデータベースから読む（SQL Server は `copy-db` で表を写してから） |
 | `pnpm --filter devbi-example-sales exec devbi-snapshot` | サンプルのスナップショットを、いま `dist/snapshots/` に作る（先にビルド） |
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
 | `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |
 | `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式、API）。パッケージのソースを直接読むので、先にビルドしなくてよい。`DEVBI_TEST_PG`、`DEVBI_TEST_MSSQL`、`DEVBI_TEST_MYSQL`、`DEVBI_TEST_MARIADB`、`DEVBI_TEST_ORACLE` に URL を入れると、そのデータベースのテストも流す（表を作り直すので、テスト用のデータベースで） |
 | `pnpm e2e` | パッケージとサンプルをビルドして `devbi-serve` で開き、ブラウザで操作を確かめる |
+| `pnpm e2e:nextjs` | Next.js の見本をビルドして `next start` で開き、ブラウザで確かめる |
 | `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
 | `pnpm --filter devbi-example-sales copy-db <URL>` | サンプルの 4 つの表を、SQL Server・Oracle・MySQL に写す（先に同じ名前の表を消す）。`DEVBI_DB` をその URL にすると、「DB から」のダッシュボードがそのデータベースから読む |
 | `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |

@@ -1,0 +1,7 @@
+.next/
+next-env.d.ts
+# pnpm copy-dashboards: the dashboards' build (examples/sales/dist)
+public/devbi/
+# The morning snapshots (lib/devbi.ts; DEVBI_SNAPSHOTS for another folder)
+snapshots/
+snapshots-*/
