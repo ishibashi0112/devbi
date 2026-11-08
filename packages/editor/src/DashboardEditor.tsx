@@ -5,7 +5,7 @@ import { ReactGridLayout, useContainerWidth, verticalCompactor, type Layout } fr
 import { EditorError, readDashboard, writeDashboard, type DashboardFile } from "./api.js";
 import { viewFor } from "./edit.js";
 import { boxesOf, newTile, placeTiles, type Box, type RawDashboard } from "./layout.js";
-import { Panel } from "./Panel.js";
+import { Panel, type Flush } from "./Panel.js";
 import { injectEditorStyles } from "./styles.js";
 
 /** Narrower than this, the 12 columns are too thin to drag. */
@@ -26,6 +26,11 @@ const same = (a: RawDashboard, b: RawDashboard) => a === b || formatDashboardJso
 
 function isTyping(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName));
+}
+
+/** Delete removes the selected tile only from the page or the grid, not from a button in the panel or the toolbar. */
+function onCanvas(target: EventTarget | null): boolean {
+  return target === document.body || (target instanceof Element && !!target.closest(".devbi-ed-grid"));
 }
 
 /**
@@ -50,6 +55,13 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   const [saving, setSaving] = useState(false);
   const [closing, setClosing] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  /** The panel's unfinished edit (a tile's new name), taken before the selection changes. */
+  const flush = useRef<Flush | null>(null);
+  const registerFlush = useCallback((f: Flush | null) => void (flush.current = f), []);
+  const select = useCallback((id: string | null) => {
+    const renamed = flush.current?.();
+    setSelected(renamed && id === renamed.from ? renamed.to : id);
+  }, []);
   const [loadError, setLoadError] = useState<string | null>(null);
   const dirty = !!file && !!spec && !same(file.spec, spec);
   /** Files changed on disk that the page has not taken in: it reloads when the editor closes. */
@@ -226,16 +238,16 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
       } else if (mod && e.key.toLowerCase() === "y") {
         e.preventDefault();
         redo();
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selected && onCanvas(e.target)) {
         e.preventDefault();
         remove(selected);
       } else if (e.key === "Escape") {
-        setSelected(null);
+        select(null);
       }
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [save, undo, redo, remove, selected]);
+  }, [save, undo, redo, remove, selected, select]);
 
   const root = { ...themeAttribute(theme) };
   if (!spec || !file) {
@@ -326,7 +338,17 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
             </button>
           </div>
         )}
-        <Body project={project} name={name} path={file.path} spec={spec} selected={selected} onSelect={setSelected} onChange={change} onRemove={remove} />
+        <Body
+          project={project}
+          name={name}
+          path={file.path}
+          spec={spec}
+          selected={selected}
+          onSelect={select}
+          onChange={change}
+          onRemove={remove}
+          registerFlush={registerFlush}
+        />
       </div>
     </div>
   );
@@ -341,6 +363,7 @@ type BodyProps = {
   onSelect(id: string | null): void;
   onChange(next: RawDashboard, merge?: string): void;
   onRemove(id: string): void;
+  registerFlush(flush: Flush | null): void;
 };
 
 /** The grid and the property panel, with the tiles' data while the dashboard is valid. */
@@ -355,8 +378,9 @@ function Body(props: BodyProps) {
   }, [spec, name, path]);
   const valid = "dashboard" in checked ? checked.dashboard : null;
   // One context while the editor is open, so a change to one tile runs only that tile's query again, and the period
-  // and other selections stay. A new one when the dashboard's metrics file (every tile's default) changes. Its
-  // `dashboard.tiles` may lag behind; the tiles here come from `valid`.
+  // and other selections stay. A new one when the dashboard's metrics file (every tile's default) changes, with the
+  // tiles started over (keyed), so the period picker takes its default again. Its `dashboard.tiles` may lag behind;
+  // the tiles here come from `valid`.
   const metricsKey = valid ? (valid.metrics ?? "") : null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const context = useMemo(() => valid, [metricsKey]);
@@ -371,12 +395,13 @@ function Body(props: BodyProps) {
       onChange={props.onChange}
       onRemove={props.onRemove}
       clearSelection={clearSelection}
+      registerFlush={props.registerFlush}
     />
   );
   return (
     <div className="devbi-ed-body">
       {valid && context ? (
-        <DevbiProvider project={project} dashboard={context}>
+        <DevbiProvider key={metricsKey} project={project} dashboard={context}>
           <Live ids={valid.tiles.map((t) => t.id)}>
             {(clear) => (
               <>

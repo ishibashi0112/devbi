@@ -90,19 +90,35 @@ export function metricsNameOf(metrics: Record<string, MetricsView>, spec: RawDas
 
 /**
  * The tile as another built-in type: the query stays (a type without one drops it, a type that needs one gets the
- * one a new tile would start with), and so do the options the new type has. Title, place and size stay.
+ * one a new tile would start with), and so do the options the new type has, with its defaults for the rest. The
+ * metrics file the tile reads goes with it (`query.metrics`, or the period picker's `options.metrics`). Title, place
+ * and size stay.
  */
 export function changeType(spec: RawDashboard, tile: RawTile, type: BuiltinTileType, metrics: Record<string, MetricsView>): RawTile {
   if (tile.type === type) return tile;
   const info = TILE_TYPES[type];
-  const { view, needsMetrics } = viewFor(metrics, spec);
-  const fresh = newTile(type, spec, view, needsMetrics);
+  const query = isObj(tile.query) ? tile.query : undefined;
+  const old = isObj(tile.options) ? tile.options : {};
+  const own = typeof query?.metrics === "string" ? query.metrics : typeof old.metrics === "string" ? old.metrics : undefined;
+  const ownView = own && Object.hasOwn(metrics, own) ? metrics[own] : undefined;
+  const base = viewFor(metrics, spec);
+  const fresh = ownView ? newTile(type, spec, ownView, true) : newTile(type, spec, base.view, base.needsMetrics);
   let next = setTileKey(tile, "type", type);
   if (!info.query) next = setTileKey(next, "query", undefined);
-  else if (!isObj(tile.query) || isEmpty(tile.query)) next = setTileKey(next, "query", fresh.query);
-  const old = isObj(tile.options) ? tile.options : {};
-  const kept = Object.fromEntries(Object.entries(old).filter(([k]) => Object.hasOwn(info.options, k)));
-  return setTileKey(next, "options", Object.keys(kept).length ? kept : fresh.options);
+  else if (!query || isEmpty(query)) {
+    const { metrics: _, ...rest } = isObj(fresh.query) ? fresh.query : {};
+    next = setTileKey(next, "query", own && !ownView ? { metrics: own, ...rest } : fresh.query);
+  }
+  const merged: Obj = { ...(isObj(fresh.options) ? fresh.options : {}), ...Object.fromEntries(Object.entries(old).filter(([k]) => Object.hasOwn(info.options, k))) };
+  const metricsName = own ?? (base.needsMetrics ? base.view?.name : undefined);
+  if (!info.query && Object.hasOwn(info.options, "metrics") && metricsName) merged.metrics = metricsName;
+  const options = Object.fromEntries(Object.keys(info.options).flatMap((k) => (Object.hasOwn(merged, k) ? [[k, merged[k]]] : [])));
+  return setTileKey(next, "options", options);
+}
+
+/** The fields a filter or a pivot's columns can use: the time column, then the dimensions, with their labels. */
+export function fieldsOf(view: MetricsView): [name: string, label: string][] {
+  return [...(view.time ? [[view.time.name, view.time.label] as [string, string]] : []), ...Object.entries(view.dimensions).map(([n, d]) => [n, d.label] as [string, string])];
 }
 
 /** Why `to` cannot be the tile's new name, if it cannot. */

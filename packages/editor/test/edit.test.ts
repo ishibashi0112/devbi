@@ -2,6 +2,7 @@ import { defineMetricsView, formatDashboardJson } from "devbi";
 import { describe, expect, it } from "vitest";
 import {
   changeType,
+  fieldsOf,
   filterRow,
   idProblem,
   metricsNameOf,
@@ -98,6 +99,18 @@ describe("changeType", () => {
     expect(select).not.toHaveProperty("options");
   });
 
+  it("takes the tile's own metrics file along: query.metrics to the period picker's options.metrics, and back", () => {
+    const orders = defineMetricsView({ model: "SELECT 1", time: "o", measures: { n: "COUNT(*)" } }, "orders");
+    const both = { sales, orders };
+    const bar = tile({ query: { metrics: "orders", measures: ["n"], time: "month" } });
+    const period = changeType(spec, bar, "date-range", both);
+    expect(period).not.toHaveProperty("query");
+    expect(period.options).toEqual({ default: "latest_fiscal_year", metrics: "orders" });
+    expect(changeType(spec, period, "kpi", both).query).toEqual({ metrics: "orders", measures: ["n"] });
+    // A dashboard without its own metrics file and more than one: the period picker names one.
+    expect(changeType({ tiles: [] }, tile(), "date-range", both).options).toEqual({ default: "latest_fiscal_year", metrics: "orders" });
+  });
+
   it("drops the query for a type without one, and starts one for a type that needs it", () => {
     const text = changeType(spec, tile({ query: { measures: ["revenue"], time: "month" } }), "markdown", metrics);
     expect(text).not.toHaveProperty("query");
@@ -107,6 +120,13 @@ describe("changeType", () => {
     expect(back).not.toHaveProperty("options");
     expect(changeType(spec, tile(), "date-range", metrics).options).toEqual({ default: "latest_fiscal_year" });
   });
+});
+
+it("lists the time column, then the dimensions", () => {
+  expect(fieldsOf(sales)).toEqual([
+    ["d", "日付"],
+    ["region", "地域"],
+  ]);
 });
 
 describe("names, lists and sort", () => {

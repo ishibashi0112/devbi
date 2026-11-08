@@ -374,3 +374,41 @@ test("the property panel: a tile's name is checked, options show at once, a type
   expect(spec.tiles.find((t: { id: string }) => t.id === "region-quarter").options).toEqual({ columns: "受注日", totals: false });
   expect(spec.tiles.find((t: { id: string }) => t.id === "period").options).toEqual({ default: "previous_fiscal_year" });
 });
+
+test("the property panel keeps what is being typed: a new name when another tile is pressed, a date typed digit by digit", async ({ page }) => {
+  await openEditor(page);
+  const p = panel(page);
+  // A new name, then another tile pressed: the name is taken, and the panel goes to that tile.
+  await pick(page, "region");
+  await p.getByLabel("名前（id）").fill("region-2");
+  await item(page, "monthly").locator(".devbi-ed-cover").click();
+  await expect(p.getByLabel("名前（id）")).toHaveValue("monthly");
+  await expect(item(page, "region-2")).toBeVisible();
+  // The same tile pressed: the panel stays on it, under its new name.
+  await p.getByLabel("名前（id）").fill("monthly-2");
+  await item(page, "monthly").locator(".devbi-ed-cover").click();
+  await expect(p.getByLabel("名前（id）")).toHaveValue("monthly-2");
+
+  // Backspace after a button in the panel does not remove the tile.
+  await pick(page, "products");
+  await p.getByRole("button", { name: "数量を前へ" }).click();
+  await page.keyboard.press("Backspace");
+  await expect(item(page, "products")).toBeVisible();
+
+  // A start date typed digit by digit: the box stays (with focus) while the filter is written.
+  await pick(page, "region-2");
+  await p.getByLabel("絞り込みを追加").selectOption({ label: "受注日" });
+  const start = p.getByLabel("受注日の始まり");
+  await start.focus();
+  await page.keyboard.type("04012025");
+  await expect(start).toHaveValue("2025-04-01");
+  await expect(start).toBeFocused();
+
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const spec = JSON.parse(readFileSync(salesFile, "utf8"));
+  const byId = (id: string) => spec.tiles.find((t: { id: string }) => t.id === id);
+  expect(byId("monthly-2")).toBeTruthy();
+  expect(byId("region-2").query.filters).toEqual([{ field: "受注日", between: ["2025-04-01", null] }]);
+  expect(byId("products").query.measures).toEqual(["revenue", "quantity", "revenue_yoy", "orders"]);
+});

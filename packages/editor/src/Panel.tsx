@@ -1,8 +1,21 @@
 import { useDevbiQuery } from "@devbi/react";
-import { GRAINS, TILE_TYPES, TILE_TYPE_NAMES, compileQuery, type BuiltinTileType, type Grain, type MetricsView, type Query, type Scalar, type TileOptionSchema } from "devbi";
+import {
+  GRAINS,
+  TILE_TYPES,
+  TILE_TYPE_NAMES,
+  compileQuery,
+  isoDate,
+  type BuiltinTileType,
+  type Grain,
+  type MetricsView,
+  type Query,
+  type Scalar,
+  type TileOptionSchema,
+} from "devbi";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   changeType,
+  fieldsOf,
   filterRow,
   idProblem,
   isObj,
@@ -30,6 +43,9 @@ const GRAIN_LABELS: Record<Grain, string> = {
   fiscal_year: "年度",
 };
 
+/** Takes a tile's new name typed but not yet taken; says which name became which. */
+export type Flush = () => { from: string; to: string } | undefined;
+
 export interface PanelProps {
   metrics: Record<string, MetricsView>;
   /** The dashboard's file name (`dashboards/<name>.dash.json`). */
@@ -39,11 +55,13 @@ export interface PanelProps {
   /** Inside the dashboard's DevbiProvider: a filter's values can be read from the data. */
   live: boolean;
   onSelect(id: string | null): void;
-  /** `merge`: the same key as the change before folds both into one undo step (typing in a text box). */
+  /** `merge`: the same key as the change before folds both into one undo step (typing in a box). */
   onChange(next: RawDashboard, merge?: string): void;
   onRemove(id: string): void;
   /** Clear a tile's selection (its period, for instance), so the tile starts over. */
   clearSelection(id: string): void;
+  /** What to finish before the selection changes (a new name typed but not yet taken), or null. */
+  registerFlush(flush: Flush | null): void;
 }
 
 /**
@@ -60,8 +78,10 @@ export function Panel(props: PanelProps) {
   );
 }
 
+type Ids = { id: string; "aria-describedby"?: string };
+
 /** A label, a control and a hint under it, tied together for screen readers. */
-function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children(ids: { id: string; "aria-describedby"?: string }): ReactNode }) {
+function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children(ids: Ids): ReactNode }) {
   const id = useId();
   return (
     <div className="devbi-ed-field">
@@ -72,66 +92,84 @@ function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; 
   );
 }
 
-/** A text box whose typing, from focus to blur, is one undo step. */
+/** A merge key that stays the same from focus to blur: the edits in between are one undo step. */
+function useMergeKey(): { key: () => string; onFocus: () => void } {
+  const id = useId();
+  const session = useRef(0);
+  return { key: () => `${id}#${session.current}`, onFocus: () => void session.current++ };
+}
+
 function TextInput({
   value,
   onChange,
   multiline,
   ...rest
-}: {
-  value: string;
-  onChange(value: string, merge: string): void;
-  multiline?: boolean;
-  id: string;
-  placeholder?: string;
-  "aria-describedby"?: string;
-}) {
-  const key = useId();
-  const session = useRef(0);
-  const common = {
-    ...rest,
-    value,
-    onFocus: () => session.current++,
-    onChange: (e: { target: { value: string } }) => onChange(e.target.value, `${key}#${session.current}`),
-  };
+}: Ids & { value: string; onChange(value: string, merge: string): void; multiline?: boolean; placeholder?: string }) {
+  const merge = useMergeKey();
+  const common = { ...rest, value, onFocus: merge.onFocus, onChange: (e: { target: { value: string } }) => onChange(e.target.value, merge.key()) };
   return multiline ? <textarea {...common} /> : <input type="text" {...common} />;
 }
 
-function DashboardPanel({ metrics, name, spec, onChange }: PanelProps) {
+/** A number box: empty removes the key; something that is not a number yet ("-", "1e") is left alone. */
+function NumberInput({ value, onChange, integer, ...rest }: Ids & { value: number | undefined; onChange(value: number | undefined, merge: string): void; integer?: boolean }) {
+  const merge = useMergeKey();
+  return (
+    <input
+      {...rest}
+      type="number"
+      {...(integer ? { min: 1, step: 1 } : {})}
+      value={value ?? ""}
+      onFocus={merge.onFocus}
+      onChange={(e) => {
+        if (e.target.value === "") {
+          if (!e.target.validity.badInput) onChange(undefined, merge.key());
+          return;
+        }
+        const n = Number(e.target.value);
+        if (Number.isFinite(n) && (!integer || (Number.isInteger(n) && n >= 1))) onChange(n, merge.key());
+      }}
+    />
+  );
+}
+
+/** A metrics file to pick, with the one written in the file even when it does not exist. */
+function MetricsSelect({ metrics, value, empty, onChange, ...ids }: Ids & { metrics: Record<string, MetricsView>; value: string; empty: string; onChange(v: string): void }) {
   const names = Object.keys(metrics).sort();
-  const current = typeof spec.metrics === "string" ? spec.metrics : "";
+  return (
+    <select {...ids} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{empty}</option>
+      {names.map((n) => (
+        <option key={n} value={n}>
+          {metrics[n]!.label}（{n}）
+        </option>
+      ))}
+      {value && !names.includes(value) && <option value={value}>{value}（ありません）</option>}
+    </select>
+  );
+}
+
+const str = (v: unknown) => (typeof v === "string" ? v : "");
+
+function DashboardPanel({ metrics, name, spec, onChange }: PanelProps) {
+  const single = Object.keys(metrics).length === 1;
   return (
     <>
       <h2>ダッシュボード</h2>
       <Field label="見出し" hint={`空のときはファイル名（${name}）`}>
-        {(ids) => (
-          <TextInput {...ids} placeholder={name} value={typeof spec.title === "string" ? spec.title : ""} onChange={(v, merge) => onChange(setDashboardKey(spec, "title", v), merge)} />
-        )}
+        {(ids) => <TextInput {...ids} placeholder={name} value={str(spec.title)} onChange={(v, merge) => onChange(setDashboardKey(spec, "title", v), merge)} />}
       </Field>
       <Field label="説明" hint="見出しの横に出る一文">
-        {(ids) => (
-          <TextInput {...ids} value={typeof spec.description === "string" ? spec.description : ""} onChange={(v, merge) => onChange(setDashboardKey(spec, "description", v), merge)} />
-        )}
+        {(ids) => <TextInput {...ids} value={str(spec.description)} onChange={(v, merge) => onChange(setDashboardKey(spec, "description", v), merge)} />}
       </Field>
-      <Field label="指標ファイル" hint={names.length === 1 ? "指標ファイルが 1 つだけなので、指定しなくても使われます" : "タイルが使う models/<名前>.metrics.yaml"}>
-        {(ids) => (
-          <select {...ids} value={current} onChange={(e) => onChange(setDashboardKey(spec, "metrics", e.target.value))}>
-            <option value="">指定しない</option>
-            {names.map((n) => (
-              <option key={n} value={n}>
-                {metrics[n]!.label}（{n}）
-              </option>
-            ))}
-            {current && !names.includes(current) && <option value={current}>{current}（ありません）</option>}
-          </select>
-        )}
+      <Field label="指標ファイル" hint={single ? "指標ファイルが 1 つだけなので、指定しなくても使われます" : "タイルが使う models/<名前>.metrics.yaml"}>
+        {(ids) => <MetricsSelect {...ids} metrics={metrics} value={str(spec.metrics)} empty="指定しない" onChange={(v) => onChange(setDashboardKey(spec, "metrics", v))} />}
       </Field>
       <p className="devbi-hint">タイルを押すと、そのタイルの種類・見出し・データをここで変えられます。</p>
     </>
   );
 }
 
-function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, clearSelection }: PanelProps & { tile: RawTile }) {
+function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, clearSelection, registerFlush }: PanelProps & { tile: RawTile }) {
   const onTile = (update: (t: RawTile) => RawTile, merge?: string) => onChange(updateTile(spec, tile.id, update), merge);
   const type = typeof tile.type === "string" ? tile.type : undefined;
   const builtin = type && Object.hasOwn(TILE_TYPES, type) ? (type as BuiltinTileType) : undefined;
@@ -140,7 +178,7 @@ function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, cl
   return (
     <>
       <div className="devbi-ed-panel-head">
-        <h2>{typeof tile.title === "string" && tile.title ? tile.title : tile.id}</h2>
+        <h2>{str(tile.title) || tile.id}</h2>
         <button type="button" className="devbi-ed-mini" onClick={() => onSelect(null)}>
           ダッシュボード全体
         </button>
@@ -171,15 +209,16 @@ function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, cl
         </Field>
       )}
       <Field label="見出し" hint="空のときは見出しなし">
-        {(ids) => <TextInput {...ids} value={typeof tile.title === "string" ? tile.title : ""} onChange={(v, merge) => onTile((t) => setTileKey(t, "title", v), merge)} />}
+        {(ids) => <TextInput {...ids} value={str(tile.title)} onChange={(v, merge) => onTile((t) => setTileKey(t, "title", v), merge)} />}
       </Field>
       <IdField
         spec={spec}
         tile={tile}
-        onRename={(id) => {
+        registerFlush={registerFlush}
+        onRename={(id, follow) => {
           clearSelection(tile.id);
           onChange(updateTile(spec, tile.id, (t) => setTileKey(t, "id", id)));
-          onSelect(id);
+          if (follow) onSelect(id);
         }}
       />
       {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} />}
@@ -193,15 +232,40 @@ function TilePanel({ metrics, spec, tile, live, onSelect, onChange, onRemove, cl
   );
 }
 
-/** The tile's id: taken when the box is left or Enter is pressed, and only when no other tile has it. */
-function IdField({ spec, tile, onRename }: { spec: RawDashboard; tile: RawTile; onRename(id: string): void }) {
+/**
+ * The tile's id: taken when the box is left or Enter is pressed, and only when no other tile has it. Pressing
+ * another tile (or between the tiles) takes it first, through `registerFlush`, so it is not lost when the panel
+ * switches to that tile.
+ */
+function IdField({
+  spec,
+  tile,
+  registerFlush,
+  onRename,
+}: {
+  spec: RawDashboard;
+  tile: RawTile;
+  registerFlush(flush: Flush | null): void;
+  /** `follow`: the panel stays on this tile (under its new name). */
+  onRename(id: string, follow: boolean): void;
+}) {
   const [text, setText] = useState(tile.id);
   useEffect(() => setText(tile.id), [tile.id]);
   const problem = idProblem(spec, tile.id, text);
-  const commit = () => {
-    if (problem) setText(tile.id);
-    else if (text !== tile.id) onRename(text);
+  const done = useRef(false);
+  const take = (follow: boolean) => {
+    if (done.current || problem || text === tile.id) return undefined;
+    // Taken on the way out (another tile pressed): a blur that may follow must not take it again.
+    done.current = !follow;
+    onRename(text, follow);
+    return { from: tile.id, to: text };
   };
+  const latest = useRef(take);
+  latest.current = take;
+  useEffect(() => {
+    registerFlush(() => latest.current(false));
+    return () => registerFlush(null);
+  }, [registerFlush]);
   return (
     <Field label="名前（id）" hint={problem ?? "dash.json でタイルを見分ける名前"}>
       {(ids) => (
@@ -211,9 +275,9 @@ function IdField({ spec, tile, onRename }: { spec: RawDashboard; tile: RawTile; 
           value={text}
           aria-invalid={!!problem}
           onChange={(e) => setText(e.target.value)}
-          onBlur={commit}
+          onBlur={() => (problem ? setText(tile.id) : take(true))}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !problem) commit();
+            if (e.key === "Enter") take(true);
           }}
         />
       )}
@@ -229,8 +293,8 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
   const name = metricsNameOf(metrics, spec, tile);
   const view = name && Object.hasOwn(metrics, name) ? metrics[name] : undefined;
   const set = (key: keyof Query, value: unknown, merge?: string) => onTile((t) => setQueryKey(t, key, value), merge);
-  const own = typeof query.metrics === "string" ? query.metrics : "";
-  const dashboardDefault = typeof spec.metrics === "string" ? spec.metrics : names.length === 1 ? names[0] : undefined;
+  const own = str(query.metrics);
+  const dashboardDefault = str(spec.metrics) || (names.length === 1 ? names[0] : undefined);
   // What the tile would say instead of its data (an unknown name, nothing to show), next to the boxes that fix it.
   let problem: string | undefined;
   if (view) {
@@ -247,15 +311,7 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
       {(names.length > 1 || own) && (
         <Field label="指標ファイル">
           {(ids) => (
-            <select {...ids} value={own} onChange={(e) => set("metrics", e.target.value)}>
-              <option value="">ダッシュボードと同じ{dashboardDefault ? `（${dashboardDefault}）` : ""}</option>
-              {names.map((n) => (
-                <option key={n} value={n}>
-                  {metrics[n]!.label}（{n}）
-                </option>
-              ))}
-              {own && !names.includes(own) && <option value={own}>{own}（ありません）</option>}
-            </select>
+            <MetricsSelect {...ids} metrics={metrics} value={own} empty={`ダッシュボードと同じ${dashboardDefault ? `（${dashboardDefault}）` : ""}`} onChange={(v) => set("metrics", v)} />
           )}
         </Field>
       )}
@@ -282,20 +338,7 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
           <FiltersEditor view={view} query={query} live={live} set={set} />
           <SortEditor view={view} query={query} set={set} />
           <Field label="件数" hint="空のときはすべての行">
-            {(ids) => (
-              <input
-                {...ids}
-                type="number"
-                min={1}
-                step={1}
-                value={typeof query.limit === "number" ? query.limit : ""}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (e.target.value === "") set("limit", undefined);
-                  else if (Number.isInteger(n) && n >= 1) set("limit", n, `${tile.id}:limit`);
-                }}
-              />
-            )}
+            {(ids) => <NumberInput {...ids} integer value={typeof query.limit === "number" ? query.limit : undefined} onChange={(n, merge) => set("limit", n, merge)} />}
           </Field>
         </>
       )}
@@ -338,22 +381,26 @@ function NameList({ legend, defs, chosen, onChange }: { legend: string; defs: Re
   );
 }
 
-const plain = (v: Scalar): Scalar => (v instanceof Date ? v.toISOString().slice(0, 10) : v);
+const plain = (v: Scalar): Scalar => (v instanceof Date ? isoDate(v) : v);
 const valueKey = (v: Scalar) => JSON.stringify(plain(v));
 const valueText = (v: Scalar) => (v === null ? "（空欄）" : String(plain(v)));
 
-/** Fixed filters: values of a dimension to keep, or days of the time column. */
-function FiltersEditor({ view, query, live, set }: { view: MetricsView; query: Query; live: boolean; set(key: keyof Query, value: unknown): void }) {
+type EditableRow = Exclude<FilterRow, { kind: "other" }>;
+
+/**
+ * Fixed filters: values of a dimension to keep, or days of the time column. A filter that would filter nothing (no
+ * value checked, no day given) is not written; its box stays open (as a draft) until it is given one or closed.
+ * Boxes are keyed by field, so a box keeps its state (what is typed, focus) when its filter is written or removed.
+ */
+function FiltersEditor({ view, query, live, set }: { view: MetricsView; query: Query; live: boolean; set(key: keyof Query, value: unknown, merge?: string): void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const timeName = view.time?.name;
   const filters = (query.filters ?? []) as unknown[];
-  const fields: [string, string][] = [
-    ...(view.time ? [[view.time.name, view.time.label] as [string, string]] : []),
-    ...Object.entries(view.dimensions).map(([n, d]) => [n, d.label] as [string, string]),
-  ];
+  const fields = fieldsOf(view);
   const labelOf = (f: string) => fields.find(([n]) => n === f)?.[1] ?? f;
-  const used = new Set(filters.map((f) => (isObj(f) ? f.field : undefined)));
-  const write = (at: number | null, row: Exclude<FilterRow, { kind: "other" }>) => {
+  const fieldOf = (f: unknown) => (isObj(f) && typeof f.field === "string" ? f.field : "?");
+  const used = new Set(filters.map(fieldOf));
+  const write = (at: number | null, row: EditableRow, merge?: string) => {
     const f = rowFilter(row);
     const next = [...filters];
     if (at === null) {
@@ -361,75 +408,111 @@ function FiltersEditor({ view, query, live, set }: { view: MetricsView; query: Q
       next.push(f);
       setDraft(null);
     } else if (f) next[at] = f;
-    else next.splice(at, 1);
-    set("filters", next);
+    else {
+      next.splice(at, 1);
+      setDraft(row.field);
+    }
+    set("filters", next, merge);
   };
-  const remove = (at: number) => set("filters", filters.filter((_, i) => i !== at));
-  const rowFor = (field: string): Exclude<FilterRow, { kind: "other" }> =>
-    field === timeName ? { kind: "period", field, from: null, to: null } : { kind: "in", field, values: [] };
-  const editor = (row: Exclude<FilterRow, { kind: "other" }>, at: number | null) =>
-    row.kind === "in" ? (
-      live ? (
-        <LiveValues metrics={view.name} row={row} onChange={(values) => write(at, { ...row, values })} />
-      ) : (
-        <TypedValues row={row} onChange={(values) => write(at, { ...row, values })} />
-      )
-    ) : (
-      <div className="devbi-ed-row">
-        <input type="date" aria-label={`${labelOf(row.field)}の始まり`} value={row.from ?? ""} onChange={(e) => write(at, { ...row, from: e.target.value || null })} />
-        <span>〜</span>
-        <input type="date" aria-label={`${labelOf(row.field)}の終わり（この日を含む）`} value={row.to ?? ""} onChange={(e) => write(at, { ...row, to: e.target.value || null })} />
-      </div>
+  const blank = (field: string): EditableRow => (field === timeName ? { kind: "period", field, from: null, to: null } : { kind: "in", field, values: [] });
+  const seen = new Map<string, number>();
+  const keyOf = (field: string) => {
+    const n = seen.get(field) ?? 0;
+    seen.set(field, n + 1);
+    return `${field}#${n}`;
+  };
+  const boxes = filters.map((f, i) => {
+    const row = filterRow(f, timeName);
+    const field = fieldOf(f);
+    return (
+      <FilterBox key={keyOf(field)} label={labelOf(field)} close="×" closeLabel={`${labelOf(field)}の絞り込みを消す`} onClose={() => set("filters", filters.filter((_, j) => j !== i))}>
+        {row.kind === "other" ? (
+          <>
+            <code className="devbi-ed-code">{JSON.stringify(f)}</code>
+            <small className="devbi-hint">ここでは変えられない形です。dash.json で直してください</small>
+          </>
+        ) : (
+          <FilterInputs view={view} row={row} live={live} labelOf={labelOf} onChange={(r, merge) => write(i, r, merge)} />
+        )}
+      </FilterBox>
     );
+  });
+  if (draft !== null && !used.has(draft)) {
+    boxes.push(
+      <FilterBox key={keyOf(draft)} label={labelOf(draft)} close="やめる" closeLabel={`${labelOf(draft)}の絞り込みをやめる`} onClose={() => setDraft(null)}>
+        <FilterInputs view={view} row={blank(draft)} live={live} labelOf={labelOf} onChange={(r, merge) => write(null, r, merge)} />
+      </FilterBox>,
+    );
+  }
+  const free = fields.filter(([n]) => !used.has(n) && n !== draft);
   return (
     <fieldset>
       <legend>絞り込み</legend>
-      {filters.map((f, i) => {
-        const row = filterRow(f, timeName);
-        const field = row.kind === "other" ? (isObj(f) && typeof f.field === "string" ? f.field : "?") : row.field;
-        return (
-          <div className="devbi-ed-filter" key={i}>
-            <div className="devbi-ed-row">
-              <strong>{labelOf(field)}</strong>
-              <button type="button" className="devbi-ed-mini" aria-label={`${labelOf(field)}の絞り込みを消す`} onClick={() => remove(i)}>
-                ×
-              </button>
-            </div>
-            {row.kind === "other" ? (
-              <>
-                <code className="devbi-ed-code">{JSON.stringify(f)}</code>
-                <small className="devbi-hint">ここでは変えられない形です。dash.json で直してください</small>
-              </>
-            ) : (
-              editor(row, i)
-            )}
-          </div>
-        );
-      })}
-      {draft !== null && (
-        <div className="devbi-ed-filter">
-          <div className="devbi-ed-row">
-            <strong>{labelOf(draft)}</strong>
-            <button type="button" className="devbi-ed-mini" onClick={() => setDraft(null)}>
-              やめる
-            </button>
-          </div>
-          {editor(rowFor(draft), null)}
-        </div>
-      )}
-      {draft === null && fields.some(([n]) => !used.has(n)) && (
+      {boxes}
+      {free.length > 0 && (
         <select aria-label="絞り込みを追加" value="" onChange={(e) => e.target.value && setDraft(e.target.value)}>
           <option value="">＋ 絞り込みを追加</option>
-          {fields
-            .filter(([n]) => !used.has(n))
-            .map(([n, l]) => (
-              <option key={n} value={n}>
-                {l}
-              </option>
-            ))}
+          {free.map(([n, l]) => (
+            <option key={n} value={n}>
+              {l}
+            </option>
+          ))}
         </select>
       )}
     </fieldset>
+  );
+}
+
+function FilterBox({ label, close, closeLabel, onClose, children }: { label: string; close: string; closeLabel: string; onClose(): void; children: ReactNode }) {
+  return (
+    <div className="devbi-ed-filter">
+      <div className="devbi-ed-row">
+        <strong>{label}</strong>
+        <button type="button" className="devbi-ed-mini" aria-label={closeLabel} onClick={onClose}>
+          {close}
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function FilterInputs({
+  view,
+  row,
+  live,
+  labelOf,
+  onChange,
+}: {
+  view: MetricsView;
+  row: EditableRow;
+  live: boolean;
+  labelOf(field: string): string;
+  onChange(row: EditableRow, merge?: string): void;
+}) {
+  const merge = useMergeKey();
+  if (row.kind === "in") {
+    return live ? <LiveValues metrics={view.name} row={row} onChange={(values) => onChange({ ...row, values })} /> : <TypedValues row={row} onChange={(values) => onChange({ ...row, values })} />;
+  }
+  // A date box reports each step of typing a date (the year one digit at a time): one undo step from focus to blur.
+  return (
+    <div className="devbi-ed-row">
+      <input
+        type="date"
+        aria-label={`${labelOf(row.field)}の始まり`}
+        value={row.from ?? ""}
+        onFocus={merge.onFocus}
+        onChange={(e) => onChange({ ...row, from: e.target.value || null }, merge.key())}
+      />
+      <span>〜</span>
+      <input
+        type="date"
+        aria-label={`${labelOf(row.field)}の終わり（この日を含む）`}
+        value={row.to ?? ""}
+        onFocus={merge.onFocus}
+        onChange={(e) => onChange({ ...row, to: e.target.value || null }, merge.key())}
+      />
+    </div>
   );
 }
 
@@ -441,9 +524,8 @@ function LiveValues({ metrics, row, onChange }: { metrics: string; row: Extract<
   const data = useDevbiQuery(query, { crossfilter: false });
   const [search, setSearch] = useState("");
   const chosen = new Set(row.values.map(valueKey));
-  const all = [...row.values, ...data.rows.map((r) => plain(r[row.field] ?? null))];
   const seen = new Set<string>();
-  const values = all.filter((v) => {
+  const values = [...row.values, ...data.rows.map((r) => plain(r[row.field] ?? null))].filter((v) => {
     const k = valueKey(v);
     if (seen.has(k)) return false;
     seen.add(k);
@@ -475,28 +557,33 @@ function LiveValues({ metrics, row, onChange }: { metrics: string; row: Extract<
   );
 }
 
-/** Values typed in, comma-separated (when the data cannot be read: the dashboard has a problem to fix first). */
+/**
+ * Values typed in, comma-separated (when the data cannot be read: the dashboard has a problem to fix first). Only
+ * a changed text is written, and a value written as it was keeps its type (`null`, numbers).
+ */
 function TypedValues({ row, onChange }: { row: Extract<FilterRow, { kind: "in" }>; onChange(values: Scalar[]): void }) {
-  const [text, setText] = useState(row.values.map(valueText).join(", "));
+  const written = row.values.map(valueText).join(", ");
+  const [text, setText] = useState(written);
+  useEffect(() => setText(written), [written]);
   return (
     <input
       type="text"
       aria-label="値（カンマ区切り）"
       value={text}
       onChange={(e) => setText(e.target.value)}
-      onBlur={() =>
-        onChange(
-          text
-            .split(/[,、]/)
-            .map((s) => s.trim())
-            .filter(Boolean),
-        )
-      }
+      onBlur={() => {
+        if (text === written) return;
+        const tokens = text
+          .split(/[,、]/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        onChange(tokens.map((t) => row.values.find((v) => valueText(v) === t) ?? t));
+      }}
     />
   );
 }
 
-/** Sort keys over the tile's output columns. */
+/** Sort keys over the tile's output columns, each column once. */
 function SortEditor({ view, query, set }: { view: MetricsView; query: Query; set(key: keyof Query, value: unknown): void }) {
   const keys = sortKeys(query.sort);
   const outputs: [string, string, boolean][] = [
@@ -506,6 +593,7 @@ function SortEditor({ view, query, set }: { view: MetricsView; query: Query; set
   ];
   const labelOf = (f: string) => outputs.find(([n]) => n === f)?.[1] ?? f;
   const write = (next: typeof keys) => set("sort", sortSpecs(next));
+  const usedElsewhere = (i: number) => new Set(keys.filter((_, j) => j !== i).map((k) => k.field));
   const free = outputs.filter(([n]) => !keys.some((k) => k.field === n));
   return (
     <fieldset>
@@ -513,11 +601,13 @@ function SortEditor({ view, query, set }: { view: MetricsView; query: Query; set
       {keys.map((k, i) => (
         <div className="devbi-ed-row" key={i}>
           <select aria-label={`${i + 1} 番目に並べる列`} value={k.field} onChange={(e) => write(keys.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))}>
-            {outputs.map(([n, l]) => (
-              <option key={n} value={n}>
-                {l}
-              </option>
-            ))}
+            {outputs
+              .filter(([n]) => !usedElsewhere(i).has(n))
+              .map(([n, l]) => (
+                <option key={n} value={n}>
+                  {l}
+                </option>
+              ))}
             {!outputs.some(([n]) => n === k.field) && <option value={k.field}>{k.field}（結果にありません）</option>}
           </select>
           <select
@@ -581,80 +671,56 @@ function OptionsEditor({
     if (restart) clearSelection(tile.id);
     onTile((t) => setOption(t, key, value), merge);
   };
+  const control = (key: string, o: TileOptionSchema, ids: Ids) => {
+    const value = options[key];
+    if (o.enum) {
+      return (
+        <select {...ids} value={str(value)} onChange={(e) => set(key, e.target.value)}>
+          <option value="">既定</option>
+          {o.enum.map((v, i) => (
+            <option key={v} value={v}>
+              {o.enumLabels?.[i] ?? v}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (o.type === "boolean") {
+      return (
+        <select {...ids} value={typeof value === "boolean" ? String(value) : ""} onChange={(e) => set(key, e.target.value === "" ? undefined : e.target.value === "true")}>
+          <option value="">既定</option>
+          <option value="true">はい</option>
+          <option value="false">いいえ</option>
+        </select>
+      );
+    }
+    if (o.type === "number") return <NumberInput {...ids} value={typeof value === "number" ? value : undefined} onChange={(n, merge) => set(key, n, merge)} />;
+    if (o.input === "field") {
+      const fields = view ? fieldsOf(view) : [];
+      const current = str(value);
+      return (
+        <select {...ids} value={current} onChange={(e) => set(key, e.target.value)}>
+          <option value="">既定</option>
+          {fields.map(([n, l]) => (
+            <option key={n} value={n}>
+              {l}
+            </option>
+          ))}
+          {current && !fields.some(([n]) => n === current) && <option value={current}>{current}（ありません）</option>}
+        </select>
+      );
+    }
+    if (o.input === "metrics") return <MetricsSelect {...ids} metrics={metrics} value={str(value)} empty="ダッシュボードと同じ" onChange={(v) => set(key, v)} />;
+    return <TextInput {...ids} multiline={o.input === "text"} value={str(value)} onChange={(v, merge) => set(key, v, merge)} />;
+  };
   return (
     <>
       <h3>表示</h3>
-      {entries.map(([key, o]) => {
-        const value = options[key];
-        return (
-          <Field key={key} label={o.label} hint={o.description}>
-            {(ids) => {
-              if (o.enum) {
-                return (
-                  <select {...ids} value={typeof value === "string" ? value : ""} onChange={(e) => set(key, e.target.value)}>
-                    <option value="">既定</option>
-                    {o.enum.map((v, i) => (
-                      <option key={v} value={v}>
-                        {o.enumLabels?.[i] ?? v}
-                      </option>
-                    ))}
-                  </select>
-                );
-              }
-              if (o.type === "boolean") {
-                return (
-                  <select {...ids} value={typeof value === "boolean" ? String(value) : ""} onChange={(e) => set(key, e.target.value === "" ? undefined : e.target.value === "true")}>
-                    <option value="">既定</option>
-                    <option value="true">はい</option>
-                    <option value="false">いいえ</option>
-                  </select>
-                );
-              }
-              if (o.type === "number") {
-                return (
-                  <input
-                    {...ids}
-                    type="number"
-                    value={typeof value === "number" ? value : ""}
-                    onChange={(e) => set(key, e.target.value === "" ? undefined : Number(e.target.value), `${tile.id}:${key}`)}
-                  />
-                );
-              }
-              if (o.input === "field") {
-                const fields: [string, string][] = view
-                  ? [...(view.time ? [[view.time.name, view.time.label] as [string, string]] : []), ...Object.entries(view.dimensions).map(([n, d]) => [n, d.label] as [string, string])]
-                  : [];
-                return (
-                  <select {...ids} value={typeof value === "string" ? value : ""} onChange={(e) => set(key, e.target.value)}>
-                    <option value="">既定</option>
-                    {fields.map(([n, l]) => (
-                      <option key={n} value={n}>
-                        {l}
-                      </option>
-                    ))}
-                    {typeof value === "string" && value && !fields.some(([n]) => n === value) && <option value={value}>{value}（ありません）</option>}
-                  </select>
-                );
-              }
-              if (o.input === "metrics") {
-                const names = Object.keys(metrics).sort();
-                return (
-                  <select {...ids} value={typeof value === "string" ? value : ""} onChange={(e) => set(key, e.target.value)}>
-                    <option value="">ダッシュボードと同じ</option>
-                    {names.map((n) => (
-                      <option key={n} value={n}>
-                        {metrics[n]!.label}（{n}）
-                      </option>
-                    ))}
-                    {typeof value === "string" && value && !names.includes(value) && <option value={value}>{value}（ありません）</option>}
-                  </select>
-                );
-              }
-              return <TextInput {...ids} multiline={o.input === "text"} value={typeof value === "string" ? value : ""} onChange={(v, merge) => set(key, v, merge)} />;
-            }}
-          </Field>
-        );
-      })}
+      {entries.map(([key, o]) => (
+        <Field key={key} label={o.label} hint={o.description}>
+          {(ids) => control(key, o, ids)}
+        </Field>
+      ))}
     </>
   );
 }
