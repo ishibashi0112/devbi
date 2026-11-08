@@ -7,6 +7,7 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [metrics.yaml](#metricsyaml)（指標と軸）
 - [dash.json](#dashjson)（タイルの並び）
 - [組み込みタイル](#組み込みタイル)
+- [Excel と PDF に書き出す](#excel-と-pdf-に書き出す)
 - [自作タイル（JSX）](#自作タイルjsx)
 - [エディタでの補完と型（pnpm gen）](#エディタでの補完と型pnpm-gen)
 - [書式](#書式)
@@ -263,6 +264,41 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 
 選択は、選んだタイル以外のすべてのタイルにかかります。選んだタイル自身は絞られず、選んだもの以外が薄くなります。選択は画面上のチップで外せます。
 
+## Excel と PDF に書き出す
+
+ダッシュボードの見出しの右に「Excel」と「印刷・PDF」のボタンがあります（ビルドしたサイト、開発サーバー、埋め込み、`<Dashboard>` のどれでも）。どちらも、いま画面に出ている状態（期間や選択での絞り込み）のままを書き出します。サーバーは使わず、ブラウザの中で作ります。
+
+### Excel
+
+ブラウザのダウンロードで `<ダッシュボードのタイトル>_<年月日>-<時分>.xlsx`（例: `売上ダッシュボード_20261108-1023.xlsx`）を保存します。
+
+- 最初のシート「概要」: タイトル、説明、書き出した日時、データの時点（[スナップショット](#毎朝のスナップショット)を読むとき）、いまの絞り込み、タイルの一覧（名前を押すとそのシートへ。行数、メモ）
+- データを読むタイル 1 つにつき 1 シート。ダッシュボードの並び順で、シートの名前はタイルの `title`（なければ `id`。Excel で使えない `[]:*?/\` は空白にし、31 文字まで、同じ名前には `(2)` を付ける）。1 行目にタイトル、2 行目にそのタイルにかかった絞り込み（`query.filters` と、ほかのタイルでの選択）、4 行目から表。表の見出しは固定され、オートフィルタが付きます
+- 行は画面と同じです。ほかのタイルでの選択で絞り、選んだタイル自身は絞りません。`limit` もそのままです。表（`table`）の列のメニューでの並べ替えや絞り込みは入りません（クエリの `order` の順です）
+- 数字は数値のままで、指標の `format` を Excel の表示形式にして付けます（`¥#,##0` → `"¥"#,##0`、`0.0%`・`#,##0"円"`・`正;負;ゼロ` はそのまま。色や条件の `[Red]`・`[>100]` は落とします）。`compact`（万・億）は Excel にないので `#,##0` です。`format` のない指標は `#,##0`（小数は `#,##0.0#`）
+- 日付は日付のままで、時間の粒度の表示形式です（月は `2026年4月`、年は `2026年`、年度は `2026年度`、週は `2026/4/6週`、日は `2026/4/1`）。四半期は Excel に表示形式がないので、`2026年Q2` の文字です。真偽（はい・いいえ）も文字です。指標でない 16 桁以上の整数（コードや ID）は、Excel が 15 桁までしか持たないので文字で書きます
+- `pivot` は画面と同じクロス集計で、合計の行と列が付きます（行の項目がないときは、1 行だけなので合計の行は付けません）。「概要」の行数は、クロス集計の行の数です
+- 自作タイル（JSX）は、`query` を export しているものだけ、その結果の表を書きます。自分でデータを読むタイルは、「概要」のメモに「書き出せません」と書いて飛ばします。`markdown` と `date-range` はシートを作りません
+- エラーになったタイルは、「概要」のメモにエラーを書き、ほかのタイルは書き出します。1 シートは Excel の上限（1,048,576 行）までです。列の上限（16,384 列）を超える `pivot`（列の項目の値が多すぎるもの）は、メモに書いて飛ばします
+- 大きな表は時間がかかります（12 列 10 万行で数秒）。書き出しているあいだ、ボタンは「書き出し中…」です
+
+### 印刷・PDF
+
+ブラウザの印刷の画面を開きます。送り先を「PDF に保存」（Safari は「PDF として保存」）にすると PDF になります。PDF の名前は `<タイトル>_<年月日>` です。
+
+- 画面のとおりのダッシュボードを、見えない枠（iframe）に写して印刷します。埋め込んだダッシュボードでも、まわりのページは印刷しません。画面はそのままです
+- 写すのは、ダッシュボード（`.devbi-root`）と、埋め込みならそれを置いた要素の `data-devbi…` 属性、それにページのスタイルすべて（`<style>`・`<link>`、CSS-in-JS が足したものも）です。ページの CSS の `:not([data-devbi] *)` は写しでも効きます。外側の要素に付けた指定（`#report-area .devbi-root { … }`、`html.dark .devbi-root { … }`）は写しに届かないので、色を変えるときは `.devbi-root` か `[data-devbi]` に書いてください
+- 用紙は横向きです。画面の幅のまま並べて、紙の幅（A4 の横）に収まるように縮めます。ダークモードでも、白地の明るい色で印刷します。プロジェクトで変えた色（`.devbi-root { --devbi-accent: … }`）はそのままです
+- 印刷するのは、ボタン・チップの ×・「すべて解除」・一覧へのリンクを除いたものです。見出しの右に、印刷した時刻（「2026/11/8 10:23 の表示」）が付きます
+- タイルがページの境目で切れないように、どのタイルもまたがない行の区切りで改ページします（1 ページより高いタイルの並びは途中で切れます）。幅が 720px より狭くタイルが 1 列のときは、どのタイルの間でも改ページします
+- 読み込み中のタイルがあれば、読み終わるのを待ちます（20 秒まで）
+- 表（`table`）とスクロールする一覧は、画面に見えている行だけです（スクロールした位置のまま）。全部の行は Excel で
+- ブラウザのメニューの「印刷」（Ctrl+P・⌘+P）でも、白地の明るい色で、ボタンなしで印刷します。ただしページ全体を印刷し、グラフは画面の大きさのままです
+
+### ボタンを出さない
+
+`<Dashboard exports={false}>`、`<DevbiApp exports={false}>`、`mountDashboard(要素, project, { exports: false })`、`devbi-embed.js` の `mount(…, { exports: false })`、埋め込みの属性 `data-devbi-exports="false"`。
+
 ## 自作タイル（JSX）
 
 `dashboards/` の中に `.tsx` か `.jsx` を置き、dash.json の `component` で指します。GUI エディタの「[コードにする](#コードにする)」で、組み込みのタイルから同じ見た目のファイルを書き出して始めることもできます。
@@ -369,6 +405,8 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 | `compact:¥:` / `compact::件` | 34000 | ¥3.4万 / 3.4万件 |
 
 `format` がないときは、整数は桁区切り、小数は 2 桁までです。時間は粒度に合わせて「2026年5月」「2026年Q2」「2026年度」「2026/5/4週」「2026/5/1」と表示します。
+
+「Excel」のボタンで書き出すと、同じ書式が Excel の表示形式になります（[書き出し](#excel)）。
 
 ## @devbi/vite
 
@@ -959,10 +997,12 @@ export default { base: "./", plugins: [react(), devbi({ embed: true })] };
 | --- | --- |
 | `data-devbi` | ダッシュボードの名前（`dashboards/<名前>.dash.json`）。ダッシュボードが 1 つだけなら空でよい |
 | `data-devbi-theme` | `light`、`dark`、`auto`（既定。OS の設定に合わせる）。明るい画面に置くときは `light` |
+| `data-devbi-exports` | `false` で、「Excel」「印刷・PDF」のボタンを出さない（[書き出し](#excel-と-pdf-に書き出す)） |
 | `data-devbi-api` | 読み取り API の場所（`read_api` を使うとき）。既定は `devbi-embed.js` と同じ場所の `api/`。アプリに API を足したときは、その場所（例: `/MyApp/devbi/api/`）。相対パス（`api2/`）は、ページではなく `devbi-embed.js` のある場所からです。ページとも `devbi-embed.js` とも違うサーバーは使いません（要るときは JavaScript の `mount` に `apiUrl` で渡します） |
 
 - `<script type="module">` は、ページを読み終わってから動きます。`<head>` に書いても、div より前に書いてもかまいません。
 - 1 つのページに、いくつでも置けます。DuckDB のエンジンは `devbi-embed.js` 1 本につき 1 つで、API の場所が違うダッシュボードも同じエンジンを使います。
+- 「印刷・PDF」は、ダッシュボードだけを印刷します（まわりのページは入りません）。ページの CSS は写しにも入りますが、外側の要素に付けた指定は届きません（[印刷・PDF](#印刷pdf)）。
 - 幅は置いた場所いっぱいです。高さはタイルの並びで決まり、スクロールはページのものです。置いた場所の幅が 720px より狭いと、スマートフォンと同じようにタイルを 1 列に並べます（画面の幅ではなく、ダッシュボードの幅で決めます）。
 - ページの CSS のうち、要素の名前だけの指定（`h1 { … }`、`td { … }`、`ul { … }`、`button { … }` など）は、ダッシュボードの中ではブラウザの既定に戻します。文字の揃えや字間など、ページから引き継ぐ指定も戻します。ページの CSS が `@layer` の中にあれば、どれだけ強くても戻します。
 - 戻せないもの: ID・クラス・属性・疑似クラスの付いた指定（`#main td { … }`、`.content h2 { … }`、`tr:nth-child(odd) td { … }`、`a:link { … }`）は DevBI の打ち消しより強いので、ダッシュボードの中にも届きます。そのときはページの CSS の側で、`:not([data-devbi] *)` を付けるなどして `[data-devbi]` の中を外してください。`div`、`span`、`svg`、`img` への指定も戻しません。
@@ -983,7 +1023,7 @@ export default { base: "./", plugins: [react(), devbi({ embed: true })] };
 | 名前 | 中身 |
 | --- | --- |
 | `dashboards` | ダッシュボードの一覧（`name`、`title`、`description`）。画面のメニューを作るとき |
-| `mount(要素かセレクタ, { dashboard?, theme?, apiUrl?, fetch?, isolate? })` | ダッシュボードを出す。書かなかったものは要素の `data-devbi…` 属性から取る。`isolate: false` で、ページの CSS を打ち消さない（既定は `true`）。同じ要素にもう一度呼ぶと切り替わる（ダッシュボード・API・`fetch` が変わると最初から、`theme` だけなら絞り込みはそのまま）。戻り値の `unmount()` は、そのあと同じ要素に `mount` し直していたら何もしない。`fetch` は API を呼ぶときに使う関数（ヘッダーを足すとき） |
+| `mount(要素かセレクタ, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports? })` | ダッシュボードを出す。書かなかったものは要素の `data-devbi…` 属性から取る。`isolate: false` で、ページの CSS を打ち消さない（既定は `true`）。`exports: false` で「Excel」「印刷・PDF」のボタンを出さない。同じ要素にもう一度呼ぶと切り替わる（ダッシュボード・API・`fetch` が変わると最初から、`theme` だけなら絞り込みはそのまま）。戻り値の `unmount()` は、そのあと同じ要素に `mount` し直していたら何もしない。`fetch` は API を呼ぶときに使う関数（ヘッダーを足すとき） |
 | `mountAll(root?)` | `data-devbi` の付いた要素のうち、まだ出していないものに出す。ページから消えた要素のものは片付ける。`unmount` で消した要素には出さない。ページにほかのプロジェクトの `devbi-embed.js` があれば、そちらのダッシュボードもそちらが出す。戻り値は新しく出した数 |
 | `unmount(要素かセレクタ)` | ダッシュボードを消す（ページのどの `devbi-embed.js` が出したものでも）。もう一度出すときは `mount` |
 
@@ -1065,9 +1105,9 @@ function DevbiDashboard({ name }: { name: string }) {
 
 | 名前 | 中身 |
 | --- | --- |
-| `<DevbiApp project={…} theme? />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す。開発サーバーで `@devbi/editor` が入っていると、「編集」と「＋ 新しいダッシュボード」を出す（[GUI エディタ](#gui-エディタdevbieditor)） |
-| `<Dashboard project={…} name="sales" back?="#/" theme? isolate? actions? />` | ダッシュボード 1 つ。`actions` は見出しの右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
-| `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
+| `<DevbiApp project={…} theme? exports? />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す。開発サーバーで `@devbi/editor` が入っていると、「編集」と「＋ 新しいダッシュボード」を出す（[GUI エディタ](#gui-エディタdevbieditor)）。`exports={false}` で「Excel」「印刷・PDF」のボタンを出さない |
+| `<Dashboard project={…} name="sales" back?="#/" theme? isolate? exports? actions? />` | ダッシュボード 1 つ。見出しの右に「Excel」「印刷・PDF」のボタン（[書き出し](#excel-と-pdf-に書き出す)。`exports={false}` で出さない）。`actions` はその右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
+| `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
 | `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
 | `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`。型は `DevServer`） |
 | `themeAttribute(theme)` / `injectStyles()` | `.devbi-root` に付ける `data-theme` / DevBI の CSS をページに入れる（`<Dashboard>` は自分で入れる）。GUI エディタが使う |
@@ -1098,7 +1138,10 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `apiCalls(sql)` / `snapshotFile(name, params)` | `model` の中の `read_api` の名前とパラメーター / そのスナップショットのファイル名（ブラウザとサーバーで同じ） |
 | `readXlsx(bytes, { sheet?, range?, header?, allVarchar? })` | Excel を型つきの列で読む。戻り値は `{ sheet, rowCount, columns: [{ name, type, values }] }` |
 | `listSheets(bytes)` | シートの名前 |
-| `writeXlsx([{ name, rows }])` | Excel を書く（テストやサンプルデータ用） |
+| `writeXlsx([{ name, rows }])` | Excel を書く（テストやサンプルデータ用。シートごとに表 1 つ、日付は Excel の日付） |
+| `Workbook` | 書式つきの Excel を書く（依存なし）。`new Workbook({ font? })`（既定は游ゴシック）、`book.sheet(名前)`（Excel で使える名前にして、重なれば `(2)` を付ける）、`sheet.add(...セル)` で 1 行（セルは値か `{ v, s?, link?, text?, noWidth? }`。`s` は `{ bold, italic, underline, strike, size, color, fill, border, wrap, format }`、`format` は Excel の表示形式。`link` は `'シート'!A1` のようなブックの中の場所。`text` は列幅を決める表示の文字）、`sheet.skip(n?)`、`sheet.freeze = { rows, cols? }`、`sheet.filter = [見出しの行, 最後の行, 列の数]`（0 から数える）、`sheet.widths`（列幅を決めるとき）、`await book.toBytes()`。日付は Excel の日付になる（表示形式がなければ `yyyy/m/d`、時刻があれば `yyyy/m/d h:mm`）。数値はどれも数値で書く（Excel は 15 桁まで）。列幅は中身から（全角は 2 文字ぶん、60 まで）。印刷は A4 横で幅に合わせる。1 シートは 1,048,576 行・16,384 列まで（`MAX_ROWS`・`MAX_COLS`。超えると `add` がエラー） |
+| `addResultTable(sheet, rows, fields, { fiscalYearStart? })` / `resultCell(value, field, fiscalYearStart?, style?)` | クエリの結果（`rows` と `fields`）を、見出しつきの表で書く（見出しを固定し、オートフィルタを付ける）/ 結果の値 1 つをセルにする。数値と日付はそのままで、[書き出し](#excel)と同じ表示形式になる。「Excel」のボタンが使う |
+| `excelNumberFormat(format)` / `excelTimeFormat(grain, fiscalYearStart?, withTime?)` | [書式](#書式)を Excel の表示形式にする / 時間の粒度を Excel の表示形式にする（四半期は `undefined`） |
 | `formatNumber(value, format?)` / `formatTime(date, grain?, fiscalYearStart?)` / `formatValue(value, field?)` | [書式](#書式)どおりの文字にする |
 | `getMeasure(view, name)` / `getDimension(view, name)` | 名前で引く |
 | `defineQuery(query)` / `RowOf<typeof query>` | 名前を検査するクエリと、その行の型（[自作タイル](#自作タイルjsx)） |
@@ -1132,6 +1175,8 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `--devbi-accent` / `--devbi-accent-soft` | 強調と選択 | `#3b6fe0` / `#7c9cf5` |
 | `--devbi-up` / `--devbi-down` | 前年比などの良し悪し | `#12805c`・`#c4320a` / `#4cc38a`・`#ff8a65` |
 | `--devbi-radius` | タイルの角の丸み | `10px` |
+
+印刷（「印刷・PDF」とブラウザの印刷）では、背景を白（`--devbi-bg: #ffffff`）にし、ダークの色が効くところ（OS のダークモードや `data-theme="dark"`）にはライトの色を入れます。上のように `.devbi-root` で変えた色は、紙の上でもそのままです。紙の上だけ色を変えるときは、`@media print { .devbi-root.devbi-root { --devbi-accent: …; } }` のように書きます（クラスを 2 つ重ねると、ダークモードから印刷するときも効きます）。
 
 自作タイルでもこの変数を使えば、ダークモードに合わせて色が変わります。
 

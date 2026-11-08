@@ -38,7 +38,7 @@ export {
   type CompiledQuery,
 } from "./compile.js";
 export { ident, literal, timeLiteral, isoDate, isoTimestamp, hasUrlScheme, scanSources, apiParams, apiCalls, snapshotFile, unquoteString, type SourceRef, type SourceFormat, type ApiParamValue } from "./sql.js";
-export { formatNumber, formatTime, formatValue } from "./format.js";
+export { formatNumber, formatTime, formatValue, excelNumberFormat, excelTimeFormat } from "./format.js";
 export {
   readXlsx,
   listSheets,
@@ -50,3 +50,5 @@ export {
   type XlsxValue,
 } from "./xlsx/read.js";
 export { writeXlsx, type XlsxSheet, type XlsxCell } from "./xlsx/write.js";
+export { Workbook, MAX_ROWS, MAX_COLS, sheetRef, type Sheet, type Cell, type CellStyle, type CellValue } from "./xlsx/workbook.js";
+export { resultCell, addResultTable, TABLE_STYLES } from "./xlsx/result.js";

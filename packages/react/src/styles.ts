@@ -1,3 +1,16 @@
+/** The light colors (the default; on paper always). */
+const LIGHT = `
+    --devbi-bg: #f6f7f9;
+    --devbi-card: #ffffff;
+    --devbi-text: #1d2330;
+    --devbi-muted: #667085;
+    --devbi-border: #e3e6eb;
+    --devbi-accent: #3b6fe0;
+    --devbi-accent-soft: rgba(59, 111, 224, 0.14);
+    --devbi-up: #12805c;
+    --devbi-down: #c4320a;
+`;
+
 /** The dark colors: under the OS's dark mode (unless `data-theme="light"`), or with `data-theme="dark"`. */
 const DARK = `
     --devbi-bg: #12151b;
@@ -13,17 +26,7 @@ const DARK = `
 
 /** Default styles, injected once. Override the custom properties to theme. */
 export const css = `
-.devbi-root {
-  --devbi-bg: #f6f7f9;
-  --devbi-card: #ffffff;
-  --devbi-text: #1d2330;
-  --devbi-muted: #667085;
-  --devbi-border: #e3e6eb;
-  --devbi-accent: #3b6fe0;
-  --devbi-accent-soft: rgba(59, 111, 224, 0.14);
-  --devbi-up: #12805c;
-  --devbi-down: #c4320a;
-  --devbi-radius: 10px;
+.devbi-root {${LIGHT}  --devbi-radius: 10px;
   background: var(--devbi-bg);
   color: var(--devbi-text);
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP", sans-serif;
@@ -188,6 +191,34 @@ export const css = `
 .devbi-root[data-devbi-narrow] .devbi-dashboard { padding: 12px 16px 24px; }
 .devbi-root[data-devbi-narrow] .devbi-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
 .devbi-root[data-devbi-narrow] .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
+.devbi-actions > .devbi-error { align-self: center; }
+.devbi-printed { display: none; }
+/* On paper (the 印刷・PDF button's copy of the dashboard, or the browser's own print of the page): light colors on white,
+   with the bars' and chips' colors kept, no buttons, and a tile kept on one page. Light colors only where the dark ones
+   would apply (the same selectors, after them), so a project's own colors (.devbi-root { --devbi-accent: … }) stay. */
+@media print {
+  .devbi-root {
+    --devbi-bg: #ffffff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .devbi-root[data-theme="dark"] {${LIGHT}  --devbi-bg: #ffffff;
+    color-scheme: light;
+  }
+}
+@media print and (prefers-color-scheme: dark) {
+  .devbi-root:not([data-theme="light"]) {${LIGHT}  --devbi-bg: #ffffff;
+    color-scheme: light;
+  }
+}
+@media print {
+  .devbi-root .devbi-actions, .devbi-root .devbi-back, .devbi-root .devbi-chip button, .devbi-root .devbi-clear-all,
+  .devbi-root .devbi-clear, .devbi-root .devbi-filters .devbi-hint { display: none; }
+  .devbi-root .devbi-filters:not(:has(.devbi-chip)) { display: none; }
+  .devbi-root .devbi-printed { display: block; margin: 0; color: var(--devbi-muted); font-size: 12px; }
+  .devbi-tile { break-inside: avoid; }
+  .devbi-tile.devbi-loading::after { display: none; }
+}
 `;
 
 let injected = false;

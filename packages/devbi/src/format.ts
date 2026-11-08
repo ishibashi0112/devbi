@@ -109,6 +109,9 @@ function patterns(format: string): NumberPattern[] {
 }
 
 const compact = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFractionDigits: 1 });
+// Made once: a table (or an Excel export) formats 100,000s of numbers, and making a formatter takes longer than using it.
+const plain = [new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 0 }), new Intl.NumberFormat("ja-JP", { maximumFractionDigits: 2 })];
+const formatters = new WeakMap<NumberPattern, Intl.NumberFormat>();
 
 /**
  * Format a number with a subset of Excel number formats:
@@ -119,7 +122,7 @@ const compact = new Intl.NumberFormat("ja-JP", { notation: "compact", maximumFra
 export function formatNumber(value: number, format?: string): string {
   if (!Number.isFinite(value)) return Number.isNaN(value) ? "" : value > 0 ? "∞" : "-∞";
   if (!format) {
-    return value.toLocaleString("ja-JP", { maximumFractionDigits: Number.isInteger(value) ? 0 : 2 });
+    return plain[Number.isInteger(value) ? 0 : 1]!.format(value);
   }
   if (format === "compact") return compact.format(value);
   if (format.startsWith("compact:")) {
@@ -142,12 +145,17 @@ export function formatNumber(value: number, format?: string): string {
   if (p.literal) return p.prefix;
   if (p.percent) v *= 100;
   v /= p.scale;
-  const body = v.toLocaleString("ja-JP", {
-    minimumFractionDigits: p.minFrac,
-    maximumFractionDigits: p.maxFrac,
-    useGrouping: p.group,
-    minimumIntegerDigits: Math.max(1, p.minInt),
-  });
+  let formatter = formatters.get(p);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat("ja-JP", {
+      minimumFractionDigits: p.minFrac,
+      maximumFractionDigits: p.maxFrac,
+      useGrouping: p.group,
+      minimumIntegerDigits: Math.max(1, p.minInt),
+    });
+    formatters.set(p, formatter);
+  }
+  const body = formatter.format(v);
   const rounded = Number(body.replace(/,/g, "")) === 0;
   return `${rounded ? "" : sign}${p.prefix}${body}${p.suffix}`;
 }
@@ -189,4 +197,58 @@ export function formatValue(value: unknown, field?: Pick<FieldInfo, "format" | "
   if (typeof value === "bigint") return formatNumber(Number(value), field?.format);
   if (typeof value === "boolean") return value ? "はい" : "いいえ";
   return String(value);
+}
+
+/** Literal text in an Excel number format: quoted, a `"` escaped; `%` left bare where it scales by 100. */
+function excelLiteral(text: string, percent: boolean): string {
+  const quote = (s: string) =>
+    s
+      .split('"')
+      .map((p) => (p ? `"${p}"` : ""))
+      .join('\\"');
+  return percent ? text.split("%").map(quote).join("%") : quote(text);
+}
+
+/**
+ * The Excel number format for a DevBI one (`format` in metrics.yaml), so a value written to xlsx shows in Excel as on
+ * the dashboard. Rebuilt from what {@link formatNumber} reads, so it is always a code Excel accepts: literal text quoted,
+ * colors and conditions (`[Red]`, `[>100]`) left out. `compact` (万・億) has no Excel format: `#,##0`.
+ */
+export function excelNumberFormat(format: string): string {
+  if (format === "compact" || format.startsWith("compact:")) {
+    const [, pre = "", post = ""] = format.split(":");
+    return `${excelLiteral(pre, false)}#,##0${excelLiteral(post, false)}`;
+  }
+  return patterns(format)
+    // positive;negative;zero (a 4th section is for text, which formatNumber never shows)
+    .slice(0, 3)
+    .map((p) => {
+      if (p.literal) return excelLiteral(p.prefix, false);
+      const int = p.group ? `#,##${"0".repeat(Math.max(1, p.minInt))}` : "0".repeat(Math.max(1, p.minInt));
+      const frac = p.maxFrac > 0 ? `.${"0".repeat(p.minFrac)}${"#".repeat(p.maxFrac - p.minFrac)}` : "";
+      const scale = ",".repeat(Math.round(Math.log10(p.scale) / 3));
+      return `${excelLiteral(p.prefix, p.percent)}${int}${frac}${scale}${excelLiteral(p.suffix, p.percent)}`;
+    })
+    .join(";");
+}
+
+/**
+ * The Excel date format that shows a time bucket as {@link formatTime} labels it (`2026年4月`). None for quarters,
+ * which Excel cannot show: write their label as text.
+ */
+export function excelTimeFormat(grain: Grain | undefined, fiscalYearStart = 1, withTime = false): string | undefined {
+  switch (grain) {
+    case "year":
+      return 'yyyy"年"';
+    case "fiscal_year":
+      return fiscalYearStart === 1 ? 'yyyy"年"' : 'yyyy"年度"';
+    case "quarter":
+      return undefined;
+    case "month":
+      return 'yyyy"年"m"月"';
+    case "week":
+      return 'yyyy/m/d"週"';
+    default:
+      return withTime ? "yyyy/m/d hh:mm" : "yyyy/m/d";
+  }
 }

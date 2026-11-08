@@ -66,22 +66,48 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
-export function crc32(data: Uint8Array): number {
-  let c = 0xffffffff;
+/** CRC-32 of `data`, or of what came before it (`crc` of that) and then `data`. */
+export function crc32(data: Uint8Array, crc = 0): number {
+  let c = (crc ^ 0xffffffff) >>> 0;
   for (let i = 0; i < data.length; i++) c = CRC_TABLE[(c ^ data[i]!) & 0xff]! ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
+/** Text in parts, one after another (too long for one string: a sheet of 1,000,000 rows). */
+export type TextParts = readonly string[];
+
+/** Deflate an entry: its compressed bytes, CRC and size. Text in parts is encoded a batch at a time, never all at once. */
+async function deflate(data: Uint8Array | string | TextParts): Promise<{ deflated: Uint8Array; crc: number; size: number }> {
+  if (typeof data === "string" || data instanceof Uint8Array) {
+    const raw = typeof data === "string" ? textEncoder.encode(data) : data;
+    return { deflated: await pipe(raw, new CompressionStream("deflate-raw")), crc: crc32(raw), size: raw.length };
+  }
+  let crc = 0;
+  let size = 0;
+  let i = 0;
+  const source = new ReadableStream<BufferSource>({
+    pull(controller) {
+      if (i >= data.length) return controller.close();
+      let batch = "";
+      while (i < data.length && batch.length < 1 << 20) batch += data[i++];
+      const bytes = textEncoder.encode(batch);
+      crc = crc32(bytes, crc);
+      size += bytes.length;
+      controller.enqueue(bytes);
+    },
+  });
+  const deflated = new Uint8Array(await new Response(source.pipeThrough(new CompressionStream("deflate-raw"))).arrayBuffer());
+  return { deflated, crc, size };
+}
+
 /** Build a ZIP archive. Entries are deflated. */
-export async function writeZip(files: { name: string; data: Uint8Array | string }[]): Promise<Uint8Array> {
+export async function writeZip(files: { name: string; data: Uint8Array | string | TextParts }[]): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;
   for (const f of files) {
-    const raw = typeof f.data === "string" ? textEncoder.encode(f.data) : f.data;
-    const deflated = await pipe(raw, new CompressionStream("deflate-raw"));
+    const { deflated, crc, size } = await deflate(f.data);
     const name = textEncoder.encode(f.name);
-    const crc = crc32(raw);
     const local = new Uint8Array(30 + name.length);
     const lv = new DataView(local.buffer);
     lv.setUint32(0, 0x04034b50, true);
@@ -90,7 +116,7 @@ export async function writeZip(files: { name: string; data: Uint8Array | string 
     lv.setUint16(8, 8, true);
     lv.setUint32(14, crc, true);
     lv.setUint32(18, deflated.length, true);
-    lv.setUint32(22, raw.length, true);
+    lv.setUint32(22, size, true);
     lv.setUint16(26, name.length, true);
     local.set(name, 30);
     const cent = new Uint8Array(46 + name.length);
@@ -102,7 +128,7 @@ export async function writeZip(files: { name: string; data: Uint8Array | string 
     cv.setUint16(10, 8, true);
     cv.setUint32(16, crc, true);
     cv.setUint32(20, deflated.length, true);
-    cv.setUint32(24, raw.length, true);
+    cv.setUint32(24, size, true);
     cv.setUint16(28, name.length, true);
     cv.setUint32(42, offset, true);
     cent.set(name, 46);

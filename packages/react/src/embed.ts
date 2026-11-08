@@ -35,10 +35,12 @@ export function optionsFromAttributes(el: Element): MountOptions {
   const theme = el.getAttribute("data-devbi-theme") ?? "";
   const api = el.getAttribute("data-devbi-api");
   const name = el.getAttribute("data-devbi");
+  const exports = el.getAttribute("data-devbi-exports");
   return {
     ...(name ? { dashboard: name } : {}),
     ...(api ? { apiUrl: api } : {}),
     ...(THEMES.includes(theme) ? { theme: theme as Theme } : {}),
+    ...(exports === "false" ? { exports: false } : {}),
   };
 }
 

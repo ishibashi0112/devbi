@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { isDateFormat, listSheets, readXlsx, writeXlsx } from "../src/index.js";
-import { readZip, writeZip } from "../src/xlsx/zip.js";
+import { MAX_COLS, TABLE_STYLES, Workbook, addResultTable, isDateFormat, listSheets, readXlsx, resultCell, sheetRef, writeXlsx } from "../src/index.js";
+import { crc32, readZip, writeZip } from "../src/xlsx/zip.js";
 
 const fixture = readFileSync(new URL("./fixtures/openpyxl.xlsx", import.meta.url));
 
@@ -126,5 +126,124 @@ describe("isDateFormat", () => {
     ["[Red]0.0", false],
   ])("%s → %s", (code, expected) => {
     expect(isDateFormat(code)).toBe(expected);
+  });
+});
+
+describe("Workbook (styles, number formats, frozen headers)", () => {
+  const xml = async (bytes: Uint8Array, name: string) => (await readZip(bytes).get(name)!.text()) as string;
+
+  it("writes numbers, dates and text that readXlsx reads back, with their formats", async () => {
+    const book = new Workbook();
+    const sheet = book.sheet("売上");
+    sheet.add({ v: "月", s: TABLE_STYLES.header }, { v: "売上", s: TABLE_STYLES.header }, { v: "比", s: TABLE_STYLES.header });
+    sheet.add({ v: new Date("2026-04-01T00:00:00Z"), s: { format: 'yyyy"年"m"月"' } }, { v: 1234567, s: { format: '"¥"#,##0' } }, { v: 1.0614167144132196, s: { format: "0.0%" } });
+    sheet.add(new Date("2026-05-01T09:30:00Z"), -500, 0.5);
+    sheet.freeze = { rows: 1 };
+    sheet.filter = [0, 2, 3];
+    const bytes = await book.toBytes();
+    const t = await readXlsx(bytes);
+    expect(t.columns).toEqual([
+      { name: "月", type: "TIMESTAMP", values: [new Date("2026-04-01T00:00:00Z"), new Date("2026-05-01T09:30:00Z")] },
+      { name: "売上", type: "BIGINT", values: [1234567, -500] },
+      { name: "比", type: "DOUBLE", values: [1.0614167144132196, 0.5] },
+    ]);
+    const styles = await xml(bytes, "xl/styles.xml");
+    expect(styles).toContain('<numFmt numFmtId="164" formatCode="yyyy&quot;年&quot;m&quot;月&quot;"/>');
+    expect(styles).toContain('formatCode="&quot;¥&quot;#,##0"');
+    expect(styles).toContain('formatCode="yyyy/m/d h:mm"'); // a date without a format
+    expect(styles).toContain('<xf numFmtId="0" fontId="1" fillId="2" borderId="1"'); // the header: bold, gray, bordered
+    const sheetXml = await xml(bytes, "xl/worksheets/sheet1.xml");
+    expect(sheetXml).toContain('<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>');
+    expect(sheetXml).toContain('<autoFilter ref="A1:C3"/>');
+    expect(await xml(bytes, "xl/workbook.xml")).toContain(`<definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'売上'!$A$1:$C$3</definedName>`);
+  });
+
+  it("names sheets as Excel allows: 31 characters, no []:*?/\\, each once", async () => {
+    const book = new Workbook();
+    const names = ["地域 / 四半期", "a".repeat(40), "A".repeat(40), "[x]", "", "'q'", "😀".repeat(20), "売上(月)", "売上（月）"].map(
+      (n) => book.sheet(n).name,
+    );
+    expect(names).toEqual(["地域   四半期", "a".repeat(31), `${"A".repeat(27)} (2)`, "x", "Sheet", "q", "😀".repeat(15), "売上(月)", "売上（月） (2)"]);
+    expect(await listSheets(await book.toBytes())).toEqual(names);
+  });
+
+  it("links to other sheets, writes numbers as numbers and sizes the columns", async () => {
+    const book = new Workbook();
+    const first = book.sheet("概要");
+    const other = book.sheet("O'Neil");
+    first.add({ v: "見る", link: `${sheetRef(other.name)}!A1` }, { v: 1234567890123456 }, { v: 12345678901234 }, new Date("2026-04-01T00:00:00Z"));
+    first.add({ v: "とても長い見出しの列です", noWidth: true }, { v: 1, text: "¥1,000,000,000" });
+    const bytes = await book.toBytes();
+    const s = await xml(bytes, "xl/worksheets/sheet1.xml");
+    expect(s).toContain(`<hyperlink ref="A1" location="'O''Neil'!A1"/>`);
+    expect(s).toContain('<c r="B1"><v>1234567890123456</v></c>');
+    expect(s).toContain('<c r="C1"><v>12345678901234</v></c>');
+    // A: 見る (4 wide; the long text is left out), B: the 16 digits (wider than the 14 characters shown below it),
+    // D: the date as Excel shows it (2026/4/1), not as JavaScript writes it
+    expect(s).toContain(
+      '<col min="1" max="1" width="6" customWidth="1"/><col min="2" max="2" width="18" customWidth="1"/>' +
+        '<col min="3" max="3" width="16" customWidth="1"/><col min="4" max="4" width="12" customWidth="1"/>',
+    );
+    expect((await readXlsx(bytes)).columns[1]).toMatchObject({ type: "BIGINT" });
+  });
+
+  it("stops at Excel's 16,384 columns", () => {
+    const sheet = new Workbook().sheet("s");
+    expect(() => sheet.add(...Array.from({ length: MAX_COLS + 1 }, () => 1))).toThrow("16,384 列まで");
+    expect(sheet.rowCount).toBe(0);
+  });
+
+  it("writes a sheet's rows in batches (a sheet can be longer than one string can be)", async () => {
+    const book = new Workbook();
+    const sheet = book.sheet("s");
+    for (let i = 0; i < 30_000; i++) sheet.add(`行 ${i}`, i);
+    const bytes = await book.toBytes();
+    const t = await readXlsx(bytes);
+    expect(t.columns[1]!.values.length).toBe(29_999);
+    expect(t.columns[1]!.values.at(-1)).toBe(29_999);
+    const text = new TextEncoder().encode("hello, world");
+    expect(crc32(text.subarray(5), crc32(text.subarray(0, 5)))).toBe(crc32(text));
+    expect(crc32(text)).toBe(0xffab723a);
+  });
+});
+
+describe("resultCell and addResultTable (a query result in xlsx)", () => {
+  it("keeps numbers and dates, in the formats the dashboard shows", () => {
+    const month = { kind: "time", grain: "month" } as const;
+    expect(resultCell(1234, { kind: "measure", format: "¥#,##0" })).toMatchObject({ v: 1234, s: { format: '"¥"#,##0', border: true }, text: "¥1,234" });
+    expect(resultCell(123456789, { kind: "measure", format: "compact" })).toMatchObject({ v: 123456789, s: { format: "#,##0" }, text: "123,456,789" });
+    expect(resultCell(3.25, { kind: "measure" })).toMatchObject({ v: 3.25, s: { format: "#,##0.0#" } });
+    expect(resultCell(4, { kind: "measure" })).toMatchObject({ v: 4, s: { format: "#,##0" } });
+    expect(resultCell(10n, { kind: "measure" })).toMatchObject({ v: 10 });
+    expect(resultCell(new Date("2026-04-01T00:00:00Z"), month)).toMatchObject({ s: { format: 'yyyy"年"m"月"' }, text: "2026年4月" });
+    expect(resultCell(new Date("2026-04-01T00:00:00Z"), { kind: "time", grain: "quarter" })).toMatchObject({ v: "2026年Q2" });
+    expect(resultCell(new Date("2026-04-01T00:00:00Z"), { kind: "time", grain: "fiscal_year" }, 4)).toMatchObject({ s: { format: 'yyyy"年度"' } });
+    expect(resultCell(new Date("2026-04-01T09:30:00Z"), { kind: "dimension" })).toMatchObject({ s: { format: "yyyy/m/d hh:mm" }, text: "2026/4/1 09:30" });
+    expect(resultCell(true, { kind: "dimension" })).toMatchObject({ v: "はい" });
+    // an ID longer than Excel's 15 digits keeps them as text; a measure stays a number
+    expect(resultCell(1234567890123456, { kind: "dimension" })).toMatchObject({ v: "1234567890123456" });
+    expect(resultCell(1234567890123456, { kind: "measure" })).toMatchObject({ v: 1234567890123456 });
+    expect(resultCell(null, { kind: "dimension" })).toEqual({ v: null, s: TABLE_STYLES.cell });
+    // the same style object for the same format, so the workbook looks it up once
+    expect(resultCell(1, { kind: "measure", format: "0.0" }).s).toBe(resultCell(2, { kind: "measure", format: "0.0" }).s);
+  });
+
+  it("writes a table with its header kept in view and an auto filter", async () => {
+    const book = new Workbook();
+    const sheet = book.sheet("t");
+    sheet.add("タイトル");
+    sheet.skip();
+    const fields = [
+      { name: "region", label: "地域", kind: "dimension" as const },
+      { name: "revenue", label: "売上", kind: "measure" as const, format: "¥#,##0" },
+    ];
+    expect(addResultTable(sheet, [{ region: "関東", revenue: 100 }, { region: null, revenue: 50 }], fields)).toBe(2);
+    expect(sheet.freeze).toEqual({ rows: 3 });
+    expect(sheet.filter).toEqual([2, 4, 2]);
+    const t = await readXlsx(await book.toBytes(), { range: "A3:B5" });
+    expect(t.columns).toEqual([
+      { name: "地域", type: "VARCHAR", values: ["関東", null] },
+      { name: "売上", type: "BIGINT", values: [100, 50] },
+    ]);
   });
 });

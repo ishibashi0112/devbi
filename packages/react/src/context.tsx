@@ -113,6 +113,31 @@ function viewFields(view: MetricsView): Set<string> {
 }
 
 /**
+ * The selections that apply to a tile's query: every other tile's, on fields of the query's metrics view (a view
+ * without that field is not filtered by it). None when the query's view is missing (the query reports that).
+ */
+export function crossFilters(ctx: DevbiContextValue, query: Query, tileId: string | undefined): Filter[] {
+  let view: MetricsView;
+  try {
+    view = ctx.view(query.metrics);
+  } catch {
+    return [];
+  }
+  const names = viewFields(view);
+  return ctx.selection.filtersFor(tileId).filter((f) => names.has(f.field));
+}
+
+/** Run a query on the dashboard's data with these filters (from {@link crossFilters}) besides its own. */
+export async function runQuery(ctx: DevbiContextValue, query: Query, filters: Filter[]): Promise<{ rows: Row[]; fields: FieldInfo[] }> {
+  const view = ctx.view(query.metrics);
+  const engine = await ctx.engine;
+  const model = await engine.loadView(view);
+  const { sql, fields } = compileQuery(view, query, { filters, model });
+  const { rows } = await engine.query(sql);
+  return { rows, fields };
+}
+
+/**
  * Run a query against the dashboard's data, cross-filtered by every tile except `tileId`.
  * Pass `crossfilter: false` to ignore selections. Promoted tiles can use this for extra queries.
  */
@@ -121,18 +146,11 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
   const version = useSelectionVersion();
   const { tileId, crossfilter = true } = options;
   const hasQuery = !!query;
-  const filters = useMemo(() => {
-    if (!hasQuery || !crossfilter) return [];
-    let view: MetricsView;
-    try {
-      view = ctx.view(query.metrics);
-    } catch {
-      return [];
-    }
-    const names = viewFields(view);
-    return ctx.selection.filtersFor(tileId).filter((f) => names.has(f.field));
+  const filters = useMemo(
+    () => (hasQuery && crossfilter ? crossFilters(ctx, query, tileId) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, tileId, crossfilter, hasQuery, query?.metrics, ctx]);
+    [version, tileId, crossfilter, hasQuery, query?.metrics, ctx],
+  );
   const key = JSON.stringify([query ?? null, filters]);
   const [state, setState] = useState<QueryState>({ rows: [], fields: [], filters: [], loading: !!query, error: null });
   const seq = useRef(0);
@@ -144,16 +162,14 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
       return;
     }
     setState((s) => ({ ...s, loading: true }));
-    (async () => {
-      const view = ctx.view(query.metrics);
-      const engine = await ctx.engine;
-      const model = await engine.loadView(view);
-      const { sql, fields } = compileQuery(view, query, { filters, model });
-      const { rows } = await engine.query(sql);
-      if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null });
-    })().catch((e: unknown) => {
-      if (seq.current === mine) setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
-    });
+    runQuery(ctx, query, filters).then(
+      ({ rows, fields }) => {
+        if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null });
+      },
+      (e: unknown) => {
+        if (seq.current === mine) setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
+      },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, ctx]);
   return state;
