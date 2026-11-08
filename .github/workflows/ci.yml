@@ -99,6 +99,21 @@ jobs:
           DEVBI_DB: ${{ env.DEVBI_TEST_MSSQL }}
           DEVBI_SNAPSHOTS: snapshots-mssql
 
+  # The packages as npm would publish them (pnpm pack), installed with npm and with pnpm into a project create-devbi
+  # makes: its typecheck, build, and dev server with the GUI editor (scripts/check-packed.mjs).
+  packed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter create-devbi exec playwright install --with-deps chromium
+      - run: pnpm check:packed
+
   # The ASP.NET (C#) reference of the read-only API (dotnet/): its tests against SQL Server, then the sales
   # example's dashboards on the ASP.NET Core sample instead of devbi-serve.
   dotnet:

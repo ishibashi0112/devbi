@@ -107,6 +107,18 @@ importers:
         specifier: ^8.3.6
         version: 8.3.6(@types/node@22.20.5)(esbuild@0.28.2)(yaml@2.9.1)
 
+  packages/create-devbi:
+    devDependencies:
+      '@devbi/vite':
+        specifier: workspace:^
+        version: link:../vite
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
+      tsup:
+        specifier: ^9.0.0
+        version: 9.0.0(postcss@8.5.32)(typescript@6.0.3)(yaml@2.9.1)
+
   packages/devbi:
     dependencies:
       yaml:
@@ -123,14 +135,14 @@ importers:
   packages/editor:
     dependencies:
       devbi:
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../devbi
       react-grid-layout:
         specifier: ^2.3.0
         version: 2.3.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
       '@devbi/react':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../react
       '@types/react':
         specifier: ^19.2.0
@@ -169,7 +181,7 @@ importers:
         specifier: ^17.0.0
         version: 17.0.0
       devbi:
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../devbi
     devDependencies:
       '@types/react':
@@ -194,7 +206,7 @@ importers:
         specifier: ^17.0.0
         version: 17.0.0
       devbi:
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../devbi
     devDependencies:
       '@types/mssql':
@@ -225,17 +237,17 @@ importers:
   packages/vite:
     dependencies:
       '@devbi/server':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../server
       devbi:
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../devbi
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
     devDependencies:
       '@devbi/react':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../react
       '@types/react':
         specifier: ^19.3.0

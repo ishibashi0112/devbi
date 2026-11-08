@@ -204,6 +204,9 @@ for (const c of CASES) {
       writeFileSync(path.join(dir, "api", "types.sql"), "-- 型の確認\nSELECT * FROM devbi_types WHERE d >= :from AND region <> :skip AND (:from IS NOT NULL) ORDER BY id");
       writeFileSync(path.join(dir, "api", "text.sql"), "SELECT region, 'a:b ? @p1 ;' AS s FROM devbi_types WHERE id = :id");
       api = createApiHandler({ dir, env: { DEVBI_DB: c.url }, exposeErrors: true, maxRows: 2 });
+      // Oracle's SET TRANSACTION READ ONLY refuses a table made in the same second as the transaction starts
+      // (ORA-01466: table definition has changed). Tables in use are never that new; the ones above are.
+      if (c.name === "Oracle") await new Promise((r) => setTimeout(r, 1500));
     }, 120_000);
     afterAll(async () => {
       await api?.close();

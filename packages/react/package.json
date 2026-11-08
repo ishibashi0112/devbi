@@ -1,15 +1,23 @@
 {
   "name": "@devbi/react",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "DevBI runtime for React: DuckDB-wasm engine, built-in tiles and cross-filtering.",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/ishibashi0112/devbi.git",
     "directory": "packages/react"
   },
+  "homepage": "https://github.com/ishibashi0112/devbi#readme",
+  "bugs": "https://github.com/ishibashi0112/devbi/issues",
+  "keywords": [
+    "devbi",
+    "bi",
+    "dashboard",
+    "react",
+    "duckdb-wasm"
+  ],
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -33,7 +41,7 @@
     "@uwdata/mosaic-core": "^0.35.0",
     "@uwdata/mosaic-sql": "^0.35.0",
     "apache-arrow": "^17.0.0",
-    "devbi": "workspace:*"
+    "devbi": "workspace:^"
   },
   "peerDependencies": {
     "react": "^19.0.0",
@@ -45,5 +53,8 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsup": "^9.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

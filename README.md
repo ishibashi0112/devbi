@@ -19,6 +19,7 @@ pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボード�
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG・_MSSQL・_MYSQL・_MARIADB・_ORACLE があればそのデータベースも）
 pnpm e2e              # パッケージと examples/sales をビルドして devbi-serve で開き、Playwright で確認
+pnpm check:packed     # パッケージを npm に出す形に固め、create-devbi で作ったプロジェクトに npm と pnpm で入れて確認
 ```
 
 画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。
@@ -35,10 +36,16 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `packages/editor` | `@devbi/editor` | GUI エディタ。Vite の開発サーバーでだけ動き、react-grid-layout でタイルを並べ、設定欄でタイルの種類・データを変えて、dash.json を手書きと同じ形で保存する。「コードにする」でタイルを .tsx に書き出す（書き込み口は `@devbi/vite`）。ビルドには入らない |
 | `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL・SQL Server・Oracle・MySQL）、`devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出し、毎朝のスナップショットを作る）、`devbi-snapshot`（スナップショットをいま作る。タスクスケジューラ用）。DB への接続は ashiato のアダプタの作りを流用 |
 | `dotnet/` | （C#） | 読み取り API の ASP.NET の見本（SQL Server）。ASP.NET Core（.NET 10）の `MapDevBIApi` と、WebForms・MVC 5（.NET Framework 4.7.2 以降）の `DevBIHttpHandler`。SQL ファイルの読み方は `packages/server` と同じものをテストで確かめる。NuGet には未公開 |
+| `packages/create-devbi` | `create-devbi` | `npm create devbi@latest my-reports` で、サンプルの売上ダッシュボードと Vite・React・GUI エディタの入ったプロジェクトを作る |
 | `examples/nextjs` | （非公開） | `examples/sales` のダッシュボードを Next.js 16（App Router）のアプリに置いた見本。API とスナップショットは `app/devbi/[...path]/route.ts`（`@devbi/server` の `fetch`）、画面は `devbi-embed.js` |
 | `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ。`db/sales.sqlite` は同じ受注を表に分けて入れたもの（`pnpm gen:db`） |
 
-npm にはまだ公開していません（どのパッケージも `private: true`）。
+npm にはまだ公開していません。公開できる形（0.1.0、MIT）にはなっていて、npm の Organization `devbi` を作ってタグを push すると、GitHub Actions が出します（[docs/releasing.md](docs/releasing.md)）。公開したあとは、こう始めます。
+
+```sh
+npm create devbi@latest my-reports
+cd my-reports && npm install && npm run dev
+```
 
 ## プロジェクトの形
 

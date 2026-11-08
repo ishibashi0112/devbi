@@ -1,15 +1,23 @@
 {
   "name": "devbi",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "BI for developers: dashboards as files in git, tiles as JSX, DuckDB in the browser.",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/ishibashi0112/devbi.git",
     "directory": "packages/devbi"
   },
+  "homepage": "https://github.com/ishibashi0112/devbi#readme",
+  "bugs": "https://github.com/ishibashi0112/devbi/issues",
+  "keywords": [
+    "devbi",
+    "bi",
+    "dashboard",
+    "duckdb",
+    "metrics"
+  ],
   "exports": {
     ".": {
       "source": "./src/index.ts",

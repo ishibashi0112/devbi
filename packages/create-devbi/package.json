@@ -1,0 +1,40 @@
+{
+  "name": "create-devbi",
+  "version": "0.1.0",
+  "description": "Start a DevBI project: npm create devbi@latest my-reports",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ishibashi0112/devbi.git",
+    "directory": "packages/create-devbi"
+  },
+  "homepage": "https://github.com/ishibashi0112/devbi#readme",
+  "bugs": "https://github.com/ishibashi0112/devbi/issues",
+  "keywords": [
+    "devbi",
+    "bi",
+    "dashboard",
+    "create"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "bin": {
+    "create-devbi": "./bin/create-devbi.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "template"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@devbi/vite": "workspace:^",
+    "@playwright/test": "1.63.0",
+    "tsup": "^9.0.0"
+  }
+}

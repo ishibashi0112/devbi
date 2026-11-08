@@ -1,15 +1,23 @@
 {
   "name": "@devbi/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "DevBI's read-only API (SQL files on the server, Arrow to the browser) and devbi-serve: the built site and the API in one process.",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/ishibashi0112/devbi.git",
     "directory": "packages/server"
   },
+  "homepage": "https://github.com/ishibashi0112/devbi#readme",
+  "bugs": "https://github.com/ishibashi0112/devbi/issues",
+  "keywords": [
+    "devbi",
+    "bi",
+    "api",
+    "arrow",
+    "sql"
+  ],
   "engines": {
     "node": ">=22.16"
   },
@@ -35,7 +43,7 @@
   },
   "dependencies": {
     "apache-arrow": "^17.0.0",
-    "devbi": "workspace:*"
+    "devbi": "workspace:^"
   },
   "peerDependencies": {
     "mssql": ">=11",
@@ -66,5 +74,8 @@
     "oracledb": "^26.0.0",
     "pg": "^8.16.0",
     "tsup": "^9.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

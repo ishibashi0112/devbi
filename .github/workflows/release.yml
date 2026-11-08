@@ -1,0 +1,57 @@
+name: Release
+
+# Publishes the packages in packages/ to npm when a tag v<version> is pushed (docs/releasing.md).
+# All of them have that one version; a version already on npm is skipped, so a failed release can run again.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # The checks, including check-packed's installs from npm without a lockfile: in a job that publishes nothing and
+  # holds no token, so code from those installs cannot reach what is published.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/version.mjs --check "${GITHUB_REF_NAME#v}"
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+      # The tarballs, installed with npm and pnpm into a project create-devbi makes: build, dev server, GUI editor.
+      - run: pnpm --filter create-devbi exec playwright install --with-deps chromium
+      - run: node scripts/check-packed.mjs
+
+  # A fresh checkout, the lockfile's dependencies only, built again and published.
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      # npm provenance: npm shows which workflow run and commit built each package.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # npm 11.5 or later: provenance, and Trusted Publishing (no token) once it is set up on npm.
+      - run: npm install -g npm@11
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/version.mjs --check "${GITHUB_REF_NAME#v}"
+      - run: pnpm build
+      - run: node scripts/publish.mjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

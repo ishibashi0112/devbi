@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../.devbi/metrics.schema.json
+# 指標と軸の定義。model の SQL は DuckDB で動く。read_xlsx / read_csv / read_parquet / read_arrow のファイルは
+# ブラウザが data/ から読み込む（xlsx は DevBI が自前で読む）。
+label: 売上
+model: SELECT * FROM read_xlsx('data/sales.xlsx', sheet = '明細')
+time: { column: 受注日, label: 受注日, fiscal_year_start: 4 }
+dimensions:
+  customer: { column: 顧客, label: 顧客 }
+  region: { column: 地域, label: 地域 }
+  category: { column: 商品分類, label: 商品分類 }
+  product: { column: 商品, label: 商品 }
+measures:
+  revenue: { sql: SUM(金額), label: 売上, format: "¥#,##0" }
+  orders: { sql: COUNT(DISTINCT 受注番号), label: 受注件数, format: "#,##0" }
+  quantity: { sql: SUM(数量), label: 数量, format: "#,##0" }
+  avg_order: { sql: revenue / orders, label: 平均受注額, format: "¥#,##0" }
+  revenue_yoy: { of: revenue, compare: previous_year, as: ratio }
+  revenue_ly: { of: revenue, compare: previous_year, as: value }
+  revenue_fytd: { of: revenue, running: fiscal_year, label: 年度累計 }

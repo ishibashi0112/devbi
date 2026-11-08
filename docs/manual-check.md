@@ -1,6 +1,6 @@
 # 動作チェックの手順
 
-手元の Mac（または Windows / Linux）で DevBI のランタイムを動かして、画面を触って確かめるための手順です。所要時間は 30〜35 分ほど。
+手元の Mac（または Windows / Linux）で DevBI のランタイムを動かして、画面を触って確かめるための手順です。所要時間は 40 分ほど。
 
 ## 1. 準備（最初の一回だけ）
 
@@ -244,6 +244,17 @@ WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだ�
 | 91 | 「閉じる」。VS Code で RegionQuarter.tsx を開き、例の 7 行（`//   return (` から `//   );` まで）の先頭の `//` を外し、いちばん下の `return <Builtin … />;` の行を消して保存 | ページが読み込み直され、「地域 × 四半期」が「2026年Q2 ¥8,530,630」のような箇条書きになる。ほかのタイルで地域を選ぶと、箇条書きも絞られる |
 | 92 | ターミナルで `git checkout examples/sales/dashboards && rm examples/sales/dashboards/sales/RegionQuarter.tsx` | ページが読み込み直され、元の表に戻る |
 
+### 雛形（create-devbi）と npm に出す前の確かめ
+
+npm にはまだ出していないので、パッケージを npm に出す形に固めたもの（tarball）で確かめます。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 93 | `pnpm build && node packages/create-devbi/bin/create-devbi.js ~/devbi-try` | 「/Users/〜/devbi-try に DevBI のプロジェクトを作りました（git init 済み）。」と、`cd`・`npm install`・`npm run dev` が出る。`ls -a ~/devbi-try` で `.gitignore`、`README.md`、`dashboards/`、`models/`、`data/sales.xlsx`、`src/`、`vite.config.ts` があり、`package.json` の `devbi` などは `^0.1.0`（npm に出るまで、ここで `npm install` はできません。確かめたら `rm -rf ~/devbi-try`） |
+| 94 | もう一度 93 と同じコマンド | 「/Users/〜/devbi-try は空ではありません」と出て、何も書かない |
+| 95 | `pnpm check:packed`（Mac・Linux。5 分ほど。初回は React や Vite を npm から取ってきます） | npm で入れたものと pnpm で入れたもの、それぞれで型チェック・ビルドが通り、「1 passed」が 2 回出る。最後に、作ったプロジェクトの場所（`…/app-npm`、`…/app-pnpm`）が出る |
+| 96 | 95 で出た `app-npm` のフォルダで `npm run dev`、<http://localhost:5173> を開く | 売上ダッシュボードが出る（確かめのため「上位顧客」の自作タイルは外してあり、「地域 × 四半期」は「コードにする」で書き出したあとの形）。「編集」で GUI エディタが開く |
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -271,6 +282,7 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）。パッケージのソースを直接読むので、ビルドは要らない
 pnpm e2e         # パッケージとサンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認。GUI エディタは Vite の開発サーバーで、サンプルのコピー（examples/sales/e2e-work/）を相手に確認
 pnpm e2e:nextjs  # Next.js の見本（examples/nextjs）を next start で開いて確認
+pnpm check:packed  # パッケージを npm に出す形に固め、create-devbi で作ったプロジェクトに npm と pnpm で入れて確認（上の 95）
 dotnet test dotnet/DevBI.sln   # C# の見本（.NET 10 SDK があるとき）
 ```
 
