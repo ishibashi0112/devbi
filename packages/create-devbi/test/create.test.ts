@@ -50,6 +50,7 @@ describe("create-devbi", () => {
     expect(pkg.devDependencies["@devbi/vite"]).toBe(`^${version}`);
     expect(pkg.devDependencies["@devbi/editor"]).toBe(`^${version}`);
     expect(pkg.scripts.dev).toBe("vite");
+    expect(pkg.scripts.check).toBe("devbi-check");
     const readme = readFileSync(path.join(dir, "README.md"), "utf8");
     expect(readme).toMatch(/^# my-reports\n/);
     expect(readme).toContain("pnpm install\npnpm dev ");

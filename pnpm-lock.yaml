@@ -239,6 +239,12 @@ importers:
       '@devbi/server':
         specifier: workspace:^
         version: link:../server
+      '@duckdb/duckdb-wasm':
+        specifier: 1.33.1-dev114.0
+        version: 1.33.1-dev114.0
+      apache-arrow:
+        specifier: ^17.0.0
+        version: 17.0.0
       devbi:
         specifier: workspace:^
         version: link:../devbi

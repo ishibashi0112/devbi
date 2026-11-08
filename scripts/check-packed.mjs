@@ -3,7 +3,7 @@
 //   1. pnpm pack each package (workspace:^ becomes ^<version>, only the "files" go in)
 //   2. create-devbi from its tarball makes a project, as `npm create devbi` would
 //   3. npm, and then pnpm, install the other tarballs into a copy of it (no links; pnpm's strict node_modules)
-//   4. the project's typecheck and build
+//   4. the project's typecheck, devbi-check (DuckDB-wasm's Node build from the installed packages) and build
 //   5. its dev server with the GUI editor (Playwright, packages/create-devbi/e2e): the dashboard draws, and
 //      "コードにする" writes a tile out without a page reload.
 // Run `pnpm build` first (pnpm check:packed does). The projects are left in the folder it prints, for a look.
@@ -63,6 +63,7 @@ for (const manager of ["npm", "pnpm"]) {
 
   // 4. What a user runs first.
   run(manager, ["run", "typecheck"], app);
+  run(manager, ["run", "check"], app);
   run(manager, ["run", "build"], app);
 
   // 5. The dev server, on the project without its self-written tile: then the tile "コードにする" writes is the first

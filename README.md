@@ -17,6 +17,7 @@ pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost
 pnpm example:nextjs   # 同じダッシュボードを Next.js のアプリに置いた例（http://127.0.0.1:3000）。API は route.ts 1 つ
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
+pnpm example:check    # サンプルの指標とすべてのタイルのクエリを、ブラウザを開かずにデータに流して確かめる（devbi-check）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG・_MSSQL・_MYSQL・_MARIADB・_ORACLE があればそのデータベースも）
 pnpm e2e              # パッケージと examples/sales をビルドして devbi-serve で開き、Playwright で確認
 pnpm check:packed     # パッケージを npm に出す形に固め、create-devbi で作ったプロジェクトに npm と pnpm で入れて確認

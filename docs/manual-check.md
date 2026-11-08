@@ -268,6 +268,20 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 | 101 | 埋め込みの見本（上の 35）で「印刷・PDF」を押す | 紺色のヘッダーや左のメニューは入らず、ダッシュボードだけが印刷のプレビューに出る |
 | 102 | ブラウザの幅を狭くして（タイルが 1 列になるまで）「印刷・PDF」 | 1 列のままで、どのタイルもページの境目で切れない（高いタイルは 1 ページに 1 つ） |
 
+### ファイルを確かめる（devbi-check・devbi-inspect）
+
+ブラウザを開かずに、ターミナルで確かめます。`pnpm build` のあと、`examples/sales` のフォルダで動かします（`cd examples/sales`）。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 103 | `pnpm check` | 指標ファイル 3 つの行数（`models/sales.metrics.yaml: 6,044 行、指標 7・軸 4` など）と、ダッシュボードごとのタイルの行数が出て、最後に「問題はありません」。2 秒ほど |
+| 104 | `models/sales.metrics.yaml` の `SUM(数量)` を `SUM(数)` にして、もう一度 `pnpm check` | `✗ models/sales.metrics.yaml: 指標 quantity: Binder Error: Referenced column "数" not found …` と、次の行に `Candidate bindings: "数量", …`。売上ダッシュボードの `kpi-qty`（数量）と `products`（商品別）のタイルは「quantity のエラーのため確かめていません」。最後に「エラー 1 件、注意 0 件」で、`echo $?` は 1 |
+| 105 | 104 を戻し、`dashboards/sales.dash.json` の `"measures": ["orders"]` を `["orderz"]` にして `pnpm check` | `✗ dashboards/sales.dash.json: タイル kpi-orders（受注件数）: 指標 orderz は sales にありません（sales の指標: revenue・orders・…）` |
+| 106 | `pnpm inspect data/sales.xlsx` | `data/sales.xlsx（シート「明細」）: 6,044 行、9 列` と、列ごとの型・範囲・種類の数。`地域` には「多い値: 関東 (2,322)、近畿 (1,325)、…」。2 行目に「シート: 明細・メモ」 |
+| 107 | `pnpm inspect sales_daily` | 指標ファイル `sales_daily` の `model` の結果（受注日・地域・商品分類・金額・数量・明細数の 6 列、4,014 行）。サンプルの SQLite から読む |
+
+試したあとは `git checkout .` で元に戻せます。
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -295,6 +309,7 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）。パッケージのソースを直接読むので、ビルドは要らない
 pnpm e2e         # パッケージとサンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認。GUI エディタは Vite の開発サーバーで、サンプルのコピー（examples/sales/e2e-work/）を相手に確認
 pnpm e2e:nextjs  # Next.js の見本（examples/nextjs）を next start で開いて確認
+pnpm example:check  # サンプルの指標とすべてのタイルのクエリをデータに流して確認（上の 103）
 pnpm check:packed  # パッケージを npm に出す形に固め、create-devbi で作ったプロジェクトに npm と pnpm で入れて確認（上の 95）
 dotnet test dotnet/DevBI.sln   # C# の見本（.NET 10 SDK があるとき）
 ```

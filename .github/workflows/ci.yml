@@ -88,6 +88,7 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm --filter devbi-example-sales check
       - run: pnpm --filter devbi-example-sales exec playwright install --with-deps chromium
       - run: pnpm e2e
       # The same dashboards in a Next.js app (examples/nextjs): next build of the sales build above, then next start.
