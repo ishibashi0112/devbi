@@ -1,0 +1,9 @@
+/* The app's own look: DevBI's dashboards keep theirs (element-only rules like these do not reach inside). */
+body { margin: 0; font-family: "Hiragino Sans", "Yu Gothic", sans-serif; background: #f3f1ec; color: #222; }
+header { display: flex; gap: 24px; align-items: center; padding: 12px 24px; background: #1f3a5f; color: #fff; }
+header nav { display: flex; gap: 16px; }
+header a { color: #cfe0f5; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px 24px 48px; }
+h1 { color: #8a1c1c; font-size: 22px; }
+p { line-height: 1.7; }
+.report { margin-top: 16px; }

@@ -90,6 +90,8 @@ jobs:
       - run: pnpm test
       - run: pnpm --filter devbi-example-sales exec playwright install --with-deps chromium
       - run: pnpm e2e
+      # The same dashboards in a Next.js app (examples/nextjs): next build of the sales build above, then next start.
+      - run: pnpm --filter devbi-example-nextjs e2e
 
   # The ASP.NET (C#) reference of the read-only API (dotnet/): its tests against SQL Server, then the sales
   # example's dashboards on the ASP.NET Core sample instead of devbi-serve.

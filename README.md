@@ -2,7 +2,7 @@
 
 開発者がいる会社が自社アプリの中に置く BI。ダッシュボードは git のファイル、タイルは JSX に「昇格」でき、集計はブラウザ内の DuckDB-wasm。MIT。
 
-構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）ができて、いまは §5 の 2（埋め込みと読み取り API）を作っているところです。GUI エディタはまだありません。
+構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）と §5 の 2（埋め込みと読み取り API）ができました。GUI エディタはまだありません。
 
 ## 動かす
 
@@ -13,6 +13,7 @@ pnpm example:preview  # 静的ビルドしたものを開く（http://localhost:
 pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost:8080）。DB 版のダッシュボードはサンプルの SQLite を API から読む。
                       # 「売上の日次集計」は、devbi-serve が毎朝 6:00（と起動したとき）に作るスナップショットを読む
                       # /embed-demo.html は、ほかのアプリの画面に script 1 本で埋め込んだ例
+pnpm example:nextjs   # 同じダッシュボードを Next.js のアプリに置いた例（http://localhost:3000）。API は route.ts 1 つ
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG・_MSSQL・_MYSQL・_MARIADB・_ORACLE があればそのデータベースも）
@@ -32,6 +33,7 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `packages/vite` | `@devbi/vite` | Vite プラグイン。`virtual:devbi` で dashboards/ と models/ と昇格タイルを渡し、ビルドで data/ をコピー。`embed: true` で埋め込み用の `devbi-embed.js` も作る |
 | `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL・SQL Server・Oracle・MySQL）、`devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出し、毎朝のスナップショットを作る）、`devbi-snapshot`（スナップショットをいま作る。タスクスケジューラ用）。DB への接続は ashiato のアダプタの作りを流用 |
 | `dotnet/` | （C#） | 読み取り API の ASP.NET の見本（SQL Server）。ASP.NET Core（.NET 10）の `MapDevBIApi` と、WebForms・MVC 5（.NET Framework 4.7.2 以降）の `DevBIHttpHandler`。SQL ファイルの読み方は `packages/server` と同じものをテストで確かめる。NuGet には未公開 |
+| `examples/nextjs` | （非公開） | `examples/sales` のダッシュボードを Next.js 16（App Router）のアプリに置いた見本。API とスナップショットは `app/devbi/[...path]/route.ts`（`@devbi/server` の `fetch`）、画面は `devbi-embed.js` |
 | `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ。`db/sales.sqlite` は同じ受注を表に分けて入れたもの（`pnpm gen:db`） |
 
 npm にはまだ公開していません（どのパッケージも `private: true`）。

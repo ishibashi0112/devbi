@@ -183,6 +183,19 @@ pnpm example:dev
 
 WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだけ動きます。手元のアプリで試すときは、リファレンスの「[WebForms・MVC 5](reference.md#webformsmvc-5net-framework-472-以降)」のとおり `Global.asax` と `web.config` に足し、`dist/` を `~/Scripts/devbi/` に置いて、ページに `<div data-devbi="sales-db" data-devbi-theme="light"></div>` と `devbi-embed.js` の 2 行を足します。56 と同じ金額が出れば動いています。
 
+### Next.js のアプリに置く
+
+同じダッシュボードを、Next.js 16 のアプリ（`examples/nextjs`）の画面に置きます。API は `app/devbi/[...path]/route.ts` が答えます（`devbi-serve` は使わない）。データベースはサンプルの SQLite です。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 60 | `pnpm example:nextjs` | `examples/sales/dist` を `public/devbi` に写し、`next build` のあと `Ready` と出る。初回は `[devbi] スナップショット sales_daily~9e979dd94c517434.arrows（api/sales_daily.sql）: 4,014 行、… ms` も出る |
+| 61 | <http://localhost:3000/> を開き、ダッシュボードの「全期間」を押す | 紺の帯（社内ポータル）の下に赤い見出し「売上」と、「売上ダッシュボード（DB から）」。売上が ¥193,161,410。ダッシュボードの見出しは赤くならない。ターミナルに `[devbi] api/orders.sql: 6,044 行、… ms` |
+| 62 | 上の帯の「日次集計（毎朝）」を押す | ページを読み込み直さずに「売上の日次集計」に変わり、見出しの下に「データは …の時点（毎日 6:00 に更新）」。「全期間」で ¥193,161,410。ブラウザの「戻る」で 61 のダッシュボードに戻る |
+| 63 | <http://localhost:3000/devbi/api/schema> を開く | `orders` と `sales_daily` が並び、`snapshots` に `updatedAt`（60 で作った時刻）がある |
+| 64 | 60 を止め、`pnpm --filter devbi-example-nextjs dev` で開発サーバーを動かし、61 を開く | 同じ金額が出る（開発サーバーでも route.ts の API が動く） |
+| 65 | `pnpm e2e:nextjs` | `4 passed` |
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -209,6 +222,7 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 ```sh
 pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）。パッケージのソースを直接読むので、ビルドは要らない
 pnpm e2e         # パッケージとサンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認
+pnpm e2e:nextjs  # Next.js の見本（examples/nextjs）を next start で開いて確認
 dotnet test dotnet/DevBI.sln   # C# の見本（.NET 10 SDK があるとき）
 ```
 
