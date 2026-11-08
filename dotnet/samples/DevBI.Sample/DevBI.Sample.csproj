@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The sales example (examples/sales) served by ASP.NET Core instead of devbi-serve: the built dashboards
+    (examples/sales/dist) and api/*.sql on SQL Server. What an app of your own does, in a few lines (Program.cs).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <!-- Microsoft.Data.SqlClient 7.1.1 asks for 9.0.18, which has known vulnerabilities (GHSA-846f-f764-76mx). -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DevBI.Server.AspNetCore\DevBI.Server.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

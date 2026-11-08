@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DevBIHttpHandler: DevBI's read-only API in ASP.NET on .NET Framework (WebForms, MVC 5, Web API 2), registered in
+    web.config. .NET Framework 4.7.2 and later.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <RootNamespace>DevBI.Server.SystemWeb</RootNamespace>
+    <Description>DevBI's read-only API for ASP.NET on .NET Framework (an IHttpHandler).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Web" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets the project build where .NET Framework is not installed (Linux, CI). -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevBI.Server\DevBI.Server.csproj" />
+  </ItemGroup>
+
+</Project>

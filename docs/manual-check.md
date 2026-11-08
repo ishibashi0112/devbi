@@ -169,6 +169,20 @@ pnpm example:dev
 
 終わったら `docker rm -f devbi-mssql devbi-mysql devbi-oracle` で消せます。
 
+### ASP.NET（C#）の見本（.NET 10 SDK があるとき）
+
+`devbi-serve` の代わりに、ASP.NET Core のサンプル（`dotnet/samples/DevBI.Sample`）で同じダッシュボードを出します。データベースは 50 の SQL Server です（`copy-db` まで済ませておく）。.NET 10 SDK は <https://dotnet.microsoft.com/download> から入れます。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 55 | `pnpm example:build` のあと、`ConnectionStrings__DEVBI_DB="Server=127.0.0.1,1433;Database=master;User Id=sa;Password=DevBI_test1;TrustServerCertificate=true" dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179`（Windows の PowerShell では `$env:ConnectionStrings__DEVBI_DB="…"` を先に実行） | `Now listening on: http://127.0.0.1:4179` と出る |
+| 56 | <http://127.0.0.1:4179/#/sales-db> を開き、「全期間」を押す | 売上が ¥193,161,410。ターミナルに `api/orders.sql: 6,044 行、… ms` が出る |
+| 57 | <http://127.0.0.1:4179/api/schema> を開く | `orders` と `sales_daily` が並び、最後の `snapshots` は `[]`（C# の見本はスナップショットを作らない）。「売上の日次集計」は API から読むので、見出しの下の「…の時点」は出ない |
+| 58 | 55 の `ConnectionStrings__DEVBI_DB` を付けずに起動し、56 を開く | タイルに「接続先がありません。DEVBI_DB の接続を DevBIOptions.Connect で返してください」 |
+| 59 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln` | `Passed!` と出て、`Failed:` が 0 |
+
+WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだけ動きます。手元のアプリで試すときは、リファレンスの「[WebForms・MVC 5](reference.md#webformsmvc-5net-framework-472-以降)」のとおり `Global.asax` と `web.config` に足し、`dist/` を `~/Scripts/devbi/` に置いて、ページに `<div data-devbi="sales-db" data-devbi-theme="light"></div>` と `devbi-embed.js` の 2 行を足します。56 と同じ金額が出れば動いています。
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -195,6 +209,7 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 ```sh
 pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）。パッケージのソースを直接読むので、ビルドは要らない
 pnpm e2e         # パッケージとサンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認
+dotnet test dotnet/DevBI.sln   # C# の見本（.NET 10 SDK があるとき）
 ```
 
 `pnpm e2e` は初回だけ `pnpm --filter devbi-example-sales exec playwright install chromium` でブラウザを入れます。
@@ -205,7 +220,7 @@ pnpm e2e         # パッケージとサンプルをビルドして devbi-serve 
 - 初回の読み込みが重めです。重いのは DuckDB-wasm（約 34MB、圧縮して 8.5MB）で、2 回目以降はブラウザのキャッシュから読みます。画面の JavaScript は最初に約 440KB を読み、グラフ（約 280KB）、表（約 225KB と CSS 約 73KB）、DuckDB を動かす部分（約 220KB）は使うときに別のファイルとして読みます
 - `dist/` を新しいビルドで置き換えたときは、開いたままのページを読み込み直してください。まだ読んでいなかったグラフなどのファイルが見つからず、タイルに「ページを読み込み直してください」と出ます
 - Parquet は DuckDB の拡張をインターネットから取りに行きます。社内で外に出られないときは xlsx / CSV で試してください
-- SQL Server の Windows 認証（統合認証）には、まだつなげません（SQL Server 認証のユーザーで試してください）
+- `devbi-serve` は、SQL Server の Windows 認証（統合認証）にはまだつなげません（SQL Server 認証のユーザーで試してください）。Windows 認証は ASP.NET（C#）の見本でつなげます。C# の見本は SQL Server だけで、スナップショットは作りません
 - スナップショットは Arrow の形で保存します（handoff では Parquet でしたが、DuckDB-wasm が Parquet の拡張をインターネットから取りに行くため）。時刻はサーバーの時計で、`devbi-serve` が止まっていた間の分は、次に起動したときに作ります
 - どの SQL をスナップショットから読むかは、ビルドしたときに決まります。`-- snapshot:` の行を足したり消したりしたら、ビルドし直してください（ファイルが見つからないときは、API から読みます）
 - `pnpm build` は `dist/` を作り直すので、スナップショットも消えます。`devbi-serve` は次に開かれたときに作り直しますが、IIS などに静的に置くときは、ビルドのあとに `devbi-snapshot` を動かしてください

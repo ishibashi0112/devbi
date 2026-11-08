@@ -84,6 +84,28 @@ describe("toArrowTable", () => {
     expect(t.getChild("f")!.get(1)).toBeNull();
     expect(String(t.schema.fields[4]!.type)).toBe("Timestamp<MICROSECOND>");
   });
+  it("reads years 1 to 99 as they are (.NET's DateTime.MinValue is 0001-01-01), and before 1970", () => {
+    const t = toArrowTable({
+      columns: [
+        { name: "d", type: "date" },
+        { name: "ts", type: "timestamp" },
+      ],
+      rows: [
+        ["0001-01-01", "0050-03-01 10:00:00.500"],
+        ["1969-12-31", "1969-12-31 23:59:59.999"],
+      ],
+    });
+    const at = (y: number, ...rest: number[]) => {
+      const d = new Date(0);
+      d.setUTCFullYear(y, rest[0] ?? 0, rest[1] ?? 1);
+      return d.setUTCHours(rest[2] ?? 0, rest[3] ?? 0, rest[4] ?? 0, rest[5] ?? 0);
+    };
+    expect(t.getChild("d")!.get(0)).toBe(at(1));
+    expect(t.getChild("ts")!.get(0)).toBe(at(50, 2, 1, 10, 0, 0, 500));
+    expect(new Date(t.getChild("d")!.get(0) as number).toISOString()).toBe("0001-01-01T00:00:00.000Z");
+    expect(t.getChild("d")!.get(1)).toBe(Date.UTC(1969, 11, 31));
+    expect(t.getChild("ts")!.get(1)).toBe(Date.UTC(1969, 11, 31, 23, 59, 59, 999));
+  });
   it("keeps the SELECT's column order, whatever the names", () => {
     const t = toArrowTable({
       columns: [

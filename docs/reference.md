@@ -447,7 +447,7 @@ model: SELECT * FROM read_api('orders', from = '2024-04-01')
 - データベースのユーザーは SELECT の権限だけにしてください。いちばん確かな守りはこの権限です。DevBI の守り（SELECT か WITH で始まる文だけ通す、読み取り専用のトランザクション）は、その手前の守りです。たとえば Oracle では、`PRAGMA AUTONOMOUS_TRANSACTION` で書き込む関数を SELECT から呼ぶと、その書き込みは確定します。
 - パスワードに `@` や `:` が入るときは、`%40`、`%3A` のように書きます。
 - PostgreSQL の `timestamptz` は、接続のタイムゾーンでの時刻になります。変えるときは URL に `?options=-c%20TimeZone%3DAsia%2FTokyo` を足します。
-- SQL Server の Windows 認証（統合認証）には、まだつなげません。SELECT の権限だけの SQL Server 認証のユーザーを作ってください。
+- `devbi-serve` は、SQL Server の Windows 認証（統合認証）にはまだつなげません。SELECT の権限だけの SQL Server 認証のユーザーを作ってください。Windows 認証でつなぐときは、[ASP.NET（C#）の見本](#windows-認証で-sql-server-につなぐ)を使います。
 - Oracle では、引用符で囲まない列名や別名は大文字になります（`AS amount` は `AMOUNT`）。metrics.yaml の SQL（DuckDB）は大文字と小文字を区別しないので、`amount` のまま書けます。`AS 金額` のような日本語の別名は、そのままです。
 - Oracle は、接続ごとに日付の書き方（`NLS_DATE_FORMAT`）を `YYYY-MM-DD HH24:MI:SS` にします。`WHERE order_date >= :from` に `'2024-04-01'` を渡せます。
 - Oracle の SQL には（23ai より前は）真偽がないので、パラメーターの `true` / `false` は `1` / `0` で渡します。
@@ -551,7 +551,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 
 ### API の形
 
-ほかの言語のサーバー（ASP.NET など）で同じ API を作るときの決まりです。
+ほかの言語のサーバーで同じ API を作るときの決まりです。ASP.NET には C# の見本があります（[ASP.NET（C#）で API を出す](#aspnetcで-api-を出す)）。
 
 `GET <場所>/api/schema`
 
@@ -589,6 +589,100 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
 
 `createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。`run(name, params)` で SQL を 1 つ実行し、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
+
+## ASP.NET（C#）で API を出す
+
+`devbi-serve` を別に動かさず、ASP.NET のアプリに同じ API（[API の形](#api-の形)）を足す見本です（`dotnet/`）。データベースは SQL Server だけです。アプリのログイン（Windows 認証など）がそのまま API にもかかります。
+
+| プロジェクト | 中身 |
+| --- | --- |
+| `dotnet/src/DevBI.Server` | API の本体。`api/*.sql` を読んで確かめ、SQL Server で実行し、Arrow で返す。Web の仕組みには依存しない（netstandard2.0 と net10.0。.NET Framework 4.7.2 以降でも動く） |
+| `dotnet/src/DevBI.Server.AspNetCore` | ASP.NET Core（.NET 10）用。`app.MapDevBIApi(...)` |
+| `dotnet/src/DevBI.Server.SystemWeb` | .NET Framework の ASP.NET（WebForms、MVC 5）用。`DevBIHttpHandler`（`IHttpHandler`） |
+| `dotnet/samples/DevBI.Sample` | サンプル（`examples/sales`）を `devbi-serve` の代わりに ASP.NET Core で出す |
+
+NuGet にはまだ出していません。アプリのソリューションにプロジェクトを足して参照するか、`DevBI.Server` の 5 つの `.cs` をアプリにコピーして、NuGet で `Apache.Arrow` と（.NET Framework では）`System.Text.Json` を入れます。コピーするときは、C# 8 以降の書き方を使っているので、古い形式の `.csproj`（.NET Framework の既定は C# 7.3）に `<LangVersion>latest</LangVersion>` を足します（Visual Studio 2019 以降）。
+
+### ASP.NET Core
+
+```csharp
+using DevBI.Server;
+using DevBI.Server.AspNetCore;
+using Microsoft.Data.SqlClient;
+
+var api = new DevBIApi(new DevBIOptions
+{
+    // devbi/api/*.sql。wwwroot の外に置く（SQL をブラウザから読ませない）
+    Directory = Path.Combine(builder.Environment.ContentRootPath, "devbi"),
+    // DEVBI_DB（-- connection: erp なら DEVBI_DB_ERP）の接続。appsettings.json の ConnectionStrings から
+    Connect = name => builder.Configuration.GetConnectionString(name) is { Length: > 0 } cs ? new SqlConnection(cs) : null,
+});
+app.MapDevBIApi("/reports", api).RequireAuthorization();   // /reports/api/schema と /reports/api/query
+```
+
+- ビルドした `dist/` を `wwwroot/reports/` に置くと、ダッシュボードは `/reports/` で開け、API は既定の場所（`/reports/api/`）で答えます。
+- `.arrows`（[スナップショット](#毎朝のスナップショット)）と、データに使うなら `.parquet`・`.arrow` は、ASP.NET Core の静的ファイルが型を知らないので、`FileExtensionContentTypeProvider` に足します（`dotnet/samples/DevBI.Sample/Program.cs`）。
+- `MapDevBIApi` の戻り値には、`.RequireAuthorization()` などのふつうの設定が付けられます。
+
+### WebForms・MVC 5（.NET Framework 4.7.2 以降）
+
+`Global.asax` で API を作り、`web.config` で `api/` の下のリクエストを渡します。
+
+```csharp
+protected void Application_Start(object sender, EventArgs e)
+{
+    DevBIHttpHandler.Api = new DevBIApi(new DevBIOptions
+    {
+        Directory = Server.MapPath("~/App_Data/devbi"),   // ~/App_Data/devbi/api/orders.sql など
+        Connect = name => name == "DEVBI_DB" ? new SqlConnection(ConfigurationManager.ConnectionStrings["DevBI"].ConnectionString) : null,
+        Log = line => System.Diagnostics.Trace.WriteLine(line),
+    });
+}
+```
+
+```xml
+<location path="Scripts/devbi/api">
+  <system.webServer>
+    <handlers>
+      <add name="DevBI" path="*" verb="*" type="DevBI.Server.SystemWeb.DevBIHttpHandler, DevBI.Server.SystemWeb" preCondition="integratedMode" />
+    </handlers>
+  </system.webServer>
+</location>
+```
+
+- `dist/` は `~/Scripts/devbi/` に置きます。埋め込みの API の既定の場所（`devbi-embed.js` と同じ場所の `api/`）が `~/Scripts/devbi/api/` なので、`data-devbi-api` は要りません。
+- `api/*.sql` は `App_Data` の下に置きます。IIS は `App_Data` のファイルを配りません。
+- IIS の統合パイプライン（既定）で、`web.config` に `<httpRuntime targetFramework="4.5" />` 以降があるアプリで動きます（Visual Studio で作ったアプリにはあります）。`System.Data.SqlClient` でも `Microsoft.Data.SqlClient` でもかまいません。
+- MVC 5 のアプリでは、既定のルート（`{controller}/{action}/{id}`）が `web.config` のハンドラーより先に `Scripts/devbi/api/query` をつかむので、`RouteConfig` の `MapRoute` より前に `routes.IgnoreRoute("Scripts/devbi/api/{*pathInfo}");` を足します。
+- `web.config` の `<httpErrors existingResponse="Replace">` は、API の日本語のエラーも IIS のエラーページに置き換えます。その設定があるときは、`location` の中で `<httpErrors existingResponse="PassThrough" />` にします。
+- 古い形式のプロジェクト（`packages.config`）で `System.Text.Json` を入れると、NuGet が `web.config` にバインド リダイレクトを足します。足されていないと「アセンブリが見つからない」エラーになるので、そのときは NuGet で入れ直します。
+
+### Windows 認証で SQL Server につなぐ
+
+接続文字列に `Integrated Security=true`（`Server=db01;Database=sales;Integrated Security=true;TrustServerCertificate=true`）と書くと、Windows のアカウントで SQL Server につながります。IIS では、アプリケーション プールのアカウント（`IIS AppPool\<プール名>`、ほかのコンピューターの SQL Server からは `<ドメイン>\<Web サーバー名>$`）です。そのアカウントに、読ませる表の SELECT の権限だけを付けます。利用者ひとりひとりのアカウントではつなぎません（DevBI の API は、だれが開いても同じ行を返します）。
+
+`<identity impersonate="true" />` にしている WebForms のアプリでは、開いた利用者のアカウントでつながることがあります。そのときは利用者ごとの権限になり、ほかのコンピューターの SQL Server には Kerberos の委任の設定が要ります。アプリケーション プールのアカウントでつなぐなら、SQL Server 認証のユーザーを使うのがかんたんです。
+
+### `DevBIOptions`
+
+| 名前 | 中身 |
+| --- | --- |
+| `Directory` | `api/` のあるフォルダ |
+| `Connect` | 接続の名前（`DEVBI_DB`、`DEVBI_DB_ERP` など）から、新しい、まだ開いていない `DbConnection` を返す関数。ないときは `null`（「接続先がありません。DEVBI_DB の接続を DevBIOptions.Connect で返してください」の `500`）。1 回の API ごとに呼び、使い終わると閉じる（ADO.NET の接続プールが使い回す） |
+| `MaxRows` | 1 回に返す行の上限。既定は 1,000,000 |
+| `Timeout` | 1 回の SQL の時間の上限。既定は 60 秒。`TimeSpan.Zero` で上限なし |
+| `ExposeErrors` | データベースのエラーをそのままブラウザに返す（`devbi-serve` の `--debug`）。既定は `false` |
+| `Log` | 1 回ごとの行（`api/orders.sql: 6,044 行、381 ms`）と、エラーのくわしい内容を受け取る関数 |
+
+`api.RunAsync(name, parameters)` で SQL を 1 つ実行できます（戻り値は Arrow のバイト列と行数）。`api.HandleAsync(request)` は HTTP の 1 回分で、ほかの Web の仕組みにつなぐときに使います（パスから `schema` / `query` を取るのは `DevBIApi.ActionOf(path)`）。
+
+### `devbi-serve` との違い
+
+- SQL Server だけです。SQL は SQL Server の書き方（`[名前]` の引用符など）で確かめ、パラメーターは `@p1`、`@p2` … で渡します。型の受け取り方（[接続先](#接続先)の表）、状態コード、メッセージは `devbi-serve` と同じです。違うメッセージは、接続先がないとき（「DEVBI_DB の接続を DevBIOptions.Connect で返してください」）と、時間切れの案内（「`DevBIOptions.Timeout` で延ばせます」）だけです。
+- `geography`・`geometry`・`hierarchyid` の列は、読めずにエラーになります。`location.STAsText() AS location` や `node.ToString() AS node` のように、SQL で文字にしてください。
+- スナップショットは作りません。`api/schema` の `snapshots` はいつも空です。`-- snapshot:` の行がある SQL のダッシュボードは、`devbi-snapshot`（Node）でサイトの `snapshots/` に作ったファイルがあればそれを、なければ API を読みます。
+- 知らないホスト名を断る仕組み（DNS リバインディングの対策）は持ちません。ASP.NET Core では `AllowedHosts`（appsettings.json）、IIS ではサイトのバインドにホスト名を書きます。
+- パスの前に何が付いても答える `devbi-serve` と違い、`MapDevBIApi` に渡した場所（WebForms では `web.config` の `location`）でだけ答えます。
 
 ## ほかのアプリの画面に埋め込む
 
@@ -655,7 +749,7 @@ Sys.WebForms.PageRequestManager.getInstance().add_endRequest(() => window.DevBI?
 
 ### 4. API とログイン
 
-- `read_api` を使うダッシュボードには、読み取り API が要ります。`devbi-serve` を同じサーバーで動かすか、アプリに同じ形の API（[API の形](#api-の形)）を足して、`data-devbi-api` でその場所を指します。
+- `read_api` を使うダッシュボードには、読み取り API が要ります。`devbi-serve` を同じサーバーで動かすか、アプリに同じ形の API（[API の形](#api-の形)）を足して、`data-devbi-api` でその場所を指します。ASP.NET のアプリには、[C# の見本](#aspnetcで-api-を出す)をそのまま足せます。
 - アプリのログイン（Cookie、Windows 認証）は、同じオリジンならそのまま API に届きます。
 - CSRF のトークンなど、ヘッダーが要るときは `mount` の `fetch` で足します。
 
@@ -812,3 +906,6 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
 | `pnpm --filter devbi-example-sales copy-db <URL>` | サンプルの 4 つの表を、SQL Server・Oracle・MySQL に写す（先に同じ名前の表を消す）。`DEVBI_DB` をその URL にすると、「DB から」のダッシュボードがそのデータベースから読む |
 | `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |
+| `dotnet test dotnet/DevBI.sln` | C# の見本のテスト（.NET 10 SDK）。SQL ファイルの読み方が TypeScript と同じか（`packages/server/test/fixtures/sqlserver-cases.json` と比べる）と、HTTP の答え方。`DEVBI_TEST_MSSQL` があれば SQL Server でも流す |
+| `dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179` | サンプルのビルド（`dist/`）と API を ASP.NET Core で出す。接続は環境変数 `ConnectionStrings__DEVBI_DB` に ADO.NET の接続文字列で（先に `copy-db` で SQL Server に表を写す） |
+| `E2E_BASE_URL=http://127.0.0.1:4179 pnpm --filter devbi-example-sales exec playwright test` | e2e を、`devbi-serve` ではなく、そこで動いているサーバーに向けて流す |
