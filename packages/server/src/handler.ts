@@ -17,7 +17,7 @@ export interface ApiOptions {
   env?: Record<string, string | undefined>;
   /** Most rows one request may return. Default 1,000,000. */
   maxRows?: number;
-  /** How long one query may run, in milliseconds (PostgreSQL). Default 60,000. */
+  /** How long one query may run, in milliseconds (all but SQLite). Default 60,000. */
   timeoutMs?: number;
   /**
    * Send database errors to the browser as they are (they can name tables and columns). Off: the browser gets
@@ -137,11 +137,10 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     // Checked with the database's quoting rules ([brackets], $$ … $$), which the read-only check depends on.
     const dataset = parseDataset(name, text, conn.dialect);
     const bound = bindParameters(dataset, conn.dialect, params as Record<string, unknown>);
-    // One row past the limit tells whether there were more.
-    const limited = `SELECT * FROM (\n${bound.sql}\n) AS devbi_rows LIMIT ${maxRows + 1}`;
     let result;
     try {
-      result = await conn.query(limited, bound.params, { timeoutMs });
+      // One row past the limit tells whether there were more.
+      result = await conn.query(bound.sql, bound.params, { timeoutMs, maxRows: maxRows + 1 });
     } catch (e) {
       const detail = (e as Error).message;
       log(`api/${name}.sql: ${detail}`);

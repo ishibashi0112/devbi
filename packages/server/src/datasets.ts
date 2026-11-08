@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { Dialect } from "./connect.js";
+import type { Dialect } from "./result.js";
 import { parameters, readOnlyProblem, splitStatements } from "./sqltext.js";
 
 /** One `api/<name>.sql` file: a SELECT the API runs for `read_api('<name>')`. */
@@ -132,8 +132,9 @@ export function parseDataset(name: string, text: string, dialect?: Dialect): Dat
 export type ParamValue = string | number | boolean | null;
 
 /**
- * The dataset's SQL with its `:name` parameters in the database's placeholder style (`?` for SQLite, `$1` for
- * PostgreSQL), and the values in order. Every parameter needs a value, and no others may be given.
+ * The dataset's SQL with its `:name` parameters in the database's placeholder style, and the values in order:
+ * `?` for each place (SQLite, MySQL), or one numbered placeholder per name (`$1` PostgreSQL, `@p1` SQL Server,
+ * `:p1` Oracle). Every parameter needs a value, and no others may be given.
  */
 export function bindParameters(dataset: Dataset, dialect: Dialect, values: Record<string, unknown>): { sql: string; params: unknown[] } {
   const rel = `api/${dataset.name}.sql`;
@@ -160,10 +161,10 @@ export function bindParameters(dataset: Dataset, dialect: Dialect, values: Recor
   let last = 0;
   for (const p of parameters(dataset.sql, dialect)) {
     out += dataset.sql.slice(last, p.start);
-    if (dialect === "postgres") {
+    if (dialect === "postgres" || dialect === "mssql" || dialect === "oracle") {
       let k = order.findIndex((q) => q.toLowerCase() === p.name.toLowerCase());
       if (k < 0) k = order.push(p.name) - 1;
-      out += `$${k + 1}`;
+      out += dialect === "postgres" ? `$${k + 1}` : dialect === "mssql" ? `@p${k + 1}` : `:p${k + 1}`;
     } else {
       order.push(p.name);
       out += "?";

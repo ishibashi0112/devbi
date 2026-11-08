@@ -1,5 +1,5 @@
 import * as arrow from "apache-arrow";
-import type { ColumnType, ResultSet } from "./connect.js";
+import type { ColumnType, ResultSet } from "./result.js";
 
 /** Milliseconds since 1970 for `YYYY-MM-DD[ HH:MM:SS[.fff]]`, read as UTC (DuckDB's TIMESTAMP has no time zone). Sent as microseconds, DuckDB's TIMESTAMP, to the millisecond. */
 function utcMillis(text: string): number | null {

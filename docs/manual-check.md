@@ -155,6 +155,20 @@ pnpm example:dev
 | 48 | `devbi-serve` を動かしたまま、別のターミナルで `pnpm --filter devbi-example-sales exec devbi-snapshot` | `1 個を …/dist/snapshots に作りました` と出る。ページを読み込み直すと、見出しの時刻がいまの時刻に変わる（IIS などに置くときは、これをタスクスケジューラで毎朝動かす） |
 | 49 | `pnpm example:dev` で「売上の日次集計」を開く | 開発サーバーはファイルを作らず、毎回データベースから読む。見出しの時刻は開いた時刻 |
 
+### SQL Server・Oracle・MySQL から読む（Docker があるとき）
+
+サンプルの SQLite と同じ 4 つの表を、Docker で動かしたデータベースに写して、同じ `api/*.sql` で読みます。どのデータベースも、ドライバー（`mssql`、`oracledb`、`mysql2`）はサンプルに入っています。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 50 | `docker run -d --name devbi-mssql -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=DevBI_test1 -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest` を実行し、20 秒ほど待って `pnpm --filter devbi-example-sales copy-db mssql://sa:DevBI_test1@127.0.0.1:1433/master` | `customers 40 行、products 10 行、orders 3029 行、order_lines 6044 行 を mssql://127.0.0.1:1433/master に写しました` と出る（Apple シリコンの Mac は、Docker Desktop の設定で Rosetta を使う） |
+| 51 | `DEVBI_DB=mssql://sa:DevBI_test1@127.0.0.1:1433/master pnpm example:serve` で開き、「売上ダッシュボード（DB から）」で「全期間」を押す | 売上が ¥193,161,410。ターミナルに `api/orders.sql: 6,044 行` が出る。「売上の日次集計」も同じ金額 |
+| 52 | MySQL: `docker run -d --name devbi-mysql -e MYSQL_ROOT_PASSWORD=devbi -e MYSQL_DATABASE=devbi -p 3306:3306 mysql:8.4`、`copy-db mysql://root:devbi@127.0.0.1:3306/devbi`、`DEVBI_DB=` をその URL にして 51 と同じ | 同じく ¥193,161,410 |
+| 53 | Oracle: `docker run -d --name devbi-oracle -e ORACLE_PASSWORD=devbi -e APP_USER=devbi -e APP_USER_PASSWORD=devbi -p 1521:1521 gvenzl/oracle-free:23-slim-faststart`（`docker logs devbi-oracle` に `DATABASE IS READY TO USE!` が出るまで待つ）、`copy-db oracle://devbi:devbi@127.0.0.1:1521/FREEPDB1`、51 と同じ | 同じく ¥193,161,410 |
+| 54 | 51 のまま、`examples/sales/api/orders.sql` の `SELECT` を `DELETE FROM orders` に変えて開き直す | 「SELECT か WITH で始まる文だけ使えます」と出て、表は消えない。戻すと直る |
+
+終わったら `docker rm -f devbi-mssql devbi-mysql devbi-oracle` で消せます。
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -191,7 +205,7 @@ pnpm e2e         # パッケージとサンプルをビルドして devbi-serve 
 - 初回の読み込みが重めです。重いのは DuckDB-wasm（約 34MB、圧縮して 8.5MB）で、2 回目以降はブラウザのキャッシュから読みます。画面の JavaScript は最初に約 440KB を読み、グラフ（約 280KB）、表（約 225KB と CSS 約 73KB）、DuckDB を動かす部分（約 220KB）は使うときに別のファイルとして読みます
 - `dist/` を新しいビルドで置き換えたときは、開いたままのページを読み込み直してください。まだ読んでいなかったグラフなどのファイルが見つからず、タイルに「ページを読み込み直してください」と出ます
 - Parquet は DuckDB の拡張をインターネットから取りに行きます。社内で外に出られないときは xlsx / CSV で試してください
-- データベースは SQLite と PostgreSQL だけです（SQL Server・Oracle・MySQL はこのあと）
+- SQL Server の Windows 認証（統合認証）には、まだつなげません（SQL Server 認証のユーザーで試してください）
 - スナップショットは Arrow の形で保存します（handoff では Parquet でしたが、DuckDB-wasm が Parquet の拡張をインターネットから取りに行くため）。時刻はサーバーの時計で、`devbi-serve` が止まっていた間の分は、次に起動したときに作ります
 - どの SQL をスナップショットから読むかは、ビルドしたときに決まります。`-- snapshot:` の行を足したり消したりしたら、ビルドし直してください（ファイルが見つからないときは、API から読みます）
 - `pnpm build` は `dist/` を作り直すので、スナップショットも消えます。`devbi-serve` は次に開かれたときに作り直しますが、IIS などに静的に置くときは、ビルドのあとに `devbi-snapshot` を動かしてください
