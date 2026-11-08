@@ -17,11 +17,20 @@ export const DATE_RANGE_PRESETS = [
 
 export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
 
-/** A JSON Schema fragment for one option (kept small: enough for completion and hover text). */
+/** One option of a tile type: a JSON Schema fragment (completion and hover text) plus what the GUI editor shows. */
 export interface TileOptionSchema {
   type?: "string" | "boolean" | "number";
   enum?: readonly string[];
+  /** A short name for each `enum` value, in the same order (the GUI editor, and hover text in VS Code). */
+  enumLabels?: readonly string[];
   description: string;
+  /** A short name for the GUI editor's property panel. */
+  label: string;
+  /**
+   * How the GUI editor asks for a string: `text` (several lines), `field` (a dimension or the time column of the
+   * tile's metrics file), `metrics` (a metrics file). Default: one line.
+   */
+  input?: "text" | "field" | "metrics";
 }
 
 export interface TileTypeInfo {
@@ -84,8 +93,8 @@ export const TILE_TYPES = {
     description: "クロス集計。1 つの項目を列に、残りの軸を行に、最初の指標をセルに。合計の行と列つき",
     query: true,
     options: {
-      columns: { type: "string", description: "列にする項目（軸の名前か time の列名）。既定は最後の軸か時間" },
-      totals: { type: "boolean", description: "false で合計の行と列を消す" },
+      columns: { type: "string", label: "列にする項目", input: "field", description: "列にする項目（軸の名前か time の列名）。既定は最後の軸か時間" },
+      totals: { type: "boolean", label: "合計の行と列", description: "false で合計の行と列を消す" },
     },
   },
   select: {
@@ -94,7 +103,7 @@ export const TILE_TYPES = {
     description: "最初の軸の値の一覧から選ぶ。9 件以上で検索欄が出る",
     query: true,
     options: {
-      multiple: { type: "boolean", description: "false で 1 つだけ選ぶ（既定は複数）" },
+      multiple: { type: "boolean", label: "複数選べる", description: "false で 1 つだけ選ぶ（既定は複数）" },
     },
   },
   "date-range": {
@@ -105,9 +114,11 @@ export const TILE_TYPES = {
     options: {
       default: {
         enum: DATE_RANGE_PRESETS,
+        enumLabels: ["全期間", "最新の月", "直近12ヶ月", "最新の年", "前の年", "今年の累計", "最新の年度", "前の年度"],
+        label: "最初の期間",
         description: "最初に選ぶ期間。「最新」はデータの最終日が基準",
       },
-      metrics: { type: "string", description: "使う指標ファイル（ダッシュボードの metrics と違うとき）" },
+      metrics: { type: "string", label: "指標ファイル", input: "metrics", description: "使う指標ファイル（ダッシュボードの metrics と違うとき）" },
     },
   },
   markdown: {
@@ -116,7 +127,7 @@ export const TILE_TYPES = {
     description: "文章。**太字**、*斜体*、`コード`、[リンク](URL)、# 見出し、- 箇条書き。query は書かない",
     query: false,
     options: {
-      text: { type: "string", description: "本文（Markdown）" },
+      text: { type: "string", label: "本文", input: "text", description: "本文（Markdown）" },
     },
   },
 } as const satisfies Record<string, TileTypeInfo>;

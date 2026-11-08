@@ -488,6 +488,16 @@
                         "latest_fiscal_year",
                         "previous_fiscal_year"
                       ],
+                      "enumDescriptions": [
+                        "全期間",
+                        "最新の月",
+                        "直近12ヶ月",
+                        "最新の年",
+                        "前の年",
+                        "今年の累計",
+                        "最新の年度",
+                        "前の年度"
+                      ],
                       "description": "最初に選ぶ期間。「最新」はデータの最終日が基準"
                     },
                     "metrics": {
