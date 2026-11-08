@@ -692,17 +692,17 @@ Next.js（App Router、16 で確かめています）のアプリに、ダッシ
 
 ```
 アプリ/
-  public/devbi/                    DevBI のプロジェクトの dist/ を写したもの（devbi-embed.js、assets/、data/）
+  public/devbi/                    DevBI のプロジェクトの dist/ を写したもの（devbi-embed.js、assets/、data/。snapshots/ は写さない）
   app/devbi/[...path]/route.ts     /devbi/api/schema、/devbi/api/query、/devbi/snapshots/<ファイル>
   lib/devbi.ts                     createApiHandler（サーバー全体で 1 つ）
   instrumentation.ts               起動したときと毎朝の時刻に、スナップショットを作る
   components/devbi-dashboard.tsx   ダッシュボードを出す部品（"use client"）
 ```
 
-`npm install @devbi/server`（Node 22.16 以上）と、使うデータベースのドライバ（`mssql` など。[接続先](#接続先)）をアプリに入れます。
+アプリに `@devbi/server`（Node 22.16 以上）と、使うデータベースのドライバ（`mssql` など。[接続先](#接続先)）を入れます。`@devbi/server` は npm にまだ出していないので、いまはこのリポジトリの `packages/server` をビルドして使います（見本は pnpm のワークスペースでつないでいる）。
 
 ```ts
-// next.config.ts: バンドルせず、Node でそのまま動かす（データベースのドライバと node:sqlite）
+// next.config.ts: node_modules の @devbi/server をバンドルせず、Node でそのまま動かす
 const config: NextConfig = { serverExternalPackages: ["@devbi/server"] };
 ```
 
@@ -753,10 +753,12 @@ export async function register() {
 部品は、[React のアプリに置く](#react-のアプリに置く)の `DevbiDashboard` と同じで、URL を `/devbi/devbi-embed.js` にし、ファイルの先頭に `"use client";` を書きます（`import()` には `/* webpackIgnore: true */ /* turbopackIgnore: true */` を付けます）。ページでは `<DevbiDashboard name="sales" />` のように置きます。
 
 - `dist/` は `public/devbi/` に、`next build` の前に写します（見本は `prebuild` で写す）。ダッシュボードの API の既定の場所は `devbi-embed.js` と同じ場所の `api/`（`/devbi/api/`）なので、`data-devbi-api` は要りません。`public/` のファイルは route より先に配られ、残りの `/devbi/…` に route が答えます。
-- スナップショットは `public/` に置きません（`next start` は、ビルドのあとで `public/` に足したファイルを配りません）。サーバーのフォルダ（`snapshotDir`）に作り、route が返します。まだなければ作ってから返し、`If-Modified-Since` に `304` で答えるのは `devbi-serve` と同じです。いつも動いているサーバーがない置き方では、`instrumentation.ts` の代わりに `devbi-snapshot --dir <プロジェクト> --out <フォルダ>` をタスクスケジューラや cron で動かし、`snapshotDir` を `<フォルダ>/snapshots` にします。
+- `dist/snapshots/` は写しません（`devbi-snapshot` の既定の置き場所なので、あることがあります）。写すと、route より先に `public/` の古いファイルが配られます。`dist/index.html` も、DevBI だけのページなので要りません（見本は写さない）。
+- スナップショットは `public/` に置きません（`next start` は、動き始めたあとで `public/` に足したファイルを配りません）。サーバーのフォルダ（`snapshotDir`）に作り、route が返します。まだなければ作ってから返し、`If-Modified-Since` に `304` で答えるのは `devbi-serve` と同じです。いつも動いているサーバーがない置き方では、`instrumentation.ts` の代わりに `devbi-snapshot --dir <プロジェクト> --out <フォルダ>` をタスクスケジューラや cron で動かし、`snapshotDir` を `<フォルダ>/snapshots` にします。
 - `fetch` は gzip で返しません。Next.js は route の答えの `Content-Encoding` を消してしまい、Arrow の型（`application/vnd.apache.arrow.stream`）は自分では圧縮しないためです。行が多いときは、前に置く IIS や nginx で、この型も圧縮させます（nginx なら `gzip_types` に足す）。
-- ログイン: 同じオリジンなので、アプリの Cookie はそのまま API に届きます。route の中で、アプリのほかの route と同じように確かめます（`proxy.ts` で守っているなら、`/devbi/` もその対象に入れます）。
-- ホスト名: `devbi-serve` と同じく、IP アドレスと `localhost` のほかは `DEVBI_ALLOWED_HOSTS`（カンマ区切り。`.corp.local` はその下の名前すべて）に書いた名前だけを通します。
+- ログイン: 同じオリジンなので、アプリの Cookie はそのまま API に届きます。route の中で、アプリのほかの route と同じように確かめます。ただし `public/devbi/` のファイル（`devbi-embed.js`、`data/` の Excel や CSV など）は route を通らずに配られます。データのファイルもログインで守るときは、`proxy.ts` の `matcher` に `/devbi/:path*` を入れます（`proxy.ts` は `public/` のファイルの前にも動きます）。
+- ホスト名: `devbi-serve` と同じく、IP アドレスと `localhost` のほかは `DEVBI_ALLOWED_HOSTS`（カンマ区切り。`.corp.local` はその下の名前すべて）に書いた名前だけを通します。IP アドレスでは開けるので、手元で試すときは `next dev --hostname 127.0.0.1` のように、このコンピューターだけで待ち受けます（見本の `dev` と `start` はそうしている。Next.js の既定はすべてのネットワークから）。
+- バンドル: `serverExternalPackages` は、`node_modules` にある `@devbi/server` にだけ効きます。ワークスペースでつないだもの（見本）はバンドルされますが、データベースのドライバは `import()` を Node に任せて読むので、どちらでも動きます。ドライバはアプリの `node_modules` から探します。
 - `lib/devbi.ts` で `globalThis` に置くのは、`next dev` がファイルを直すたびに読み込み直しても、データベースの接続を作り直さないためです。`next dev` でもそのまま動きます。
 - `path.resolve` の `/* turbopackIgnore: true */` は、「サーバーが動いてから読むフォルダで、ビルドに含めるファイルではない」という印です。付けないと、`next build` が「プロジェクト全体をたどる」警告を出します。
 
@@ -974,7 +976,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm example:dev` | パッケージをビルドして、サンプルの開発サーバーを開く（<http://localhost:5173>） |
 | `pnpm example:preview` | サンプルを静的ビルドして開く（<http://localhost:4173>） |
 | `pnpm example:serve` | サンプルをビルドして、`devbi-serve` で開く（<http://localhost:8080>）。「売上ダッシュボード（DB から）」はサンプルの SQLite を API から読み、「売上の日次集計」は起動したときに作ったスナップショットを読む |
-| `pnpm example:nextjs` | サンプルのダッシュボードを、Next.js のアプリ（`examples/nextjs`）に置いて開く（<http://localhost:3000>）。API は `app/devbi/[...path]/route.ts` |
+| `pnpm example:nextjs` | サンプルのダッシュボードを、Next.js のアプリ（`examples/nextjs`）に置いて開く（<http://127.0.0.1:3000>）。API は `app/devbi/[...path]/route.ts`。`DEVBI_DB` を付けて起動すると、そのデータベースから読む（SQL Server は `copy-db` で表を写してから） |
 | `pnpm --filter devbi-example-sales exec devbi-snapshot` | サンプルのスナップショットを、いま `dist/snapshots/` に作る（先にビルド） |
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
 | `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |

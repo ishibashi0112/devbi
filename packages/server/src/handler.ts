@@ -354,8 +354,18 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     async fetch(request) {
       const a = await answer(fromFetch(request));
       if (!a) return undefined;
-      const body = a.body instanceof Readable ? (Readable.toWeb(a.body) as ReadableStream<Uint8Array<ArrayBuffer>>) : ((a.body as Uint8Array<ArrayBuffer> | undefined) ?? null);
-      return new Response(body, { status: a.status, headers: a.headers });
+      if (!(a.body instanceof Readable)) return new Response((a.body as Uint8Array<ArrayBuffer> | undefined) ?? null, { status: a.status, headers: a.headers });
+      // A snapshot file: closed when the browser goes away, also before the server starts sending (Next.js then
+      // never reads or cancels the body, and an open file cannot be replaced on Windows).
+      const stream = a.body;
+      const stop = () => stream.destroy();
+      if (request.signal.aborted) {
+        stop();
+        return new Response(null, { status: a.status, headers: a.headers });
+      }
+      request.signal.addEventListener("abort", stop, { once: true });
+      stream.once("close", () => request.signal.removeEventListener("abort", stop));
+      return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array<ArrayBuffer>>, { status: a.status, headers: a.headers });
     },
     run,
     snapshots,

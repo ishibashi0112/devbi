@@ -13,7 +13,7 @@ pnpm example:preview  # 静的ビルドしたものを開く（http://localhost:
 pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost:8080）。DB 版のダッシュボードはサンプルの SQLite を API から読む。
                       # 「売上の日次集計」は、devbi-serve が毎朝 6:00（と起動したとき）に作るスナップショットを読む
                       # /embed-demo.html は、ほかのアプリの画面に script 1 本で埋め込んだ例
-pnpm example:nextjs   # 同じダッシュボードを Next.js のアプリに置いた例（http://localhost:3000）。API は route.ts 1 つ
+pnpm example:nextjs   # 同じダッシュボードを Next.js のアプリに置いた例（http://127.0.0.1:3000）。API は route.ts 1 つ
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG・_MSSQL・_MYSQL・_MARIADB・_ORACLE があればそのデータベースも）

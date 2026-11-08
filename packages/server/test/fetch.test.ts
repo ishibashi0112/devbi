@@ -1,7 +1,7 @@
 // createApiHandler's fetch(): the same API with the web's Request and Response, for Next.js route handlers and
 // other servers built on them. The answers must match what devbi-serve sends (server.test.ts, snapshot.test.ts);
 // the last tests check handle() (Node's http) on the same files, gzip included.
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, readlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -104,6 +104,24 @@ describe("createApiHandler: fetch (the web's Request / Response) and handle (Nod
     expect(await error(await ask("snapshots/%E3%81.arrows"))).toEqual([404, "スナップショットの名前を読めません"]);
   });
 
+  it("a body over 64 KB: 413, and the rest is not read (the browser's stream is cancelled)", async () => {
+    let pulls = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulls++;
+        c.enqueue(new Uint8Array(16384).fill(32));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const init = { method: "POST", headers: { "Content-Type": "application/json" }, body: endless, duplex: "half" } as RequestInit;
+    expect(await error(await ask("api/query", init))).toEqual([413, "リクエストが大きすぎます"]);
+    expect(cancelled).toBe(true);
+    expect(pulls).toBeLessThan(10);
+  });
+
   it("snapshots: made when missing, then streamed from the file, with 304 and HEAD", async () => {
     const first = await ask(`snapshots/${encodeURIComponent(daily)}`);
     expect(first.status).toBe(200);
@@ -125,6 +143,35 @@ describe("createApiHandler: fetch (the web's Request / Response) and handle (Nod
 
     const other = await ask(`snapshots/${snapshotFile("daily", { from: "2000-01-01" })}`);
     expect(other.status).toBe(404);
+  });
+
+  // Where the system lists a process's open files (Linux): the snapshot file must not stay open.
+  it.runIf(existsSync("/proc/self/fd"))("closes the file when the browser goes away, before or while it is sent", async () => {
+    const open = () =>
+      readdirSync("/proc/self/fd").filter((fd) => {
+        try {
+          return readlinkSync(`/proc/self/fd/${fd}`).endsWith(daily);
+        } catch {
+          return false;
+        }
+      }).length;
+    const closed = async () => {
+      for (let i = 0; i < 50 && open() > 0; i++) await new Promise((r) => setTimeout(r, 20));
+      return open();
+    };
+    await (await ask(`snapshots/${daily}`)).arrayBuffer(); // read to the end
+    expect(await closed()).toBe(0);
+    // Gone before the answer (Next.js then never reads nor cancels the body).
+    const gone = new AbortController();
+    gone.abort();
+    await ask(`snapshots/${daily}`, { signal: gone.signal });
+    expect(await closed()).toBe(0);
+    // Gone after the answer, before its body is read.
+    const later = new AbortController();
+    const res = await ask(`snapshots/${daily}`, { signal: later.signal });
+    expect(res.status).toBe(200);
+    later.abort();
+    expect(await closed()).toBe(0);
   });
 
   it("handle (Node's http): the same, gzipped when large and asked for, the file streamed through gzip", async () => {

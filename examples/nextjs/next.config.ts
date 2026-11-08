@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
-  // @devbi/server runs as it is in Node (database drivers, node:sqlite), not bundled.
+  // @devbi/server from node_modules runs as it is in Node, not bundled. (Here it is the workspace's packages/server,
+  // which Next.js bundles all the same; it loads the database drivers with import() left to Node, so both work.)
   serverExternalPackages: ["@devbi/server"],
   // `next dev` would write AGENTS.md here; this example keeps only its own files.
   agentRules: false,

@@ -13,6 +13,9 @@ if (!existsSync(path.join(from, "devbi-embed.js"))) {
   process.exit(1);
 }
 rmSync(to, { recursive: true, force: true });
-// Snapshots are not static files here: app/devbi/[...path]/route.ts sends them from snapshots/, made by the server.
-cpSync(from, to, { recursive: true, filter: (src) => !/[\\/]snapshots$/.test(src) && !src.endsWith("embed-demo.html") });
+// Left out: snapshots/ (app/devbi/[...path]/route.ts sends them from the server's folder, made each morning; a copy
+// in public/ would be served before the route, and stay as it was when the server started), and the pages of the
+// dashboards' own site (index.html, embed-demo.html): this app's pages show the dashboards.
+const skip = new Set(["snapshots", "index.html", "embed-demo.html"].map((name) => path.join(from, name)));
+cpSync(from, to, { recursive: true, filter: (src) => !skip.has(src) });
 console.log(`${path.relative(process.cwd(), from)} を ${path.relative(process.cwd(), to)} に写しました`);

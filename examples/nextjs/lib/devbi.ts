@@ -12,7 +12,7 @@ function create(): ApiHandler {
   return createApiHandler({
     dir,
     env: loadEnv(dir),
-    // On the server, sent by the route (Next.js does not serve files put in public/ after the build).
+    // On the server, sent by the route (next start does not serve files put in public/ after it started).
     snapshotDir: path.resolve(/* turbopackIgnore: true */ process.env.DEVBI_SNAPSHOTS ?? "snapshots"),
     log: (line) => console.log(`[devbi] ${line}`),
   });

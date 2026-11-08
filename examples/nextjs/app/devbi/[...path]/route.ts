@@ -12,7 +12,8 @@ async function answer(request: Request): Promise<Response> {
   if (!isHostAllowed(request.headers.get("host") ?? undefined, allowedHosts)) {
     return Response.json({ error: "このホスト名では開けません（DEVBI_ALLOWED_HOSTS に書いてください）" }, { status: 403 });
   }
-  // The app's login goes here, as for its other routes (for example: if (!(await auth())) return 401).
+  // The app's login goes here, as for its other routes (for example: if (!(await auth())) return 401). Files in
+  // public/devbi/ (devbi-embed.js, the data files) do not come here: proxy.ts guards them, if they need it.
   return (await devbi.fetch(request)) ?? Response.json({ error: "見つかりません" }, { status: 404 });
 }
 
