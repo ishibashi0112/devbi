@@ -1,6 +1,6 @@
 # 動作チェックの手順
 
-手元の Mac（または Windows / Linux）で DevBI のランタイムを動かして、画面を触って確かめるための手順です。所要時間は 15〜20 分ほど。
+手元の Mac（または Windows / Linux）で DevBI のランタイムを動かして、画面を触って確かめるための手順です。所要時間は 20〜25 分ほど。
 
 ## 1. 準備（最初の一回だけ）
 
@@ -197,6 +197,25 @@ WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだ�
 | 65 | （SQL Server があるとき）50 の `copy-db` と `pnpm --filter devbi-example-nextjs build` のあと、`DEVBI_DB=mssql://sa:DevBI_test1@127.0.0.1:1433/master DEVBI_SNAPSHOTS=snapshots-mssql pnpm --filter devbi-example-nextjs start` で起動し、61 を開く | 同じ ¥193,161,410。ターミナルに `[devbi] api/orders.sql: 6,044 行` が出て、「mssql が要ります」は出ない |
 | 66 | `pnpm e2e:nextjs` | `4 passed` |
 
+### GUI エディタ（開発サーバー）
+
+`pnpm example:dev` で開きます。保存するとサンプルのファイル（`examples/sales/dashboards/`）が書き換わるので、最後の 77 で元に戻します。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 67 | <http://localhost:5173/#/sales> を開き、見出しの右の「編集」を押す | 上に「売上ダッシュボード dashboards/sales.dash.json」と、「＋ タイルを追加」「元に戻す」「やり直す」「保存」「閉じる」の帯が出る。タイルは数字やグラフを出したまま。マウスを乗せると青い枠と「monthly · 棒グラフ」のような名札、右上に × が出る |
+| 68 | 「地域別売上」をつかんで、左の「月別売上」の上へドラッグ | 動かしている間は行き先に青い点線の枠が出て、「月別売上」が押し下げられる。離すとそこに収まり、「未保存の変更があります」と出る |
+| 69 | 「元に戻す」を押し、「月別売上」の右端をつかんで左へドラッグ | 68 の前に戻る。「月別売上」の幅が列の単位で狭くなる（グラフも描き直される） |
+| 70 | ⌘S（Windows は Ctrl+S）。ターミナルで `git diff examples/sales/dashboards` | 「保存しました（dashboards/sales.dash.json）」と出る。差分は `"id": "monthly"` の下の `"x": 0, "y": 3, "w": …` の 1 行だけ。ページは読み込み直されない |
+| 71 | 「＋ タイルを追加」で「数字（KPI）」を選ぶ | いちばん下に「売上」の KPI が金額つきで出て、そこまでスクロールする |
+| 72 | 足したタイルの右上の × を押す。続けて ⌘Z | 消えて、⌘Z で戻る。タイルを押して選び Delete を押しても消える |
+| 73 | 「閉じる」 | 「保存していない変更があります」と、「保存して閉じる」「保存せずに閉じる」「編集を続ける」が出る。「保存せずに閉じる」で、70 で保存した形のダッシュボードに戻る |
+| 74 | もう一度「編集」を押し、VS Code で `sales.dash.json` の `"title"` を変えて保存 | エディタの見出しがその言葉に変わり、「読み込み直しました」と出る |
+| 75 | エディタでタイルを 1 つ動かしてから、VS Code で `"title"` をもう一度変えて保存 | 「dashboards/sales.dash.json が、ほかで書き換えられました」と、「ファイルの内容を読み込む（ここでの変更は捨てる）」「ここでの内容で上書きする」が出る。「保存」を押しても「エディタで開いたあとに書き換えられています」で断られる。「ファイルの内容を読み込む」で VS Code で直した内容になる |
+| 76 | 「閉じる」→「＋ 新しいダッシュボード」。ファイル名に `月次` と入れる。次に `monthly`、見出しに「月次の売上」と入れて「作って編集する」。「＋ タイルを追加」で「棒グラフ」を選んで保存し、「閉じる」 | `月次` では「半角の英数字と - _ で書いてください」と出て押せない。作ると空の編集画面（「＋ タイルを追加」から…）になり、棒グラフの月別売上が出る。`examples/sales/dashboards/monthly.dash.json` ができ、閉じると「月次の売上」のダッシュボードが出て、「← 一覧へ」の一覧に 4 つ並ぶ |
+| 77 | ターミナルで `git checkout examples/sales/dashboards && rm examples/sales/dashboards/monthly.dash.json` | ページが読み込み直され、一覧が元の 3 つに戻る |
+| 78 | `pnpm example:preview` で <http://localhost:4173> を開く | 「編集」も「＋ 新しいダッシュボード」も出ない（ビルドにはエディタが入らない） |
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。
@@ -222,7 +241,7 @@ pnpm try-xlsx ~/Desktop/売上一覧.xlsx --sheet 明細
 
 ```sh
 pnpm test        # 指標 → SQL、xlsx、書式（DuckDB Node で実際に SQL を流す）、API（SQLite）。パッケージのソースを直接読むので、ビルドは要らない
-pnpm e2e         # パッケージとサンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認
+pnpm e2e         # パッケージとサンプルをビルドして devbi-serve で開き、ブラウザ（Playwright）で上の主な操作を確認。GUI エディタは Vite の開発サーバーで、サンプルのコピー（examples/sales/e2e-work/）を相手に確認
 pnpm e2e:nextjs  # Next.js の見本（examples/nextjs）を next start で開いて確認
 dotnet test dotnet/DevBI.sln   # C# の見本（.NET 10 SDK があるとき）
 ```
@@ -230,6 +249,8 @@ dotnet test dotnet/DevBI.sln   # C# の見本（.NET 10 SDK があるとき）
 `pnpm e2e` は初回だけ `pnpm --filter devbi-example-sales exec playwright install chromium` でブラウザを入れます。
 
 ## いまの制限（v0）
+
+- GUI エディタは、いまはタイルの配置（動かす・大きさ・足す・消す）と新しいダッシュボードまでです。タイルの中身（指標・軸・種類・見出し）や、ダッシュボードの見出し・説明は dash.json を直接直してください（次の版で設定欄を足します）。編集は、開発サーバーを動かしているパソコンのブラウザで、幅 720px 以上の画面でできます
 
 - グラフの棒や点はマウス・タップでしか選べません（キーボード操作は未対応。リストとチップはキーボードで操作でき、表はセルを矢印キーで動かして Enter かスペースで選べます）
 - 初回の読み込みが重めです。重いのは DuckDB-wasm（約 34MB、圧縮して 8.5MB）で、2 回目以降はブラウザのキャッシュから読みます。画面の JavaScript は最初に約 440KB を読み、グラフ（約 280KB）、表（約 225KB と CSS 約 73KB）、DuckDB を動かす部分（約 220KB）は使うときに別のファイルとして読みます

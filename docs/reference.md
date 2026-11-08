@@ -10,6 +10,7 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [エディタでの補完と型（pnpm gen）](#エディタでの補完と型pnpm-gen)
 - [書式](#書式)
 - [@devbi/vite](#devbivite)
+- [GUI エディタ（@devbi/editor）](#gui-エディタdevbieditor)
 - [データベースから読む（@devbi/server）](#データベースから読むdevbiserver)
 - [ASP.NET（C#）で API を出す](#aspnetcで-api-を出す)
 - [Next.js に置く](#nextjs-に置く)
@@ -374,13 +375,87 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | `embed` | `true` で、ビルドのときに `devbi-embed.js` も作る（[ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)）。`base` は `"./"` にしておく（`/` で始まると警告）。既定は `false` |
 
 - `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
-- 開発サーバーでは、dash.json・metrics.yaml・data/ のファイルを保存するとページを読み込み直します。
+- 開発サーバーでは、dash.json・metrics.yaml・data/・api/ のファイルを保存するとページを読み込み直します（GUI エディタで編集中は[別の動き](#ほかで書き換えたとき)）。
+- プロジェクトに `@devbi/editor` が入っていると、開発サーバーでだけ [GUI エディタ](#gui-エディタdevbieditor)を付けます（`vite.config.ts` や `main.tsx` は変えなくてよい）。ビルド、`vite preview` には入りません。
 - 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
 - `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
 - `api/` の SQL の先頭の `-- snapshot:` の行を読み、どの SQL を[スナップショット](#毎朝のスナップショット)から読むかを `virtual:devbi` に入れます（SQL の中身は入れません）。開発サーバーと `vite preview` は、スナップショットのファイルを保存せず、聞かれるたびにデータベースから読んで返します。
+- 開発サーバーと `vite preview` の読み取り API は、知らない `Host`（IP・localhost・`server.allowedHosts` / `preview.allowedHosts` 以外の名前）の要求に答えず、Vite の確認（403）に回します（ほかのサイトが自分の名前をこのパソコンに向けて API を読む DNS rebinding を防ぐ）。
 - 開発サーバーは、`api/` の SQL と SQLite のファイル（`*.sqlite`、`*.sqlite3`、`*.db` と、`DEVBI_DB…` の `sqlite:` が指すファイル）をブラウザに渡しません（Vite の `server.fs.deny` に足します。`.env` は Vite がもとから渡しません）。
+
+## GUI エディタ（@devbi/editor）
+
+開発サーバー（`vite`）の画面で、タイルを並べて dash.json に保存します。ビルドには入りません。
+
+```sh
+pnpm add -D @devbi/editor
+```
+
+入れると、`@devbi/vite` が開発サーバーでだけ読み込み、`<DevbiApp>` の見出しの右に「編集」と「＋ 新しいダッシュボード」が出ます。設定は要りません。
+
+いまの版でできるのは**タイルの配置**までです。タイルの中身（指標・軸・種類・見出し）を GUI で変えるのは次の版（プロパティパネル）で、それまでは dash.json を直接直します（保存すると開いているエディタに入ります）。
+
+### できること
+
+| すること | やり方 |
+| --- | --- |
+| タイルを動かす | タイルをドラッグ。行き先にあるタイルは押し下げられ、空いた行には下のタイルが上がる |
+| 大きさを変える | タイルの右端・下端・右下の角をドラッグ。列と行の単位で変わる |
+| タイルを足す | 「＋ タイルを追加」で種類を選ぶ。いちばん下に、種類ごとの大きさで置く。最初からデータが出るように、指標ファイルの最初の指標を、時間の列があれば月別（なければ最初の軸別）で出す |
+| タイルを消す | タイルの右上の ×。またはタイルを押して選び、Delete |
+| 元に戻す / やり直す | ボタンか ⌘Z / ⇧⌘Z（Windows は Ctrl+Z / Ctrl+Y）。100 回まで |
+| 保存 | 「保存」か ⌘S（Windows は Ctrl+S） |
+| 閉じる | 「閉じる」。保存していない変更があれば、保存するか捨てるかを聞く |
+| 新しいダッシュボード | 「＋ 新しいダッシュボード」で、ファイル名（半角の英数字と `-` `_`）、見出し、指標ファイルを決める。`dashboards/<ファイル名>.dash.json` ができ、そのまま編集に入る |
+
+編集中もタイルはデータを出したままです。クリックはタイルを選ぶのに使うので、クロスフィルタはしません（期間のタイルの最初の期間は効きます）。幅が 720px より狭い画面では編集できません。
+
+新しいタイルの種類ごとの大きさ（列 × 行、12 列のとき）: `kpi` 3×2、`bar`・`line`・`area` 6×4、`barlist` 4×4、`table` 12×5、`pivot` 8×5、`select` 3×5、`date-range` 12×1、`markdown` 12×2。
+
+### 保存のしかた（git の差分）
+
+手で書いたときと同じ形で書くので、タイルを 1 つ動かすと、そのタイルの 1 行だけが変わります。
+
+```diff
+     {
+       "id": "region",
+-      "x": 8, "y": 3, "w": 4, "h": 4,
++      "x": 6, "y": 3, "w": 4, "h": 4,
+       "type": "barlist",
+```
+
+- キー 1 つに 1 行。タイルの `x`、`y`、`w`、`h` は 1 行にまとめる
+- 1 行が 100 桁（全角の文字は 2 桁）に収まる値（`query`、`options`）は 1 行、収まらなければ中を 1 項目 1 行
+- キーの順番はファイルのまま。ファイルにないキー（`columns` など）は足さない
+
+この形で書く関数は `devbi` の `formatDashboardJson(spec)` です。リポジトリの見本の dash.json は、この関数に通しても 1 文字も変わりません。
+
+開いたときに空いている行があると、タイルを上に詰めて表示し、そう知らせます（保存するまでファイルは変わりません）。
+
+### ほかで書き換えたとき
+
+| 変わったもの | 保存していない変更がないとき | あるとき |
+| --- | --- | --- |
+| 編集中の dash.json（VS Code、git など） | 読み込み直して「読み込み直しました」 | 知らせて、「ファイルの内容を読み込む（ここでの変更は捨てる）」か「ここでの内容で上書きする」を選ぶ。そのまま「保存」しても断られる |
+| metrics.yaml・data/・api/・ほかの dash.json | ページを読み込み直し、エディタが開き直る | 知らせるだけ（閉じるとページを読み込み直して反映される） |
+
+- エディタで保存したファイルの変更では、保存したページは読み込み直しません（同じダッシュボードを開いているほかのタブは読み込み直します）。
+- 編集中にファイルから読み込み直したときは、エディタを閉じるとページも読み込み直します。
+- 読めないファイル（書きかけの JSON など）になったときは、画面はそのままで、読めない理由を出します。「ここでの内容で上書きする」は、読めないファイルにも書けます。
+- 変更がないときの「保存」（⌘S）は何も書きません（ほかの形で手書きしたファイルを書き直さない）。
+- ブラウザの「戻る」などでアドレスが変わっても、エディタは閉じません（保存していない変更は残る）。ページを読み込み直すと、そのダッシュボードのアドレスのときだけエディタが開き直ります。
+
+### 書き込み口の守り
+
+エディタは開発サーバーの `…/__devbi/editor/dashboards/<名前>` で dash.json を読み書きします。
+
+- 開発サーバー（`vite`）にだけあります。`vite preview`、`devbi-serve`、ビルドしたサイトにはありません
+- 開発サーバーを動かしているパソコンからの要求にだけ答えます。`vite --host` でほかのパソコンやスマホから開いたページでは、見ることはできても保存できません（ブラウザと開発サーバーが別のパソコンになる Codespaces なども同じ）
+- ほかのサイトからは書けません（専用のヘッダー `X-DevBI-Editor`、`Origin` がこの開発サーバーであること、`Host` が IP・localhost・Vite の `server.allowedHosts` の名前であることを見ます。HTTPS の開発サーバーでは、Vite と同じく `Host` は見ません）
+- 書くのは `dashboards/<名前>.dash.json` だけで、ビルドと同じ検証（重なり、列数、指標ファイルと自作タイルのファイルがあるか）を通らないものは書きません。書くときは隣に一時ファイルを書いて置き換えるので、途中までのファイルを開発サーバーや VS Code が読むことはありません
+- 開いたあとにファイルが変わっていたら、上書きせずに断ります（409）
 
 ## データベースから読む（@devbi/server）
 
@@ -898,11 +973,12 @@ function DevbiDashboard({ name }: { name: string }) {
 
 | 名前 | 中身 |
 | --- | --- |
-| `<DevbiApp project={…} theme? />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す |
-| `<Dashboard project={…} name="sales" back?="#/" theme? isolate? />` | ダッシュボード 1 つ。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
+| `<DevbiApp project={…} theme? />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す。開発サーバーで `@devbi/editor` が入っていると、「編集」と「＋ 新しいダッシュボード」を出す（[GUI エディタ](#gui-エディタdevbieditor)） |
+| `<Dashboard project={…} name="sales" back?="#/" theme? isolate? actions? />` | ダッシュボード 1 つ。`actions` は見出しの右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
 | `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
 | `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
-| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる） |
+| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタとファイルの変更の知らせ。型は `DevServer`） |
+| `themeAttribute(theme)` / `injectStyles()` | `.devbi-root` に付ける `data-theme` / DevBI の CSS をページに入れる（`<Dashboard>` は自分で入れる）。GUI エディタが使う |
 | `snapshotTimesOf(project, dashboard)` | そのダッシュボードが読むスナップショットの時刻（`["06:00"]` など。なければ空）。一覧の「毎日 6:00 の時点のデータ」に使っている |
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
@@ -922,6 +998,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | --- | --- |
 | `parseMetricsYaml(text, name)` / `defineMetricsView(obj, name)` | metrics.yaml を検証して `MetricsView` にする。間違いは `MetricsError`（`issues` に項目ごと） |
 | `parseDashboardJson(text, name)` / `defineDashboard(obj, name)` | dash.json を検証する。間違いは `DashboardError` |
+| `formatDashboardJson(spec)` | dash.json を、手で書いたときと同じ形の文字にする（[保存のしかた](#保存のしかたgit-の差分)）。GUI エディタが保存に使う |
 | `checkQuery(obj, source)` | クエリだけを検証する |
 | `compileQuery(view, query, { filters?, model? })` | クエリを DuckDB の SQL にする。戻り値は `{ sql, fields }`。名前の間違いは `QueryError` |
 | `compileTimeExtent(view)` | 日付の最初と最後を出す SQL |
@@ -934,7 +1011,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `getMeasure(view, name)` / `getDimension(view, name)` | 名前で引く |
 | `defineQuery(query)` / `RowOf<typeof query>` | 名前を検査するクエリと、その行の型（[自作タイル](#自作タイルjsx)） |
 | `dashboardJsonSchema(names?)` / `metricsJsonSchema()` | dash.json と metrics.yaml の JSON Schema。`names`（`{ metrics, measures, dimensions, fields }`）を渡すと、その名前だけを許す |
-| `TILE_TYPES` / `TILE_TYPE_NAMES` / `DATE_RANGE_PRESETS` | 組み込みタイルの種類（説明と `options`）、`date-range` の期間の名前 |
+| `TILE_TYPES` / `TILE_TYPE_NAMES` / `DATE_RANGE_PRESETS` | 組み込みタイルの種類（`label` は短い名前、`description`、`options`、`size` は GUI エディタで足したときの大きさ）、`date-range` の期間の名前 |
 | 型 | `Query`、`Filter`、`Row`、`Scalar`、`FieldInfo`、`TileSpec`、`TileProps`、`Grain`、`MetricsView`、`Dashboard`、`MetricsRegistry`（`.devbi/env.d.ts` が名前を足す）など |
 
 ## 見た目の変更（CSS 変数）
@@ -974,7 +1051,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 
 | コマンド | 中身 |
 | --- | --- |
-| `pnpm example:dev` | パッケージをビルドして、サンプルの開発サーバーを開く（<http://localhost:5173>） |
+| `pnpm example:dev` | パッケージをビルドして、サンプルの開発サーバーを開く（<http://localhost:5173>）。「編集」で GUI エディタ（保存するとサンプルの dash.json が変わるので、試したあとは `git checkout examples/sales/dashboards`） |
 | `pnpm example:preview` | サンプルを静的ビルドして開く（<http://localhost:4173>） |
 | `pnpm example:serve` | サンプルをビルドして、`devbi-serve` で開く（<http://localhost:8080>）。「売上ダッシュボード（DB から）」はサンプルの SQLite を API から読み、「売上の日次集計」は起動したときに作ったスナップショットを読む |
 | `pnpm example:nextjs` | サンプルのダッシュボードを、Next.js のアプリ（`examples/nextjs`）に置いて開く（<http://127.0.0.1:3000>）。API は `app/devbi/[...path]/route.ts`。`DEVBI_DB` を付けて起動すると、そのデータベースから読む（SQL Server は `copy-db` で表を写してから） |
@@ -982,7 +1059,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
 | `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |
 | `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式、API）。パッケージのソースを直接読むので、先にビルドしなくてよい。`DEVBI_TEST_PG`、`DEVBI_TEST_MSSQL`、`DEVBI_TEST_MYSQL`、`DEVBI_TEST_MARIADB`、`DEVBI_TEST_ORACLE` に URL を入れると、そのデータベースのテストも流す（表を作り直すので、テスト用のデータベースで） |
-| `pnpm e2e` | パッケージとサンプルをビルドして `devbi-serve` で開き、ブラウザで操作を確かめる |
+| `pnpm e2e` | パッケージとサンプルをビルドして `devbi-serve` で開き、ブラウザで操作を確かめる。GUI エディタは、サンプルを `examples/sales/e2e-work/` に写して Vite の開発サーバー（ポート 5179）で確かめる（git に入らない） |
 | `pnpm e2e:nextjs` | Next.js の見本をビルドして `next start` で開き、ブラウザで確かめる |
 | `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
 | `pnpm --filter devbi-example-sales copy-db <URL>` | サンプルの 4 つの表を、SQL Server・Oracle・MySQL に写す（先に同じ名前の表を消す）。`DEVBI_DB` をその URL にすると、「DB から」のダッシュボードがそのデータベースから読む |

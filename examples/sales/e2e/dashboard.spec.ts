@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 const tile = (page: Page, id: string) => page.locator(`[data-tile="${id}"]`);
 const kpi = (page: Page, id: string) => tile(page, id).getByTestId("kpi-value");
@@ -171,4 +173,16 @@ test("the table tile (spreadsheet-grid): a row click or Enter filters the other 
     const n = await quantities();
     return n.every((v, i) => i === 0 || n[i - 1]! <= v);
   }).toBe(true);
+});
+
+test("a build has no GUI editor in it", async ({ page }) => {
+  await ready(page);
+  await expect(page.getByRole("button", { name: "編集", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "＋ 新しいダッシュボード" })).toHaveCount(0);
+  const assets = path.resolve(import.meta.dirname, "../dist/assets");
+  for (const f of readdirSync(assets).filter((f) => f.endsWith(".js"))) {
+    const code = readFileSync(path.join(assets, f), "utf8");
+    expect(code, f).not.toContain("__devbi/editor");
+    expect(code, f).not.toContain("react-grid-layout");
+  }
 });
