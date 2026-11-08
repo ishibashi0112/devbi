@@ -1,4 +1,4 @@
-// MySQL and MariaDB, through mysql2. The read-only transaction and sql_select_limit come from ashiato's adapter
+// MySQL and MariaDB, through mysql2. Read-only statements and sql_select_limit come from ashiato's adapter
 // (src/adapters/mysql.ts, MIT, same author).
 import { DATE, TIMESTAMP, base64, checkColumnNames, decimalNumber, loadDriver, timeoutMessage, wholeNumber, type ColumnType, type Connection, type ResultColumn } from "./result.js";
 
@@ -21,6 +21,54 @@ const TIMESTAMPS = new Set([7, 12]); // TIMESTAMP, DATETIME
 const BIT = 16;
 const BLOBS = new Set([249, 250, 251, 252, 253, 254]); // BLOB kinds, VAR_STRING, STRING: binary when the character set is
 const BINARY_CHARSET = 63;
+
+/** Dates with a zero month or day ('0000-00-00', and '2026-04-00' where sql_mode allows it) are no dates. */
+const realDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-(?!00)\d{2}-(?!00)\d{2}/.test(v) && !v.startsWith("0000");
+
+interface Command {
+  on(event: string, f: (...args: never[]) => void): Command;
+}
+interface CoreConnection {
+  execute(options: { sql: string; rowsAsArray: boolean }, values: unknown[]): Command;
+  stream?: { destroy(): void };
+}
+
+/**
+ * The first result's rows, as they come. A LIMIT in the SQL wins over sql_select_limit: past maxRows, reading stops
+ * (`over`) and the connection must be closed.
+ */
+function readRows(conn: PoolConnection, sql: string, params: unknown[], maxRows: number | undefined): Promise<{ fields?: Field[]; rows: unknown[][]; over: boolean }> {
+  const core = (conn as unknown as { connection: CoreConnection }).connection;
+  return new Promise((resolve, reject) => {
+    let fields: Field[] | undefined;
+    const rows: unknown[][] = [];
+    let over = false;
+    // A prepared statement: the server reads the ? placeholders (a ? inside a string stays text).
+    core
+      .execute({ sql, rowsAsArray: true }, params)
+      .on("fields", (f: Field[] | undefined, index: number | undefined) => {
+        if ((index ?? 0) === 0) fields ??= f;
+      })
+      .on("result", (row: unknown, index: number | undefined) => {
+        // other results (a statement's OK, more result sets) are not rows of the first
+        if (over || (index ?? 0) !== 0 || !Array.isArray(row)) return;
+        if (maxRows !== undefined && rows.length >= maxRows) {
+          over = true;
+          // the server is still sending: closing the socket stops it
+          core.stream?.destroy();
+          resolve({ fields, rows, over });
+          return;
+        }
+        rows.push(row);
+      })
+      .on("error", (e: Error) => {
+        if (!over) reject(e);
+      })
+      .on("end", () => {
+        if (!over) resolve({ fields, rows, over });
+      });
+  });
+}
 
 /** mysql://user:password@host:3306/database — MariaDB too (mariadb://). */
 export async function connectMysql(url: URL): Promise<Connection> {
@@ -63,8 +111,7 @@ export async function connectMysql(url: URL): Promise<Connection> {
   } finally {
     first.release();
   }
-  const limitTime = (ms: number | undefined) =>
-    mariadb ? `SET SESSION max_statement_time = ${ms ? ms / 1000 : 0}` : `SET SESSION max_execution_time = ${ms ? Math.max(1, Math.round(ms)) : 0}`;
+  const limitTime = (ms: number) => (mariadb ? `max_statement_time = ${ms / 1000}` : `max_execution_time = ${Math.max(1, Math.round(ms))}`);
 
   const typeOf = (f: Field): ColumnType => {
     if (INTS.has(f.columnType)) return "int";
@@ -82,10 +129,9 @@ export async function connectMysql(url: URL): Promise<Connection> {
       case "float":
         return typeof v === "string" ? Number(decimalNumber(v)) : v;
       case "date":
-        // zero dates ('0000-00-00') are no dates
-        return typeof v === "string" && DATE.test(v) && !v.startsWith("0000") ? v : null;
+        return realDate(v) && DATE.test(v) ? v : null;
       case "timestamp":
-        return typeof v === "string" && TIMESTAMP.test(v) && !v.startsWith("0000") ? v : null;
+        return realDate(v) && TIMESTAMP.test(v) ? v : null;
       case "bool":
         return v instanceof Uint8Array ? v[0] === 1 : Boolean(v);
       default:
@@ -98,16 +144,19 @@ export async function connectMysql(url: URL): Promise<Connection> {
     dialect: "mysql",
     async query(sql, params, options = {}) {
       const conn = await take();
+      let reusable = true;
       try {
-        // A read-only transaction (the server refuses any write), at most maxRows rows sent, and the time limit.
-        // All put back before the connection returns to the pool.
-        await conn.query("START TRANSACTION READ ONLY");
-        if (options.maxRows !== undefined) await conn.query(`SET SESSION sql_select_limit = ${Math.max(0, Math.floor(options.maxRows))}`);
-        if (options.timeoutMs) await conn.query(limitTime(options.timeoutMs));
+        // Every statement read-only (the server refuses writes and DDL alike), at most maxRows rows sent, and the
+        // time limit. The connection is reset before it returns to the pool.
+        await conn.query("SET SESSION TRANSACTION READ ONLY");
+        const settings = [
+          ...(options.maxRows !== undefined ? [`sql_select_limit = ${Math.max(0, Math.floor(options.maxRows))}`] : []),
+          ...(options.timeoutMs ? [limitTime(options.timeoutMs)] : []),
+        ];
+        if (settings.length) await conn.query(`SET SESSION ${settings.join(", ")}`);
         let result;
         try {
-          // A prepared statement: the server reads the ? placeholders (a ? inside a string stays text).
-          result = (await conn.execute({ sql, rowsAsArray: true }, params as never[])) as unknown as [unknown[][], Field[]];
+          result = await readRows(conn, sql, params, options.maxRows);
         } catch (e) {
           const code = (e as { code?: string; errno?: number }).code;
           // ER_QUERY_TIMEOUT (MySQL), ER_STATEMENT_TIMEOUT (MariaDB)
@@ -116,15 +165,18 @@ export async function connectMysql(url: URL): Promise<Connection> {
           }
           throw e;
         }
-        const [rows, fields] = result;
+        const { rows, fields, over } = result;
+        if (over) reusable = false;
+        if (!fields) throw new Error("結果の表がありません（SELECT か WITH で始まる文だけ使えます）");
         checkColumnNames(fields.map((f) => f.name));
         const columns = fields.map((f): ResultColumn => ({ name: f.name, type: typeOf(f) }));
         return { columns, rows: rows.map((r) => r.map((v, i) => valueOf(v, columns[i]!.type, fields[i]!))) };
       } finally {
         try {
-          await conn.query("ROLLBACK");
-          if (options.maxRows !== undefined) await conn.query("SET SESSION sql_select_limit = DEFAULT");
-          if (options.timeoutMs) await conn.query(limitTime(undefined));
+          if (!reusable) throw new Error("closed mid-result");
+          // back to the server's settings: the transaction mode, the limits, user variables, GET_LOCK() locks
+          await conn.reset();
+          await conn.query("SET NAMES utf8mb4");
           conn.release();
         } catch {
           conn.destroy();

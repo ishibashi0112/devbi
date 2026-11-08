@@ -1,6 +1,6 @@
 // Oracle Database, through node-oracledb (Thin mode, or Thick mode with Oracle Instant Client). Connecting and
 // Thick mode come from ashiato's adapter (src/adapters/oracle.ts, MIT, same author).
-import { base64, checkColumnNames, decimalNumber, loadDriver, localText, timeoutMessage, typeOfValues, wholeNumber, type ColumnType, type Connection, type ResultColumn } from "./result.js";
+import { base64, checkColumnNames, loadDriver, localText, timeoutMessage, utcText, wholeNumber, type ColumnType, type Connection, type ResultColumn } from "./result.js";
 
 type OracleDb = typeof import("oracledb");
 type Metadata = import("oracledb").Metadata<unknown>;
@@ -87,17 +87,21 @@ export async function connectOracle(url: URL): Promise<Connection> {
     throw thinModeHint(e);
   }
 
-  // NUMBER as text (the driver's double would round large IDs and long decimals); DATE and TIMESTAMP are Dates the
-  // driver builds from the stored wall-clock time in the process's time zone, so their local fields are that time.
+  // NUMBER as text (the driver's double would round large IDs and long decimals). DATE and TIMESTAMP: Thin mode
+  // builds a Date from the stored wall-clock time in the process's time zone (fetched as text, it is that Date's
+  // toString()), so its local fields are that time; except an hour that daylight saving skips (one later) and the
+  // years 1 to 99 (19xx), which such a Date can't hold. TIMESTAMP WITH (LOCAL) TIME ZONE is a moment: its UTC time,
+  // like SQL Server's DATETIMEOFFSET.
   const fetchTypeHandler = (meta: Metadata) => {
     switch (meta.dbType) {
       case oracledb.DB_TYPE_NUMBER:
         return { type: oracledb.STRING };
       case oracledb.DB_TYPE_DATE:
       case oracledb.DB_TYPE_TIMESTAMP:
+        return { converter: (d: unknown) => (d instanceof Date ? localText(d) : d) };
       case oracledb.DB_TYPE_TIMESTAMP_TZ:
       case oracledb.DB_TYPE_TIMESTAMP_LTZ:
-        return { converter: (d: unknown) => (d instanceof Date ? localText(d) : d) };
+        return { converter: (d: unknown) => (d instanceof Date ? utcText(d) : d) };
       case oracledb.DB_TYPE_CLOB:
       case oracledb.DB_TYPE_NCLOB:
         return { type: oracledb.STRING };
@@ -114,7 +118,7 @@ export async function connectOracle(url: URL): Promise<Connection> {
         // NUMBER(10) and NUMBER(10,0) hold whole numbers; NUMBER and expressions (SUM(…)) go by their values
         if (m.scale === 0 && (m.precision ?? 0) > 0) return "int";
         if ((m.scale ?? 0) > 0) return "float";
-        return typeOfValues(values.map((v) => (typeof v === "string" ? decimalNumber(v) : v))) ?? "float";
+        return values.some((v) => v !== null) && values.every((v) => v === null || (typeof v === "string" && /^-?\d+$/.test(v))) ? "int" : "float";
       }
       case oracledb.DB_TYPE_BINARY_FLOAT:
       case oracledb.DB_TYPE_BINARY_DOUBLE:
@@ -136,7 +140,7 @@ export async function connectOracle(url: URL): Promise<Connection> {
     if (v === null || v === undefined) return null;
     switch (type) {
       case "int":
-        return typeof v === "string" ? wholeNumber(v.replace(/\.0*$/, "")) : v;
+        return typeof v === "string" ? wholeNumber(v) : v;
       case "float":
         return typeof v === "string" ? Number(v) : v;
       case "date":
@@ -151,10 +155,19 @@ export async function connectOracle(url: URL): Promise<Connection> {
 
   const run = async (sql: string, params: unknown[], options: { timeoutMs?: number; maxRows?: number }) => {
     const conn = await pool.getConnection();
+    // The time limit is for the whole query, its fetches too: then break() tells the database to stop (ORA-01013). The
+    // driver's callTimeout, a little later, is for a server that doesn't answer.
+    let timedOut = false;
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          conn.break().catch(() => undefined);
+        }, options.timeoutMs)
+      : undefined;
     try {
-      // Oracle refuses to change anything in a read-only transaction (ORA-01456)
+      // Oracle refuses to change data in a read-only transaction (ORA-01456). DDL commits on its own, outside it.
       await conn.execute("SET TRANSACTION READ ONLY");
-      if (options.timeoutMs) conn.callTimeout = Math.max(1, Math.round(options.timeoutMs));
+      if (options.timeoutMs) conn.callTimeout = Math.round(options.timeoutMs) + 10_000;
       // Oracle's SQL has no booleans before 23ai: 1 and 0
       const binds = Object.fromEntries(params.map((v, i) => [`p${i + 1}`, typeof v === "boolean" ? (v ? 1 : 0) : v])) as import("oracledb").BindParameters;
       let res;
@@ -166,8 +179,8 @@ export async function connectOracle(url: URL): Promise<Connection> {
           fetchTypeHandler,
         });
       } catch (e) {
-        // DPI-1067 / NJS-123: the call took longer than callTimeout
-        if (options.timeoutMs && /^(DPI-1067|NJS-123|ORA-03156)\b/.test((e as Error).message)) throw new Error(timeoutMessage(options.timeoutMs));
+        // ORA-01013 after break(); DPI-1067 / NJS-123 / ORA-03156: the call took longer than callTimeout
+        if (options.timeoutMs && (timedOut || /^(DPI-1067|NJS-123|ORA-03156)\b/.test((e as Error).message))) throw new Error(timeoutMessage(options.timeoutMs));
         throw e;
       }
       const meta = res.metaData ?? [];
@@ -176,10 +189,11 @@ export async function connectOracle(url: URL): Promise<Connection> {
       const columns = meta.map((m, i): ResultColumn => ({ name: m.name, type: typeOf(m, rows.map((r) => r[i])) }));
       return { columns, rows: rows.map((r) => r.map((v, i) => valueOf(v, columns[i]!.type))) };
     } finally {
+      if (timer) clearTimeout(timer);
       await conn.rollback().catch(() => undefined);
       conn.callTimeout = 0;
-      // a connection that timed out cannot be used again: drop it from the pool
-      await conn.close({ drop: Boolean(options.timeoutMs) && !conn.isHealthy() }).catch(() => undefined);
+      // after a break, or one that came too late, the connection may still hold it: a new one next time
+      await conn.close({ drop: timedOut || !conn.isHealthy() }).catch(() => undefined);
     }
   };
 

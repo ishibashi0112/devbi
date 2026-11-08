@@ -1,8 +1,9 @@
 // SQL Server, MySQL and Oracle, each against a real database when its URL is set (CI's service containers):
 //   DEVBI_TEST_MSSQL=mssql://sa:<password>@127.0.0.1:1433/master
 //   DEVBI_TEST_MYSQL=mysql://root:<password>@127.0.0.1:3306/devbi
+//   DEVBI_TEST_MARIADB=mariadb://root:<password>@127.0.0.1:3307/devbi
 //   DEVBI_TEST_ORACLE=oracle://<user>:<password>@127.0.0.1:1521/FREEPDB1
-// The tests create and drop tables there (orders, order_lines, customers, products, devbi_types): use a database
+// The tests create and drop tables there (orders, order_lines, customers, products, devbi_types, …): use a database
 // kept for tests.
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,7 +11,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { connect, createApiHandler, type ApiHandler, type Connection } from "../src/index.js";
+import { connect, createApiHandler, toArrowTable, type ApiHandler, type Connection } from "../src/index.js";
 
 const SAMPLE = path.resolve(import.meta.dirname, "../../../examples/sales");
 
@@ -29,11 +30,49 @@ interface Case {
   arrow: string[];
   /** Something that takes a few seconds. */
   slow: string;
+  /** devbi_types' ids, with a row limit of its own above DevBI's. */
+  limit1000: string;
+  /** A whole number past BIGINT, as the database gives it (none: it gives decimals as decimals). */
+  huge?: string;
   /** Column names as the database gives them for unquoted names. */
   upper?: boolean;
 }
 
-const drop = (exists: string) => [`DROP TABLE IF EXISTS order_lines`, `DROP TABLE IF EXISTS orders`, `DROP TABLE IF EXISTS customers`, `DROP TABLE IF EXISTS products`, `DROP TABLE IF EXISTS devbi_types`].map((s) => s.replace("IF EXISTS", exists));
+const drop = (exists: string) => [`DROP TABLE IF EXISTS order_lines`, `DROP TABLE IF EXISTS orders`, `DROP TABLE IF EXISTS customers`, `DROP TABLE IF EXISTS products`, `DROP TABLE IF EXISTS devbi_types`, `DROP TABLE IF EXISTS devbi_ddl_probe`].map((s) => s.replace("IF EXISTS", exists));
+
+const MYSQL: Case = {
+  name: "MySQL",
+  url: process.env.DEVBI_TEST_MYSQL,
+  async admin(url) {
+    const mysql = (await import("mysql2/promise")).default;
+    const u = new URL(url);
+    u.protocol = "mysql:";
+    const conn = await mysql.createConnection({ uri: u.href, multipleStatements: true, charset: "utf8mb4" });
+    return {
+      exec: async (sql) => void (await conn.query(sql)),
+      async insert(table, columns, rows) {
+        for (let i = 0; i < rows.length; i += 500) {
+          await conn.query(`INSERT INTO ${table} (${columns.join(", ")}) VALUES ?`, [rows.slice(i, i + 500)]);
+        }
+      },
+      close: () => conn.end(),
+    };
+  },
+  types: [
+    ...drop("IF EXISTS"),
+    `CREATE TABLE devbi_types (id BIGINT, d DATE, ts DATETIME(3), amount DECIMAL(12,2), rate DOUBLE, region VARCHAR(20), big BIGINT,
+       ok BIT(1), flag BOOLEAN, j JSON, bin VARBINARY(4)) DEFAULT CHARSET = utf8mb4`,
+    `INSERT INTO devbi_types VALUES
+       (1, '2026-04-01', '2026-04-01 09:30:00.250', 1200.50, 0.5, '関東', 9007199254740993, b'1', TRUE, '{"a": 1}', 0x01020304),
+       (2, '2026-04-02', NULL, 800, NULL, '近畿', NULL, b'0', FALSE, NULL, NULL),
+       (3, '2026-03-31', NULL, 1, NULL, '九州', NULL, NULL, NULL, NULL, NULL)`,
+  ],
+  arrow: ["id:Int64", "d:Date32<DAY>", "ts:Timestamp<MICROSECOND>", "amount:Float64", "rate:Float64", "region:Utf8", "big:Int64", "ok:Bool", "flag:Int64", "j:Utf8", "bin:Utf8"],
+  slow: "SELECT COUNT(*) AS n FROM information_schema.columns a, information_schema.columns b, information_schema.columns c",
+  limit1000: "SELECT id FROM devbi_types ORDER BY id LIMIT 1000",
+  huge: "SELECT CAST(18446744073709551615 AS UNSIGNED) AS huge",
+};
+const mysqlLike = (c: Case) => c.name === "MySQL" || c.name === "MariaDB";
 
 const CASES: Case[] = [
   {
@@ -72,35 +111,10 @@ const CASES: Case[] = [
     ],
     arrow: ["id:Int64", "d:Date32<DAY>", "ts:Timestamp<MICROSECOND>", "amount:Float64", "rate:Float64", "region:Utf8", "big:Int64", "ok:Bool", "dto:Timestamp<MICROSECOND>", "t:Utf8", "g:Utf8", "bin:Utf8"],
     slow: "WAITFOR DELAY '00:00:05'; SELECT 1 AS one",
+    limit1000: "SELECT TOP 1000 id FROM devbi_types ORDER BY id",
   },
-  {
-    name: "MySQL",
-    url: process.env.DEVBI_TEST_MYSQL,
-    async admin(url) {
-      const mysql = (await import("mysql2/promise")).default;
-      const conn = await mysql.createConnection({ uri: url, multipleStatements: true, charset: "utf8mb4" });
-      return {
-        exec: async (sql) => void (await conn.query(sql)),
-        async insert(table, columns, rows) {
-          for (let i = 0; i < rows.length; i += 500) {
-            await conn.query(`INSERT INTO ${table} (${columns.join(", ")}) VALUES ?`, [rows.slice(i, i + 500)]);
-          }
-        },
-        close: () => conn.end(),
-      };
-    },
-    types: [
-      ...drop("IF EXISTS"),
-      `CREATE TABLE devbi_types (id BIGINT, d DATE, ts DATETIME(3), amount DECIMAL(12,2), rate DOUBLE, region VARCHAR(20), big BIGINT,
-         ok BIT(1), flag BOOLEAN, j JSON, bin VARBINARY(4)) DEFAULT CHARSET = utf8mb4`,
-      `INSERT INTO devbi_types VALUES
-         (1, '2026-04-01', '2026-04-01 09:30:00.250', 1200.50, 0.5, '関東', 9007199254740993, b'1', TRUE, '{"a": 1}', 0x01020304),
-         (2, '2026-04-02', NULL, 800, NULL, '近畿', NULL, b'0', FALSE, NULL, NULL),
-         (3, '2026-03-31', NULL, 1, NULL, '九州', NULL, NULL, NULL, NULL, NULL)`,
-    ],
-    arrow: ["id:Int64", "d:Date32<DAY>", "ts:Timestamp<MICROSECOND>", "amount:Float64", "rate:Float64", "region:Utf8", "big:Int64", "ok:Bool", "flag:Int64", "j:Utf8", "bin:Utf8"],
-    slow: "SELECT COUNT(*) AS n FROM information_schema.columns a, information_schema.columns b, information_schema.columns c",
-  },
+  MYSQL,
+  { ...MYSQL, name: "MariaDB", url: process.env.DEVBI_TEST_MARIADB },
   {
     name: "Oracle",
     url: process.env.DEVBI_TEST_ORACLE,
@@ -140,6 +154,8 @@ const CASES: Case[] = [
     ],
     arrow: ["ID:Int64", "D:Date32<DAY>", "TS:Timestamp<MICROSECOND>", "AMOUNT:Float64", "RATE:Float64", "REGION:Utf8", "BIG:Int64", "CL:Utf8", "RW:Utf8"],
     slow: "SELECT COUNT(*) AS n FROM all_objects a, all_objects b, all_objects c",
+    limit1000: "SELECT id FROM devbi_types ORDER BY id FETCH FIRST 1000 ROWS ONLY",
+    huge: "SELECT CAST(123456789012345678901234567890 AS NUMBER(30)) AS huge FROM dual",
   },
 ];
 
@@ -230,10 +246,19 @@ for (const c of CASES) {
       }
     }, 60_000);
 
-    it("stops at the row limit", async () => {
+    it("stops at the row limit, a larger one in the SQL too", async () => {
       await expect(api.run("types", { from: "2000-01-01", skip: "-" })).rejects.toMatchObject({ status: 422 });
       const r = await conn.query("SELECT id FROM devbi_types ORDER BY id", [], { maxRows: 2 });
       expect(r.rows).toEqual([[1], [2]]);
+      expect((await conn.query(c.limit1000, [], { maxRows: 2 })).rows).toEqual([[1], [2]]);
+      // and the next query is fine
+      expect((await conn.query(c.limit1000, [])).rows).toEqual([[1], [2], [3]]);
+    });
+
+    it.runIf(c.huge)("sends whole numbers past BIGINT as doubles", async () => {
+      const t = toArrowTable(await conn.query(c.huge!, []));
+      expect(String(t.schema.fields[0]!.type)).toBe("Float64");
+      expect(t.get(0)!.toJSON()[name("huge")]).toBeGreaterThan(1e19);
     });
 
     it("gives up after the time limit", async () => {
@@ -244,11 +269,16 @@ for (const c of CASES) {
       expect((await conn.query("SELECT 1 AS one" + (c.name === "Oracle" ? " FROM dual" : ""), [])).rows).toEqual([[1]]);
     }, 20_000);
 
-    it("cannot change anything, even when asked to directly", async () => {
+    it("cannot change data, even when asked to directly; nor tables, except on Oracle", async () => {
       const before = (await conn.query("SELECT COUNT(*) AS n FROM devbi_types", [])).rows[0]![0];
       await conn.query("INSERT INTO devbi_types (id) VALUES (99)", []).catch(() => undefined);
       await conn.query("DELETE FROM devbi_types", []).catch(() => undefined);
       expect((await conn.query("SELECT COUNT(*) AS n FROM devbi_types", [])).rows[0]![0]).toBe(before);
+      // Oracle's DDL commits on its own, outside the read-only transaction: there, only "SELECT or WITH" and the
+      // user's grants keep it out
+      if (c.name === "Oracle") return;
+      await conn.query("CREATE TABLE devbi_ddl_probe (id INT)", []).catch(() => undefined);
+      await expect(conn.query("SELECT * FROM devbi_ddl_probe", [])).rejects.toThrow();
     });
 
     it("refuses duplicate column names (node-oracledb names Oracle's second ID_1)", async () => {
@@ -256,5 +286,56 @@ for (const c of CASES) {
       if (c.name === "Oracle") expect((await twice).columns.map((col) => col.name)).toEqual(["ID", "ID_1"]);
       else await expect(twice).rejects.toThrow(/列名が重なっています/);
     });
+
+    it.runIf(c.name === "SQL Server")("reads FOR JSON as one text value, and a sql_variant holding a datetime as a datetime", async () => {
+      expect((await conn.query("SELECT id FROM devbi_types ORDER BY id FOR JSON PATH", [])).rows).toEqual([['[{"id":1},{"id":2},{"id":3}]']]);
+      const v = await conn.query("SELECT CAST(CAST('2026-04-01 09:30' AS DATETIME2) AS sql_variant) AS v, CAST(CAST('09:30' AS TIME) AS sql_variant) AS t", []);
+      expect(v).toEqual({ columns: [{ name: "v", type: "timestamp" }, { name: "t", type: "string" }], rows: [["2026-04-01 09:30:00", "09:30:00"]] });
+    });
+
+    it.runIf(mysqlLike(c))("reads a date with a zero month or day as no date, and leaves nothing behind on the connection", async () => {
+      await admin.exec(
+        "SET SESSION sql_mode = ''; DROP TABLE IF EXISTS devbi_zero; CREATE TABLE devbi_zero (d DATE, t DATETIME);" +
+          " INSERT INTO devbi_zero VALUES ('2026-00-00', '2026-04-00 10:00:00'), ('0000-00-00', '0000-00-00 00:00:00'), ('2026-04-01', '2026-04-01 10:00:00')",
+      );
+      try {
+        expect((await conn.query("SELECT d, t FROM devbi_zero", [])).rows).toEqual([[null, null], [null, null], ["2026-04-01", "2026-04-01 10:00:00"]]);
+      } finally {
+        await admin.exec("DROP TABLE devbi_zero");
+      }
+      // user variables and GET_LOCK() locks end with the query (the pool has up to 4 connections: ask each)
+      await conn.query("SELECT (@devbi_v := 5) AS v, GET_LOCK('devbi_test', 0) AS l", []);
+      for (let i = 0; i < 6; i++) expect((await conn.query("SELECT @devbi_v AS v, IS_USED_LOCK('devbi_test') AS l", [])).rows).toEqual([[null, null]]);
+    });
+
+    it.runIf(c.name === "Oracle")("reads dates and times the same in any process time zone; times with a zone as UTC", async () => {
+      const tz = process.env.TZ;
+      try {
+        for (const zone of ["America/New_York", "Asia/Tokyo", "UTC"]) {
+          process.env.TZ = zone;
+          const r = await conn.query(
+            "SELECT TIMESTAMP '2026-04-01 09:30:00.250' AS ts, DATE '2026-04-01' AS d, TIMESTAMP '2026-04-01 09:30:00 +09:00' AS tz," +
+              " CAST(TIMESTAMP '2026-04-01 09:30:00 +09:00' AS TIMESTAMP WITH LOCAL TIME ZONE) AS ltz FROM dual",
+            [],
+          );
+          expect(r.rows, zone).toEqual([["2026-04-01 09:30:00.250", "2026-04-01", "2026-04-01 00:30:00", "2026-04-01 00:30:00"]]);
+        }
+      } finally {
+        if (tz === undefined) delete process.env.TZ;
+        else process.env.TZ = tz;
+      }
+    });
+
+    it.runIf(c.name === "Oracle")("stops at the time limit a query that sends its rows slowly", async () => {
+      await admin.exec("CREATE OR REPLACE FUNCTION devbi_slow_row(n NUMBER) RETURN NUMBER IS BEGIN DBMS_SESSION.SLEEP(0.01); RETURN n; END;");
+      try {
+        const started = Date.now();
+        await expect(conn.query("SELECT devbi_slow_row(level) AS n FROM dual CONNECT BY level <= 600", [], { timeoutMs: 1500 })).rejects.toThrow(/秒を過ぎたので止めました/);
+        expect(Date.now() - started).toBeLessThan(4500);
+        expect((await conn.query("SELECT 1 AS one FROM dual", [])).rows).toEqual([[1]]);
+      } finally {
+        await admin.exec("DROP FUNCTION devbi_slow_row");
+      }
+    }, 20_000);
   });
 }

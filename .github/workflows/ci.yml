@@ -21,7 +21,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-      # SQL Server, MySQL and Oracle for packages/server/test/databases.test.ts.
+      # SQL Server, MySQL, MariaDB and Oracle for packages/server/test/databases.test.ts.
       mssql:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env:
@@ -46,6 +46,18 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: devbi
+          MARIADB_DATABASE: devbi
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
       oracle:
         image: gvenzl/oracle-free:23-slim-faststart
         env:
@@ -63,6 +75,7 @@ jobs:
       DEVBI_TEST_PG: postgres://postgres:devbi@localhost:5432/postgres
       DEVBI_TEST_MSSQL: mssql://sa:DevBI_test1@localhost:1433/master
       DEVBI_TEST_MYSQL: mysql://root:devbi@localhost:3306/devbi
+      DEVBI_TEST_MARIADB: mariadb://root:devbi@localhost:3307/devbi
       DEVBI_TEST_ORACLE: oracle://devbi:devbi@localhost:1521/FREEPDB1
     steps:
       - uses: actions/checkout@v4

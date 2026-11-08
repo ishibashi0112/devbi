@@ -4,6 +4,9 @@ import { base64, checkColumnNames, loadDriver, timeoutMessage, typeOfValues, utc
 
 type Mssql = typeof import("mssql");
 
+/** TIME comes as a Date on 1970-01-01 (UTC). */
+const timeOnly = (d: Date) => d.getTime() >= 0 && d.getTime() < 86_400_000;
+
 /**
  * mssql://user:password@host:1433/database — SQL Server authentication. In the query string: `instance=` (a named
  * instance, through SQL Browser), `encrypt=true`, `trustServerCertificate=false`, `applicationIntent=ReadOnly`
@@ -44,10 +47,14 @@ export async function connectMssql(url: URL): Promise<Connection> {
     if (type === T.Date) return "date";
     if (type === T.DateTime || type === T.DateTime2 || type === T.SmallDateTime || type === T.DateTimeOffset) return "timestamp";
     // sql_variant: whatever its values are
-    if (type === T.Variant) return typeOfValues(values.map((v) => (v instanceof Date ? "" : v))) ?? "string";
+    if (type === T.Variant) {
+      const dates = values.filter((v): v is Date => v instanceof Date);
+      if (dates.length && values.every((v) => v === null || v instanceof Date) && !dates.every(timeOnly)) return "timestamp";
+      return typeOfValues(values.map((v) => (v instanceof Date ? "" : v))) ?? "string";
+    }
     return "string";
   };
-  const valueOf = (v: unknown, type: ColumnType): unknown => {
+  const valueOf = (v: unknown, type: ColumnType, sqlType: unknown): unknown => {
     if (v === null || v === undefined) return null;
     switch (type) {
       case "int":
@@ -59,7 +66,7 @@ export async function connectMssql(url: URL): Promise<Connection> {
         // DATETIMEOFFSET is a moment: its UTC time
         return v instanceof Date ? utcText(v) : String(v);
       case "string":
-        if (v instanceof Date) return utcText(v).slice(11); // TIME
+        if (v instanceof Date) return sqlType === T.Time || (sqlType === T.Variant && timeOnly(v)) ? utcText(v).slice(11) : utcText(v);
         if (v instanceof Uint8Array) return base64(v);
         return String(v);
       default:
@@ -92,9 +99,10 @@ export async function connectMssql(url: URL): Promise<Connection> {
         names = cols.map((c) => c.name);
         types = cols.map((c) => c.type);
       });
-      req.on("row", (row: unknown[]) => {
+      req.on("row", (row: unknown[] | Record<string, unknown>) => {
         if (sets !== 1 || full) return;
-        rows.push(row);
+        // FOR JSON and FOR XML come as an object even in array-row mode
+        rows.push(Array.isArray(row) ? row : Object.values(row));
         if (options.maxRows !== undefined && rows.length >= options.maxRows) {
           full = true;
           req.cancel();
@@ -123,7 +131,7 @@ export async function connectMssql(url: URL): Promise<Connection> {
       if (error) throw error;
       checkColumnNames(names);
       const columns = names.map((name, i): ResultColumn => ({ name, type: typeOf(types[i], rows.map((r) => r[i])) }));
-      return { columns, rows: rows.map((r) => r.map((v, i) => valueOf(v, columns[i]!.type))) };
+      return { columns, rows: rows.map((r) => r.map((v, i) => valueOf(v, columns[i]!.type, types[i]))) };
     },
     async close() {
       await pool.close();

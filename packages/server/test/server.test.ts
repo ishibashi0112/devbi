@@ -98,6 +98,12 @@ describe("toArrowTable", () => {
     expect(t.getChild("__proto__")!.get(0)).toBe("x");
     expect(toArrowTable({ columns: [{ name: "a", type: "int" }], rows: [] }).schema.fields.map((f) => `${f.name}:${f.type}`)).toEqual(["a:Int64"]);
   });
+  it("sends whole numbers past BIGINT as doubles, not wrapped around", () => {
+    const t = toArrowTable({ columns: [{ name: "big", type: "int" }, { name: "edge", type: "int" }], rows: [[18446744073709551615n, 9223372036854775807n], [1, -9223372036854775808n]] });
+    expect(t.schema.fields.map((f) => `${f.name}:${f.type}`)).toEqual(["big:Float64", "edge:Int64"]);
+    expect(t.getChild("big")!.get(0)).toBe(18446744073709551615);
+    expect(t.getChild("edge")!.get(1)).toBe(-9223372036854775808n);
+  });
 });
 
 describe("isHostAllowed", () => {

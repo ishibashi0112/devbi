@@ -4,6 +4,7 @@
 //   mssql://sa:<password>@127.0.0.1:1433/master   oracle://<user>:<password>@127.0.0.1:1521/FREEPDB1   mysql://root:<password>@127.0.0.1:3306/devbi
 // It drops those four tables in the target first: use a database kept for trying things.
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 
 const target = process.argv[2];
 if (!target) {
@@ -17,7 +18,7 @@ if (!kind) {
   process.exit(2);
 }
 
-const db = new DatabaseSync(new URL("../db/sales.sqlite", import.meta.url).pathname, { readOnly: true });
+const db = new DatabaseSync(fileURLToPath(new URL("../db/sales.sqlite", import.meta.url)), { readOnly: true });
 const rowsOf = (sql) => db.prepare(sql).all().map((r) => Object.values(r));
 const text = (n) => (kind === "oracle" ? `NVARCHAR2(${n})` : `NVARCHAR(${n})`);
 const code = (n) => (kind === "oracle" ? `VARCHAR2(${n})` : `VARCHAR(${n})`);

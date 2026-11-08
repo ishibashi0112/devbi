@@ -89,7 +89,7 @@ export function decimalNumber(text: string): number | bigint {
   return Number(t);
 }
 
-/** `YYYY-MM-DD HH:MM:SS.fff` from a Date's UTC fields (drivers that hand over the stored wall-clock time as UTC). */
+/** `YYYY-MM-DD HH:MM:SS.fff` from a Date's UTC fields (a stored wall-clock time handed over as UTC, or a moment's UTC time). */
 export function utcText(d: Date, time = true): string {
   const iso = d.toISOString();
   if (!time) return iso.slice(0, 10);
@@ -101,7 +101,7 @@ const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 export function localText(d: Date): string {
   const ms = d.getMilliseconds();
   return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+    `${pad(d.getFullYear(), 4)}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
     (ms ? `.${pad(ms, 3)}` : "")
   );
 }
