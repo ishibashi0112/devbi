@@ -759,6 +759,7 @@ export async function register() {
 - ログイン: 同じオリジンなので、アプリの Cookie はそのまま API に届きます。route の中で、アプリのほかの route と同じように確かめます。ただし `public/devbi/` のファイル（`devbi-embed.js`、`data/` の Excel や CSV など）は route を通らずに配られます。データのファイルもログインで守るときは、`proxy.ts` の `matcher` に `/devbi/:path*` を入れます（`proxy.ts` は `public/` のファイルの前にも動きます）。
 - ホスト名: `devbi-serve` と同じく、IP アドレスと `localhost` のほかは `DEVBI_ALLOWED_HOSTS`（カンマ区切り。`.corp.local` はその下の名前すべて）に書いた名前だけを通します。IP アドレスでは開けるので、手元で試すときは `next dev --hostname 127.0.0.1` のように、このコンピューターだけで待ち受けます（見本の `dev` と `start` はそうしている。Next.js の既定はすべてのネットワークから）。
 - バンドル: `serverExternalPackages` は、`node_modules` にある `@devbi/server` にだけ効きます。ワークスペースでつないだもの（見本）はバンドルされますが、データベースのドライバは `import()` を Node に任せて読むので、どちらでも動きます。ドライバはアプリの `node_modules` から探します。
+- Next.js は、`next build` と `next dev` のたびに、匿名の利用データを Vercel に送ります（既定でそうなっている）。社外に出さないときは、アプリの `.env` に `NEXT_TELEMETRY_DISABLED=1` を書きます（見本はそうしている）。
 - `lib/devbi.ts` で `globalThis` に置くのは、`next dev` がファイルを直すたびに読み込み直しても、データベースの接続を作り直さないためです。`next dev` でもそのまま動きます。
 - `path.resolve` の `/* turbopackIgnore: true */` は、「サーバーが動いてから読むフォルダで、ビルドに含めるファイルではない」という印です。付けないと、`next build` が「プロジェクト全体をたどる」警告を出します。
 
