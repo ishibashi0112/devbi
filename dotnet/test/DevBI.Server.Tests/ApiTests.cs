@@ -106,6 +106,9 @@ namespace DevBI.Server.Tests
                 r = await Post(api, body);
                 Assert.Equal((400, "params はオブジェクトで送ってください"), (r.Status, Error(r)));
             }
+            // not UTF-16 (a lone surrogate): JSON.parse reads it, but no file has such a name
+            r = await Post(api, "{\"name\":\"\\ud800\"}");
+            Assert.Equal(400, r.Status);
             r = await Post(api, "{\"name\":\"orders\",\"pad\":\"" + new string('x', 64 * 1024) + "\"}");
             Assert.Equal((413, "リクエストが大きすぎます"), (r.Status, Error(r)));
             foreach (var name in new[] { "nothing", "../api/orders", "api/orders", "orders.sql", "ORDERS" })
@@ -137,6 +140,11 @@ namespace DevBI.Server.Tests
         {
             Assert.Throws<ArgumentException>(() => new DevBIApi(new DevBIOptions { Connect = _ => null }));
             Assert.Throws<ArgumentException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample }));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, MaxRows = 0 }));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, Timeout = TimeSpan.FromSeconds(-1) }));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, Timeout = TimeSpan.FromDays(30) }));
+            // the largest of each is fine
+            new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, MaxRows = int.MaxValue, Timeout = SqlServerQuery.MaxTimeout });
         }
 
         [Fact]

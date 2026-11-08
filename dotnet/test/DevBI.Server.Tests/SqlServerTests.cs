@@ -208,6 +208,9 @@ namespace DevBI.Server.Tests
             Assert.True(((BooleanArray)t.Column("b")).GetValue(0));
             Assert.Equal(0.5, ((DoubleArray)t.Column("f")).GetValue(0));
             Assert.Equal(9007199254740991L, ((Int64Array)t.Column("big")).GetValue(0));
+            // whole numbers past 2^53 (as JSON gives them, a double) still go as BIGINT
+            t = Read((await db.Api().RunAsync("kinds", new Dictionary<string, object?> { ["s"] = "", ["i"] = 0, ["b"] = false, ["f"] = 0, ["big"] = 1152921504606846976.0, ["n"] = null })).Bytes);
+            Assert.Equal(1152921504606846976L, ((Int64Array)t.Column("big")).GetValue(0));
             Assert.Null(((Int64Array)t.Column("n")).GetValue(0));
         }
 
@@ -273,6 +276,9 @@ namespace DevBI.Server.Tests
             Assert.Equal(new[] { 1L, 2L }, (await SqlServer.Query("SELECT TOP 1000 id FROM devbi_types ORDER BY id", 2)).Rows.Select(r => (long)r[0]!));
             // and the next query is fine
             Assert.Equal(new[] { 1L, 2L, 3L }, (await SqlServer.Query("SELECT TOP 1000 id FROM devbi_types ORDER BY id")).Rows.Select(r => (long)r[0]!));
+            // the largest limit: every row
+            var all = await db.Api(int.MaxValue).RunAsync("types", new Dictionary<string, object?> { ["from"] = "2000-01-01", ["skip"] = "-" });
+            Assert.Equal(3, all.Rows);
         }
 
         [SqlServerFact]
@@ -337,6 +343,10 @@ namespace DevBI.Server.Tests
             var text = (string)Assert.Single(long_.Rows)[0]!;
             Assert.True(text.Length > 10_000);
             Assert.Equal(500, System.Text.Json.JsonDocument.Parse(text).RootElement.GetArrayLength());
+            // its pieces are not rows: a low row limit still gets all of it
+            Assert.Equal(text, Assert.Single((await SqlServer.Query("SELECT TOP 500 o.order_no, o.order_date FROM orders o ORDER BY o.order_no FOR JSON PATH", maxRows: 3)).Rows)[0]);
+            // no rows: an empty text, as from Node's driver
+            Assert.Equal("", Assert.Single((await SqlServer.Query("SELECT id FROM devbi_types WHERE id < 0 FOR JSON PATH")).Rows)[0]);
             var v = await SqlServer.Query("SELECT CAST(CAST('2026-04-01 09:30' AS DATETIME2) AS sql_variant) AS v, CAST(CAST('09:30' AS TIME) AS sql_variant) AS t");
             Assert.Equal(new[] { (ColumnType.Timestamp, "v"), (ColumnType.String, "t") }, v.Columns.Select(c => (c.Type, c.Name)));
             Assert.Equal(new object?[] { Micros(new DateTime(2026, 4, 1, 9, 30, 0)), "09:30:00" }, Assert.Single(v.Rows));

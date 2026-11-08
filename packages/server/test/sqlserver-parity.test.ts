@@ -84,6 +84,7 @@ const binds: { text: string; values: Record<string, unknown> }[] = [
   { text: "SELECT * FROM t WHERE a = :a", values: { A: 1 } },
   { text: "SELECT * FROM t WHERE a = :a", values: { a: 1.5 } },
   { text: "SELECT * FROM t WHERE a = :a", values: { a: -9007199254740991 } },
+  { text: "SELECT * FROM t WHERE a = :a", values: { a: 2 ** 60 } },
   { text: "SELECT * FROM t WHERE a = :a", values: { a: 1e300 } },
   { text: "SELECT * FROM t WHERE a = :a", values: { a: true } },
   { text: "SELECT * FROM t WHERE a = :a", values: { a: null } },

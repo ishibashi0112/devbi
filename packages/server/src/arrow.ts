@@ -6,7 +6,11 @@ function utcMillis(text: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(\.\d+)?)?)?$/.exec(text);
   if (!m) return null;
   const ms = m[7] ? Math.round(Number(m[7]) * 1000) : 0;
-  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0), ms);
+  // setUTCFullYear, not Date.UTC: Date.UTC reads years 0–99 as 1900–1999 (0001-01-01 is .NET's DateTime.MinValue,
+  // common in SQL Server tables)
+  const d = new Date(0);
+  d.setUTCFullYear(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.setUTCHours(Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0), ms);
 }
 
 const INT64_MIN = -(2n ** 63n);

@@ -56,6 +56,15 @@ namespace DevBI.Server
     {
         private static readonly DateTime Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Unspecified);
 
+        /// <summary>The longest time limit: what <see cref="CancellationTokenSource.CancelAfter(TimeSpan)"/> takes (about 24.8 days).</summary>
+        public static readonly TimeSpan MaxTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
+
+        /// <summary>Throws <see cref="ArgumentOutOfRangeException"/> for a time limit below zero or past <see cref="MaxTimeout"/>.</summary>
+        public static void CheckTimeout(TimeSpan timeout)
+        {
+            if (timeout < TimeSpan.Zero || timeout > MaxTimeout) throw new ArgumentOutOfRangeException(nameof(timeout), "DevBIOptions.Timeout は 0（上限なし）から 24 日までにしてください");
+        }
+
         /// <summary>The message when a query takes too long (the same words as devbi-serve's, without its option name).</summary>
         public static string TimeoutMessage(TimeSpan timeout, string hint) =>
             // JavaScript's Math.round (halves up), as devbi-serve writes it
@@ -68,6 +77,7 @@ namespace DevBI.Server
         /// </summary>
         public static async Task<ResultSet> RunAsync(DbConnection connection, string sql, IReadOnlyList<object?> values, int? maxRows, TimeSpan timeout, string timeoutHint, CancellationToken cancellationToken)
         {
+            CheckTimeout(timeout);
             // SQL Server has no read-only transaction: the statement was checked to be a SELECT, the user should be
             // granted SELECT only, and it runs in a transaction that is always rolled back.
             var transaction = connection.BeginTransaction();
@@ -149,6 +159,7 @@ namespace DevBI.Server
             string[] names;
             Type[] fieldTypes;
             string[] typeNames;
+            bool pieces;
             using (var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false))
             {
                 var count = reader.FieldCount;
@@ -161,9 +172,12 @@ namespace DevBI.Server
                     fieldTypes[i] = reader.GetFieldType(i);
                     typeNames[i] = reader.GetDataTypeName(i);
                 }
+                // FOR JSON and FOR XML come in pieces of about 2,000 characters, one per row: all of them make one value,
+                // so the row limit does not count them.
+                pieces = count == 1 && IsPieces(names[0]);
                 if (count > 0)
                 {
-                    while ((maxRows == null || rows.Count < maxRows) && await reader.ReadAsync(token).ConfigureAwait(false))
+                    while ((maxRows == null || pieces || rows.Count < maxRows) && await reader.ReadAsync(token).ConfigureAwait(false))
                     {
                         var row = new object?[count];
                         for (int i = 0; i < count; i++) row[i] = await reader.IsDBNullAsync(i, token).ConfigureAwait(false) ? null : ValueAt(reader, i);
@@ -181,12 +195,8 @@ namespace DevBI.Server
                 }
             }
             CheckColumnNames(names);
-            // FOR JSON and FOR XML come in pieces of about 2,000 characters, one per row: one value, as Node's driver gives it.
-            if (names.Length == 1 && (names[0] == "JSON_F52E2B61-18A1-11d1-B105-00805F49916B" || names[0] == "XML_F52E2B61-18A1-11d1-B105-00805F49916B") && rows.Count > 1)
-            {
-                var whole = string.Concat(rows.Select(r => r[0] as string));
-                rows = new List<object?[]> { new object?[] { whole } };
-            }
+            // One value, as Node's driver gives it (an empty text when there were no rows).
+            if (pieces) rows = new List<object?[]> { new object?[] { string.Concat(rows.Select(r => r[0] as string)) } };
             var columns = new ResultColumn[names.Length];
             for (int i = 0; i < names.Length; i++)
             {
@@ -213,6 +223,9 @@ namespace DevBI.Server
                 return double.Parse(Convert.ToString(reader.GetProviderSpecificValue(i), CultureInfo.InvariantCulture) ?? "", NumberStyles.Float, CultureInfo.InvariantCulture);
             }
         }
+
+        /// <summary>The one column of a FOR JSON or FOR XML result.</summary>
+        private static bool IsPieces(string name) => name == "JSON_F52E2B61-18A1-11d1-B105-00805F49916B" || name == "XML_F52E2B61-18A1-11d1-B105-00805F49916B";
 
         /// <summary>Arrow and DuckDB need one name per column.</summary>
         internal static void CheckColumnNames(IReadOnlyList<string> names)

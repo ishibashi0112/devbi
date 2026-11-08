@@ -25,6 +25,8 @@ namespace DevBI.Server.Tests
             {
                 null => null,
                 string s => JsonValue.Create(s),
+                // past 2^53 JavaScript writes the double (1152921504606847000 for 2^60): the same number
+                long l when Math.Abs(l) > 9007199254740991 => JsonValue.Create((double)l),
                 long l => JsonValue.Create(l),
                 double d => JsonValue.Create(d),
                 bool b => JsonValue.Create(b),

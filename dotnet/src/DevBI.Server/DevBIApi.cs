@@ -30,10 +30,13 @@ namespace DevBI.Server
         /// </summary>
         public Func<string, DbConnection?>? Connect { get; set; }
 
-        /// <summary>Most rows one request may return. Default 1,000,000.</summary>
+        /// <summary>Most rows one request may return (1 or more). Default 1,000,000.</summary>
         public int MaxRows { get; set; } = 1_000_000;
 
-        /// <summary>How long one query may run, reading its rows included. Default 60 seconds. <see cref="TimeSpan.Zero"/>: no limit.</summary>
+        /// <summary>
+        /// How long one query may run, reading its rows included: up to 24 days. Default 60 seconds.
+        /// <see cref="TimeSpan.Zero"/>: no limit.
+        /// </summary>
         public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(60);
 
         /// <summary>
@@ -113,6 +116,8 @@ namespace DevBI.Server
         {
             if (string.IsNullOrEmpty(options.Directory)) throw new ArgumentException("DevBIOptions.Directory（api/*.sql のあるフォルダ）がありません", nameof(options));
             if (options.Connect == null) throw new ArgumentException("DevBIOptions.Connect（接続を作る関数）がありません", nameof(options));
+            if (options.MaxRows < 1) throw new ArgumentOutOfRangeException(nameof(options), "DevBIOptions.MaxRows は 1 以上にしてください");
+            SqlServerQuery.CheckTimeout(options.Timeout);
             this.options = options;
         }
 
@@ -274,7 +279,8 @@ namespace DevBI.Server
                 try
                 {
                     // One row past the limit tells whether there were more.
-                    result = await SqlServerQuery.RunAsync(connection, bound.Sql, bound.Values, options.MaxRows + 1, options.Timeout, TimeoutHint, cancellationToken).ConfigureAwait(false);
+                    var read = options.MaxRows < int.MaxValue ? options.MaxRows + 1 : (int?)null;
+                    result = await SqlServerQuery.RunAsync(connection, bound.Sql, bound.Values, read, options.Timeout, TimeoutHint, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception e) when (!(e is OperationCanceledException && cancellationToken.IsCancellationRequested))
                 {
@@ -308,7 +314,8 @@ namespace DevBI.Server
                     return Normalize((double)f);
                 case decimal m:
                     return Normalize((double)m);
-                case double d when Math.Floor(d) == d && Math.Abs(d) <= 9007199254740991:
+                // whole numbers as BIGINT up to its limit, as Node's mssql package sends them (2^63 is a double exactly)
+                case double d when Math.Floor(d) == d && Math.Abs(d) < 9223372036854775808.0:
                     return (long)d;
                 default:
                     return v;
@@ -332,7 +339,8 @@ namespace DevBI.Server
                     parameters = ReadRequest(doc.RootElement, out name);
                 }
             }
-            catch (JsonException)
+            // InvalidOperationException: text that is not UTF-16 (a lone surrogate, "\ud800")
+            catch (Exception e) when (e is JsonException || e is InvalidOperationException)
             {
                 throw new ApiException(400, "リクエストの JSON を読めません");
             }

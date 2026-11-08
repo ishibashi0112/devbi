@@ -863,6 +863,18 @@
     {
       "text": "SELECT * FROM t WHERE a = :a",
       "values": {
+        "a": 1152921504606847000
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          1152921504606847000
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :a",
+      "values": {
         "a": 1e+300
       },
       "bound": {

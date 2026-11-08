@@ -26,11 +26,11 @@ var api = new DevBIApi(new DevBIOptions
 });
 app.MapDevBIApi("/", api);
 
-// The dashboards: files ASP.NET Core does not know the type of included (.arrows snapshots, .wasm).
+// The dashboards: with the types ASP.NET Core does not know (.arrows snapshots, .arrow and .parquet data files).
 var site = new PhysicalFileProvider(Path.Combine(example, "dist"));
 var types = new FileExtensionContentTypeProvider();
 types.Mappings[".arrows"] = DevBIApi.ArrowStreamType;
-types.Mappings[".wasm"] = "application/wasm";
+types.Mappings[".arrow"] = "application/vnd.apache.arrow.file";
 types.Mappings[".parquet"] = "application/vnd.apache.parquet";
 app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = site });
 app.UseStaticFiles(new StaticFileOptions { FileProvider = site, ContentTypeProvider = types });

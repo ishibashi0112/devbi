@@ -179,7 +179,7 @@ pnpm example:dev
 | 56 | <http://127.0.0.1:4179/#/sales-db> を開き、「全期間」を押す | 売上が ¥193,161,410。ターミナルに `api/orders.sql: 6,044 行、… ms` が出る |
 | 57 | <http://127.0.0.1:4179/api/schema> を開く | `orders` と `sales_daily` が並び、最後の `snapshots` は `[]`（C# の見本はスナップショットを作らない）。「売上の日次集計」は API から読むので、見出しの下の「…の時点」は出ない |
 | 58 | 55 の `ConnectionStrings__DEVBI_DB` を付けずに起動し、56 を開く | タイルに「接続先がありません。DEVBI_DB の接続を DevBIOptions.Connect で返してください」 |
-| 59 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln` | `Passed!  - Failed: 0` |
+| 59 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln` | `Passed!` と出て、`Failed:` が 0 |
 
 WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだけ動きます。手元のアプリで試すときは、リファレンスの「[WebForms・MVC 5](reference.md#webformsmvc-5net-framework-472-以降)」のとおり `Global.asax` と `web.config` に足し、`dist/` を `~/Scripts/devbi/` に置いて、ページに `<div data-devbi="sales-db" data-devbi-theme="light"></div>` と `devbi-embed.js` の 2 行を足します。56 と同じ金額が出れば動いています。
 

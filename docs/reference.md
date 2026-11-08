@@ -601,7 +601,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 | `dotnet/src/DevBI.Server.SystemWeb` | .NET Framework の ASP.NET（WebForms、MVC 5）用。`DevBIHttpHandler`（`IHttpHandler`） |
 | `dotnet/samples/DevBI.Sample` | サンプル（`examples/sales`）を `devbi-serve` の代わりに ASP.NET Core で出す |
 
-NuGet にはまだ出していません。アプリのソリューションにプロジェクトを足して参照するか、`DevBI.Server` の 5 つの `.cs` をアプリにコピーして、NuGet で `Apache.Arrow` と（.NET Framework では）`System.Text.Json` を入れます。
+NuGet にはまだ出していません。アプリのソリューションにプロジェクトを足して参照するか、`DevBI.Server` の 5 つの `.cs` をアプリにコピーして、NuGet で `Apache.Arrow` と（.NET Framework では）`System.Text.Json` を入れます。コピーするときは、C# 8 以降の書き方を使っているので、古い形式の `.csproj`（.NET Framework の既定は C# 7.3）に `<LangVersion>latest</LangVersion>` を足します（Visual Studio 2019 以降）。
 
 ### ASP.NET Core
 
@@ -621,7 +621,7 @@ app.MapDevBIApi("/reports", api).RequireAuthorization();   // /reports/api/schem
 ```
 
 - ビルドした `dist/` を `wwwroot/reports/` に置くと、ダッシュボードは `/reports/` で開け、API は既定の場所（`/reports/api/`）で答えます。
-- `.arrows`（[スナップショット](#毎朝のスナップショット)）と `.wasm` は、ASP.NET Core の静的ファイルが型を知らないので、`FileExtensionContentTypeProvider` に足します（`dotnet/samples/DevBI.Sample/Program.cs`）。
+- `.arrows`（[スナップショット](#毎朝のスナップショット)）と、データに使うなら `.parquet`・`.arrow` は、ASP.NET Core の静的ファイルが型を知らないので、`FileExtensionContentTypeProvider` に足します（`dotnet/samples/DevBI.Sample/Program.cs`）。
 - `MapDevBIApi` の戻り値には、`.RequireAuthorization()` などのふつうの設定が付けられます。
 
 ### WebForms・MVC 5（.NET Framework 4.7.2 以降）
@@ -652,12 +652,16 @@ protected void Application_Start(object sender, EventArgs e)
 
 - `dist/` は `~/Scripts/devbi/` に置きます。埋め込みの API の既定の場所（`devbi-embed.js` と同じ場所の `api/`）が `~/Scripts/devbi/api/` なので、`data-devbi-api` は要りません。
 - `api/*.sql` は `App_Data` の下に置きます。IIS は `App_Data` のファイルを配りません。
-- IIS の統合パイプライン（既定）で動きます。`System.Data.SqlClient` でも `Microsoft.Data.SqlClient` でもかまいません。
+- IIS の統合パイプライン（既定）で、`web.config` に `<httpRuntime targetFramework="4.5" />` 以降があるアプリで動きます（Visual Studio で作ったアプリにはあります）。`System.Data.SqlClient` でも `Microsoft.Data.SqlClient` でもかまいません。
+- MVC 5 のアプリでは、既定のルート（`{controller}/{action}/{id}`）が `web.config` のハンドラーより先に `Scripts/devbi/api/query` をつかむので、`RouteConfig` の `MapRoute` より前に `routes.IgnoreRoute("Scripts/devbi/api/{*pathInfo}");` を足します。
+- `web.config` の `<httpErrors existingResponse="Replace">` は、API の日本語のエラーも IIS のエラーページに置き換えます。その設定があるときは、`location` の中で `<httpErrors existingResponse="PassThrough" />` にします。
 - 古い形式のプロジェクト（`packages.config`）で `System.Text.Json` を入れると、NuGet が `web.config` にバインド リダイレクトを足します。足されていないと「アセンブリが見つからない」エラーになるので、そのときは NuGet で入れ直します。
 
 ### Windows 認証で SQL Server につなぐ
 
 接続文字列に `Integrated Security=true`（`Server=db01;Database=sales;Integrated Security=true;TrustServerCertificate=true`）と書くと、Windows のアカウントで SQL Server につながります。IIS では、アプリケーション プールのアカウント（`IIS AppPool\<プール名>`、ほかのコンピューターの SQL Server からは `<ドメイン>\<Web サーバー名>$`）です。そのアカウントに、読ませる表の SELECT の権限だけを付けます。利用者ひとりひとりのアカウントではつなぎません（DevBI の API は、だれが開いても同じ行を返します）。
+
+`<identity impersonate="true" />` にしている WebForms のアプリでは、開いた利用者のアカウントでつながることがあります。そのときは利用者ごとの権限になり、ほかのコンピューターの SQL Server には Kerberos の委任の設定が要ります。アプリケーション プールのアカウントでつなぐなら、SQL Server 認証のユーザーを使うのがかんたんです。
 
 ### `DevBIOptions`
 
@@ -674,7 +678,8 @@ protected void Application_Start(object sender, EventArgs e)
 
 ### `devbi-serve` との違い
 
-- SQL Server だけです。SQL は SQL Server の書き方（`[名前]` の引用符など）で確かめ、パラメーターは `@p1`、`@p2` … で渡します。型の受け取り方（[接続先](#接続先)の表）、状態コード、メッセージは `devbi-serve` と同じです。時間切れのメッセージの案内だけ「`DevBIOptions.Timeout` で延ばせます」です。
+- SQL Server だけです。SQL は SQL Server の書き方（`[名前]` の引用符など）で確かめ、パラメーターは `@p1`、`@p2` … で渡します。型の受け取り方（[接続先](#接続先)の表）、状態コード、メッセージは `devbi-serve` と同じです。違うメッセージは、接続先がないとき（「DEVBI_DB の接続を DevBIOptions.Connect で返してください」）と、時間切れの案内（「`DevBIOptions.Timeout` で延ばせます」）だけです。
+- `geography`・`geometry`・`hierarchyid` の列は、読めずにエラーになります。`location.STAsText() AS location` や `node.ToString() AS node` のように、SQL で文字にしてください。
 - スナップショットは作りません。`api/schema` の `snapshots` はいつも空です。`-- snapshot:` の行がある SQL のダッシュボードは、`devbi-snapshot`（Node）でサイトの `snapshots/` に作ったファイルがあればそれを、なければ API を読みます。
 - 知らないホスト名を断る仕組み（DNS リバインディングの対策）は持ちません。ASP.NET Core では `AllowedHosts`（appsettings.json）、IIS ではサイトのバインドにホスト名を書きます。
 - パスの前に何が付いても答える `devbi-serve` と違い、`MapDevBIApi` に渡した場所（WebForms では `web.config` の `location`）でだけ答えます。
