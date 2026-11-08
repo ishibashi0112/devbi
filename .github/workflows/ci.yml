@@ -21,8 +21,62 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # SQL Server, MySQL, MariaDB and Oracle for packages/server/test/databases.test.ts.
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: DevBI_test1
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P DevBI_test1 -Q 'SELECT 1' -b"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: devbi
+          MYSQL_DATABASE: devbi
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pdevbi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: devbi
+          MARIADB_DATABASE: devbi
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      oracle:
+        image: gvenzl/oracle-free:23-slim-faststart
+        env:
+          ORACLE_PASSWORD: devbi
+          APP_USER: devbi
+          APP_USER_PASSWORD: devbi
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
     env:
       DEVBI_TEST_PG: postgres://postgres:devbi@localhost:5432/postgres
+      DEVBI_TEST_MSSQL: mssql://sa:DevBI_test1@localhost:1433/master
+      DEVBI_TEST_MYSQL: mysql://root:devbi@localhost:3306/devbi
+      DEVBI_TEST_MARIADB: mariadb://root:devbi@localhost:3307/devbi
+      DEVBI_TEST_ORACLE: oracle://devbi:devbi@localhost:1521/FREEPDB1
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

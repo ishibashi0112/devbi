@@ -1,60 +1,35 @@
 import path from "node:path";
+import { connectMssql } from "./mssql.js";
+import { connectMysql } from "./mysql.js";
+import { connectOracle } from "./oracle.js";
+import { DATE, TIMESTAMP, checkColumnNames, limited, loadDriver, typeOfValues, type ColumnType, type Connection, type Dialect, type ResultColumn } from "./result.js";
 
-/**
- * The kind of values in a result column, as DevBI hands them on in Arrow. `null`: nothing tells the type (a SQLite
- * expression with no rows, or only NULLs); it becomes DuckDB's NULL type, which every function and comparison takes.
- */
-export type ColumnType = "string" | "int" | "float" | "bool" | "date" | "timestamp" | "null";
+export { loadDriver, type ColumnType, type Connection, type Dialect, type QueryOptions, type ResultColumn, type ResultSet } from "./result.js";
 
-export interface ResultColumn {
-  name: string;
-  type: ColumnType;
-}
+const SCHEMES: Record<string, Dialect> = {
+  postgres: "postgres",
+  postgresql: "postgres",
+  mssql: "mssql",
+  sqlserver: "mssql",
+  oracle: "oracle",
+  mysql: "mysql",
+  mariadb: "mysql",
+};
 
-export interface ResultSet {
-  columns: ResultColumn[];
-  /**
-   * Values per row, in column order: string, number, bigint, boolean or null. Dates are `YYYY-MM-DD` text and
-   * timestamps `YYYY-MM-DD HH:MM:SS[.fff]` text (the database's own wall-clock time).
-   */
-  rows: unknown[][];
-}
-
-export type Dialect = "sqlite" | "postgres";
-
-/** A read-only connection to one database. */
-export interface Connection {
-  dialect: Dialect;
-  /**
-   * Run one SELECT with its parameters already in the database's placeholder style. Gives up after
-   * `timeoutMs` where the database supports it (PostgreSQL).
-   */
-  query(sql: string, params: unknown[], options?: { timeoutMs?: number }): Promise<ResultSet>;
-  close(): Promise<void>;
-}
-
-/** Drivers are optional peer dependencies: install only the one for your database. (From ashiato.) */
-export async function loadDriver<T>(pkg: string, label: string): Promise<T> {
-  try {
-    const mod = (await import(pkg)) as { default?: T } & T;
-    return (mod.default ?? mod) as T;
-  } catch (e) {
-    const base = pkg.split("/")[0];
-    throw new Error(`${label} につなぐには ${base} が要ります。npm install ${base} で入れてください（${(e as Error).message}）`);
-  }
-}
-
-/** The dialect of a connection URL, without connecting. Undefined when DevBI cannot read it yet. */
+/** The dialect of a connection URL, without connecting. Undefined when DevBI cannot read it. */
 export function dialectOf(connection: string): Dialect | undefined {
   if (connection.startsWith("sqlite:")) return "sqlite";
   const scheme = /^([a-z]+):/i.exec(connection)?.[1]?.toLowerCase();
-  return scheme === "postgres" || scheme === "postgresql" ? "postgres" : undefined;
+  return scheme ? SCHEMES[scheme] : undefined;
 }
 
 /**
  * Open a read-only connection from a URL:
- *   sqlite:db/sales.sqlite                 (a relative path is read from `baseDir`)
+ *   sqlite:db/sales.sqlite                         (a relative path is read from `baseDir`)
  *   postgres://user:pass@host:5432/database
+ *   mssql://user:pass@host:1433/database           (?instance=, ?encrypt=true, ?applicationIntent=ReadOnly)
+ *   oracle://user:pass@host:1521/service           (?schema=, ?client=thick for Oracle Instant Client)
+ *   mysql://user:pass@host:3306/database           (MariaDB too)
  */
 export async function connect(connection: string, baseDir = process.cwd()): Promise<Connection> {
   if (connection.startsWith("sqlite:")) {
@@ -65,7 +40,7 @@ export async function connect(connection: string, baseDir = process.cwd()): Prom
   try {
     url = new URL(connection);
   } catch {
-    throw new Error("接続先の URL を読めません（例: postgres://user:pass@host:5432/db、sqlite:db/sales.sqlite）");
+    throw new Error("接続先の URL を読めません（例: mssql://user:pass@host:1433/db、sqlite:db/sales.sqlite）");
   }
   switch (url.protocol) {
     case "postgres:":
@@ -73,34 +48,15 @@ export async function connect(connection: string, baseDir = process.cwd()): Prom
       return connectPostgres(url);
     case "mssql:":
     case "sqlserver:":
+      return connectMssql(url);
     case "oracle:":
+      return connectOracle(url);
     case "mysql:":
     case "mariadb:":
-      throw new Error(`${url.protocol.slice(0, -1)} にはまだつなげません（今は sqlite: と postgres: だけ）`);
+      return connectMysql(url);
     default:
-      throw new Error(`この接続先は使えません: ${url.protocol}（sqlite: か postgres: で書いてください）`);
+      throw new Error(`この接続先は使えません: ${url.protocol}（sqlite:、postgres:、mssql:、oracle:、mysql: で書いてください）`);
   }
-}
-
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-/** A date and time, with an optional time zone (`Z`, `+09:00`) that DevBI drops: the wall-clock time stays as written. */
-const TIMESTAMP = /^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(?:\s*(?:Z|[+-]\d{2}(?::?\d{2})?))?$/i;
-
-/** A column's type from its values, when they say: numbers, booleans, otherwise text. Undefined when all are NULL. */
-function typeOfValues(values: unknown[]): ColumnType | undefined {
-  let type: ColumnType | undefined;
-  for (const v of values) {
-    if (v === null || v === undefined) continue;
-    let t: ColumnType;
-    if (typeof v === "bigint") t = "int";
-    else if (typeof v === "number") t = Number.isInteger(v) ? "int" : "float";
-    else if (typeof v === "boolean") t = "bool";
-    else return "string";
-    if (type === undefined || type === t) type = t;
-    else if ((type === "int" && t === "float") || (type === "float" && t === "int")) type = "float";
-    else return "string";
-  }
-  return type;
 }
 
 /**
@@ -145,8 +101,8 @@ async function connectSqlite(file: string): Promise<Connection> {
   const db = new DatabaseSync(file, { readOnly: true, timeout: 5000 });
   return {
     dialect: "sqlite",
-    async query(sql, params) {
-      const stmt = db.prepare(sql);
+    async query(sql, params, options) {
+      const stmt = db.prepare(limited(sql, options?.maxRows));
       // Integers beyond 2^53 would otherwise throw.
       stmt.setReadBigInts(true);
       const info = stmt.columns();
@@ -233,11 +189,9 @@ async function connectPostgres(url: URL): Promise<Connection> {
         // and dates in ISO form whatever the database's or user's DateStyle is (DevBI reads them as text).
         const timeout = options?.timeoutMs ? `; SET LOCAL statement_timeout = ${Math.round(options.timeoutMs)}` : "";
         await client.query(`BEGIN READ ONLY; SET LOCAL DateStyle = ISO; SET LOCAL IntervalStyle = postgres${timeout}`);
-        const res = await client.query({ text: sql, values: params, rowMode: "array" });
+        const res = await client.query({ text: limited(sql, options?.maxRows), values: params, rowMode: "array" });
         await client.query("COMMIT");
-        const names = res.fields.map((f) => f.name);
-        const dup = names.find((n, i) => names.indexOf(n) !== i);
-        if (dup !== undefined) throw new Error(`列名が重なっています: ${dup}（AS で別の名前を付けてください）`);
+        checkColumnNames(res.fields.map((f) => f.name));
         const columns = res.fields.map((f): ResultColumn => ({ name: f.name, type: PG_TYPES[f.dataTypeID] ?? "string" }));
         const rows = (res.rows as (string | null)[][]).map((r) => r.map((v, i) => (v === null ? null : pgValue(v, columns[i]!.type))));
         return { columns, rows };

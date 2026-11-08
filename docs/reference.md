@@ -437,22 +437,42 @@ model: SELECT * FROM read_api('orders', from = '2024-04-01')
 | データベース | URL の例 | 補足 |
 | --- | --- | --- |
 | SQLite | `sqlite:db/sales.sqlite` | 相対パスはプロジェクトのフォルダから。読み取り専用で開く。Node 22.16 以上。時間の上限はなく、重い SQL のあいだはほかのリクエストも待つ（手元や小さいデータ向け） |
-| PostgreSQL | `postgres://user:pass@host:5432/db` | `pg` を入れる（`npm install pg`）。毎回 `BEGIN READ ONLY` の中で実行し、60 秒で打ち切る。日付はデータベースの `DateStyle` によらず読める |
+| PostgreSQL | `postgres://user:pass@host:5432/db` | `pg` を入れる（`npm install pg`）。毎回 `BEGIN READ ONLY` の中で実行する。日付はデータベースの `DateStyle` によらず読める |
+| SQL Server | `mssql://user:pass@host:1433/db` | `mssql` を入れる（`npm install mssql`）。SQL Server 認証。名前付きインスタンスは `?instance=SQLEXPRESS`（ポートを書かなければ SQL Browser で探す）、暗号化は `?encrypt=true`（サーバーの証明書も確かめるときは `&trustServerCertificate=false`。書かなければ確かめない）、Always On の読み取り用のセカンダリは `?applicationIntent=ReadOnly`。読み取り専用のトランザクションがないので、毎回トランザクションの中で実行して、必ずロールバックする |
+| Oracle | `oracle://user:pass@host:1521/サービス名` | `oracledb` を入れる（`npm install oracledb`）。Thin モードで、Oracle Instant Client は要らない。11g、古い形式のパスワード、ネットワークの暗号化が必須のサーバーは `?client=thick`（Instant Client が要る。場所は `&libDir=`）。ほかのユーザーの表を名前だけで読むときは `?schema=OWNER`。毎回 `SET TRANSACTION READ ONLY` の中で実行する（データの書き換えは止まるが、表を作る・消すなどの DDL はこのトランザクションの外で確定するので止まらない） |
+| MySQL / MariaDB | `mysql://user:pass@host:3306/db`（`mariadb://` も可） | `mysql2` を入れる（`npm install mysql2`）。毎回、読み取り専用のセッション（`SET SESSION TRANSACTION READ ONLY`）で実行する。データの書き換えも DDL も、データベースが断る。終わるたびに接続をリセットする（ユーザー変数や `GET_LOCK()` のロックは残らない） |
 
-- データベースのユーザーは SELECT の権限だけにしてください。上の確認は最初の守りで、最後の守りではありません。
+- SQLite のほかは、時間の上限（`--timeout`、既定 60 秒）を過ぎるとデータベースに止めさせ、「60 秒を過ぎたので止めました」と返します。時間は、行を受け取り終えるまでの全体で数えます。行の上限（`--max-rows`）を超えた分は、データベースから読みません（SQL に `LIMIT 1000` や `TOP 1000` のような、もっと大きい上限が書いてあっても）。
+
+- データベースのユーザーは SELECT の権限だけにしてください。いちばん確かな守りはこの権限です。DevBI の守り（SELECT か WITH で始まる文だけ通す、読み取り専用のトランザクション）は、その手前の守りです。たとえば Oracle では、`PRAGMA AUTONOMOUS_TRANSACTION` で書き込む関数を SELECT から呼ぶと、その書き込みは確定します。
 - パスワードに `@` や `:` が入るときは、`%40`、`%3A` のように書きます。
 - PostgreSQL の `timestamptz` は、接続のタイムゾーンでの時刻になります。変えるときは URL に `?options=-c%20TimeZone%3DAsia%2FTokyo` を足します。
+- SQL Server の Windows 認証（統合認証）には、まだつなげません。SELECT の権限だけの SQL Server 認証のユーザーを作ってください。
+- Oracle では、引用符で囲まない列名や別名は大文字になります（`AS amount` は `AMOUNT`）。metrics.yaml の SQL（DuckDB）は大文字と小文字を区別しないので、`amount` のまま書けます。`AS 金額` のような日本語の別名は、そのままです。
+- Oracle は、接続ごとに日付の書き方（`NLS_DATE_FORMAT`）を `YYYY-MM-DD HH24:MI:SS` にします。`WHERE order_date >= :from` に `'2024-04-01'` を渡せます。
+- Oracle の SQL には（23ai より前は）真偽がないので、パラメーターの `true` / `false` は `1` / `0` で渡します。
+- Oracle の文字のパラメーターは `VARCHAR2` として渡るので、`CHAR(5)` の列とは、後ろの空白の分だけ一致しません（`code = :code` に `'A'` を渡しても `'A    '` に当たらない）。`TRIM(code) = :code` か、`code = CAST(:code AS CHAR(5))` と書きます。
+- Oracle の `DATE` と `TIMESTAMP` は、ドライバーが DevBI のサーバーのタイムゾーンで日時にしてから読むので、夏時間のある地域では、夏時間が始まるときに飛ばされる 1 時間の値が 1 時間後になります。西暦 1〜99 年の日付は 1901〜1999 年になります（日本のタイムゾーンで動かすなら、1948〜1951 年の夏時間のほかは影響しません）。
+- 同じ列名が 2 つある結果（`SELECT a.id, b.id`）はエラーにします。Oracle だけは、ドライバーが 2 つめを `ID_1` にします。
 
 列の型は次のように受け取ります。
 
 | データベースの型 | DuckDB での型 |
 | --- | --- |
-| 整数 | `BIGINT` |
-| 小数（`numeric`、`real`、`double` など） | `DOUBLE` |
-| 真偽 | `BOOLEAN` |
+| 整数（Oracle は `NUMBER(10)` のように小数の桁が 0 のもの） | `BIGINT`（`BIGINT` に収まらない値がある列は `DOUBLE`。MySQL の `BIGINT UNSIGNED` の大きな値や、Oracle の `NUMBER(30)` など） |
+| 小数（`numeric`、`decimal`、`money`、`real`、`float`、`double`、Oracle の `NUMBER(10,2)` など） | `DOUBLE` |
+| 真偽（PostgreSQL の `boolean`、SQL Server の `bit`、MySQL の `BIT(1)`） | `BOOLEAN` |
 | 日付 | `DATE` |
-| 日時（`timestamp`、`timestamptz`） | `TIMESTAMP`（ミリ秒まで。データベースでの時刻のまま、時差は付けない） |
-| そのほか（文字、`json` など） | `VARCHAR` |
+| 日時（`timestamp`、`timestamptz`、`datetime`、`datetime2`、`smalldatetime`、Oracle の `TIMESTAMP WITH TIME ZONE`） | `TIMESTAMP`（ミリ秒まで。データベースでの時刻のまま、時差は付けない） |
+| そのほか（文字、`json`、時刻だけの `time`、`uniqueidentifier` など） | `VARCHAR` |
+| バイナリ（`varbinary`、`RAW`、`BLOB` など） | `VARCHAR`（Base64） |
+
+- MySQL の `BOOLEAN`（中身は `TINYINT(1)`）は整数のままです。
+- SQL Server の `datetimeoffset` と、Oracle の `TIMESTAMP WITH TIME ZONE`・`TIMESTAMP WITH LOCAL TIME ZONE` は、UTC での時刻になります。
+- SQL Server の `sql_variant` は中身から決めます（日時が入っていれば `TIMESTAMP`）。`FOR JSON` と `FOR XML` の結果は、1 つの文字の値です。
+- MySQL の `'0000-00-00'` や、月か日が 0 の日付（`sql_mode` で許したとき）は、NULL になります。
+- Oracle の `DATE` は時刻も持つので、結果の値がすべて 0:00 なら `DATE`、そうでなければ `TIMESTAMP` にします。
+- Oracle の桁の指定のない `NUMBER` と、計算した列（`SUM(...)` など）は、中身から決めます（すべて整数なら `BIGINT`）。
 
 SQLite は値と、表の列の宣言（`INTEGER`、`REAL`、`TEXT`、`DATE`、`DATETIME`、`BOOLEAN` など）から型を決めます。
 
@@ -519,7 +539,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 | `--port` / `--host` | 既定は `8080` / `127.0.0.1`（このコンピューターからだけ） |
 | `--allowed-hosts` | IP アドレスと `localhost` のほかに、ブラウザが使ってよいホスト名（カンマ区切り）。`.corp.local` はその下の名前すべて、`all` はどれでも。IIS などから転送するときは、利用者が開く名前（`reports.corp.local` など）を書く |
 | `--max-rows` | 1 回に返す行の上限。既定は 1,000,000。超えると日本語のエラー |
-| `--timeout` | 1 回の SQL の時間の上限（秒）。既定は 60（PostgreSQL） |
+| `--timeout` | 1 回の SQL の時間の上限（秒）。既定は 60（SQLite のほか） |
 | `--debug` | データベースのエラーをそのままブラウザに返す。ふつうは「サーバーのログを見てください」とだけ返し、くわしい内容はログに書く |
 
 - 社内の人に見せるときは、IIS などを前に置いて Windows 認証をかけ、`devbi-serve` には IIS から転送します。`devbi-serve` 自身はログインの仕組みを持ちません。
@@ -787,7 +807,8 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm --filter devbi-example-sales exec devbi-snapshot` | サンプルのスナップショットを、いま `dist/snapshots/` に作る（先にビルド） |
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
 | `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |
-| `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式、API）。パッケージのソースを直接読むので、先にビルドしなくてよい。`DEVBI_TEST_PG` に PostgreSQL の URL を入れると、PostgreSQL のテストも流す |
+| `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式、API）。パッケージのソースを直接読むので、先にビルドしなくてよい。`DEVBI_TEST_PG`、`DEVBI_TEST_MSSQL`、`DEVBI_TEST_MYSQL`、`DEVBI_TEST_MARIADB`、`DEVBI_TEST_ORACLE` に URL を入れると、そのデータベースのテストも流す（表を作り直すので、テスト用のデータベースで） |
 | `pnpm e2e` | パッケージとサンプルをビルドして `devbi-serve` で開き、ブラウザで操作を確かめる |
 | `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
+| `pnpm --filter devbi-example-sales copy-db <URL>` | サンプルの 4 つの表を、SQL Server・Oracle・MySQL に写す（先に同じ名前の表を消す）。`DEVBI_DB` をその URL にすると、「DB から」のダッシュボードがそのデータベースから読む |
 | `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |

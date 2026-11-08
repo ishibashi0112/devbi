@@ -1,5 +1,5 @@
 import * as arrow from "apache-arrow";
-import type { ColumnType, ResultSet } from "./connect.js";
+import type { ColumnType, ResultSet } from "./result.js";
 
 /** Milliseconds since 1970 for `YYYY-MM-DD[ HH:MM:SS[.fff]]`, read as UTC (DuckDB's TIMESTAMP has no time zone). Sent as microseconds, DuckDB's TIMESTAMP, to the millisecond. */
 function utcMillis(text: string): number | null {
@@ -9,9 +9,15 @@ function utcMillis(text: string): number | null {
   return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0), ms);
 }
 
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+const fitsInt64 = (v: unknown) => typeof v !== "bigint" || (v >= INT64_MIN && v <= INT64_MAX);
+
 function vector(type: ColumnType, values: unknown[]): arrow.Vector {
   switch (type) {
     case "int":
+      // Whole numbers past BIGINT (DECIMAL(38,0), BIGINT UNSIGNED, Oracle's NUMBER) go as DOUBLE, like decimals.
+      if (!values.every(fitsInt64)) return vector("float", values);
       return arrow.vectorFromArray(
         values.map((v) => (v === null || v === undefined ? null : BigInt(v as number | bigint))),
         new arrow.Int64(),

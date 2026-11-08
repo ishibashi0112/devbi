@@ -15,7 +15,7 @@ pnpm example:serve    # ビルドして devbi-serve で開く（http://localhost
                       # /embed-demo.html は、ほかのアプリの画面に script 1 本で埋め込んだ例
 pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボードを作る（ファイルは git に入らない）
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
-pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG があれば PostgreSQL も）
+pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG・_MSSQL・_MYSQL・_MARIADB・_ORACLE があればそのデータベースも）
 pnpm e2e              # パッケージと examples/sales をビルドして devbi-serve で開き、Playwright で確認
 ```
 
@@ -30,7 +30,7 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `packages/devbi` | `devbi` | ファイル形式（metrics.yaml / dash.json の検証）、指標 → DuckDB SQL のコンパイラ、xlsx の読み書き（依存なし）、書式、`TileProps` などの型。ブラウザでも Node でも動く |
 | `packages/react` | `@devbi/react` | DuckDB-wasm のエンジン、Mosaic の Selection でのクロスフィルタ、組み込みタイル、`<Dashboard>` / `<DevbiApp>`、ほかのページへの埋め込み（`mountDashboard`、`startEmbed`） |
 | `packages/vite` | `@devbi/vite` | Vite プラグイン。`virtual:devbi` で dashboards/ と models/ と昇格タイルを渡し、ビルドで data/ をコピー。`embed: true` で埋め込み用の `devbi-embed.js` も作る |
-| `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL）、`devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出し、毎朝のスナップショットを作る）、`devbi-snapshot`（スナップショットをいま作る。タスクスケジューラ用）。DB への接続は ashiato のアダプタの作りを流用 |
+| `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL・SQL Server・Oracle・MySQL）、`devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出し、毎朝のスナップショットを作る）、`devbi-snapshot`（スナップショットをいま作る。タスクスケジューラ用）。DB への接続は ashiato のアダプタの作りを流用 |
 | `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ。`db/sales.sqlite` は同じ受注を表に分けて入れたもの（`pnpm gen:db`） |
 
 npm にはまだ公開していません（どのパッケージも `private: true`）。
@@ -113,4 +113,4 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 - ピボットは Perspective を使わず、合計行・合計列つきの自前の表にしました。
 - 読み取り API の名前: handoff の `POST /api/query {model, params}` は `{name, params}` にし、サーバーの SQL は `api/<名前>.sql`、metrics.yaml からは `read_api('<名前>')` で呼びます。`model` は metrics.yaml の `model`（DuckDB の SQL）と紛らわしいため。
 - 朝のスナップショットは、handoff の Parquet ではなく Arrow IPC（`snapshots/<名前>.arrows`。API の答えと同じ中身）にしました。DuckDB-wasm が Parquet を読むには拡張をインターネットから取りに行くためです。ブラウザはこれを静的ファイルとして GET するので、IIS などにそのまま置けます。時刻は `api/<名前>.sql` の先頭の `-- snapshot: 06:00` に書きます。
-- 読み取り API は、`read_api` 1 つにつき 1 回だけ呼び、行をブラウザに渡して DuckDB-wasm で集計します（データベースは絞り込みのたびには呼ばれない）。応答は Arrow IPC（gzip）。SQLite は Node 組み込みの `node:sqlite`（Node 22.16 以上）、PostgreSQL は `pg`（optional peer）。
+- 読み取り API は、`read_api` 1 つにつき 1 回だけ呼び、行をブラウザに渡して DuckDB-wasm で集計します（データベースは絞り込みのたびには呼ばれない）。応答は Arrow IPC（gzip）。SQLite は Node 組み込みの `node:sqlite`（Node 22.16 以上）、PostgreSQL は `pg`、SQL Server は `mssql`、Oracle は `oracledb`（Thin モード）、MySQL / MariaDB は `mysql2`（どれも optional peer）。SQL Server・Oracle・MySQL の接続は ashiato のアダプタ（読み取り専用のトランザクション、行の上限の取り方、Oracle の Thick モード）を流用しています。
