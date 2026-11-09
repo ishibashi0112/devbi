@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   compileMalloy,
+  compileRows,
   compileSource,
   customFields,
+  customSelectable,
   customTable,
   customViews,
   parseMetricsYaml,
@@ -49,6 +51,24 @@ describe("customViews", () => {
     expect(customViews({ metrics: "sales_daily", sql: "SELECT 1" }, names)).toEqual(["sales_daily"]);
     expect(customViews({ measures: ["x"] }, names)).toEqual([]);
   });
+
+  it("counts only the names read as tables: not a column, an alias, a function or a qualified name", () => {
+    const names = ["sales", "customers", "order", "month", "目標"];
+    const sql = (text: string) => customViews({ sql: text }, names);
+    expect(sql("SELECT 地域, COUNT(DISTINCT 顧客) AS customers FROM sales GROUP BY ALL ORDER BY month(d)")).toEqual(["sales"]);
+    expect(sql("SELECT * FROM sales s, 目標 AS t, read_csv('x.csv') WHERE s.customers = t.x")).toEqual(["sales", "目標"]);
+    expect(sql("SELECT EXTRACT(month FROM order) FROM main.customers LEFT JOIN 目標 USING (月)")).toEqual(["目標"]);
+    expect(sql("WITH t AS (SELECT * FROM sales) SELECT * FROM t WHERE x IN (SELECT y FROM customers)")).toEqual(["sales", "customers"]);
+    expect(sql("FROM sales SELECT 1")).toEqual(["sales"]);
+    const malloy = (text: string) => customViews({ malloy: text }, names);
+    expect(malloy("run: sales -> { group_by: month; aggregate: customers is count(); order_by: month }")).toEqual(["sales"]);
+    expect(
+      malloy(
+        "source: s is sales extend { join_one: 目標 on 月 = 目標.月; join_many: c is customers on x = c.x }\nrun: s -> { group_by: x }",
+      ),
+    ).toEqual(["sales", "目標", "customers"]);
+    expect(malloy("source: s is `sales`\nrun: s -> { group_by: x }")).toEqual(["sales"]);
+  });
 });
 
 describe("withSources", () => {
@@ -57,6 +77,10 @@ describe("withSources", () => {
     expect(withSources("SELECT * FROM sales;", src)).toBe('WITH "sales" AS (\n  SELECT 1 AS a\n)\nSELECT * FROM sales');
     expect(withSources("-- note\nwith recursive t AS (SELECT 1) SELECT * FROM t, sales", src)).toBe(
       '-- note\nWITH RECURSIVE "sales" AS (\n  SELECT 1 AS a\n),\nt AS (SELECT 1) SELECT * FROM t, sales',
+    );
+    // What follows the last statement goes: the SQL is put in DESCRIBE SELECT * FROM (…).
+    expect(withSources("SELECT '--;' AS x FROM sales; -- by region\n/* end */ ;", src)).toBe(
+      `WITH "sales" AS (\n  SELECT 1 AS a\n)\nSELECT '--;' AS x FROM sales`,
     );
   });
 });
@@ -73,6 +97,25 @@ describe("compileSource", () => {
       { order_id: "o6", big: true },
       { order_id: "o7", big: false },
     ]);
+  });
+});
+
+describe("compileSource with a dimension named like a column", () => {
+  it("has the dimension's value under that name, and filters by it", async () => {
+    const named = parseMetricsYaml(
+      `
+model: SELECT * FROM sales
+dimensions:
+  region: { sql: "region || '地方'" }
+  customer_name: { column: region }
+measures:
+  n: { sql: COUNT(*) }
+`,
+      "named",
+    );
+    const columns = Object.keys(await describeSql(named.model));
+    const sql = compileSource(named, { columns, filters: [{ field: "region", in: ["東地方"] }] });
+    expect(await rows(`SELECT DISTINCT region, customer_name FROM (${sql})`)).toEqual([{ region: "東地方", customer_name: "東" }]);
   });
 });
 
@@ -120,6 +163,27 @@ describe("Malloy", () => {
     ]);
   });
 
+  it("a week is not the time (Malloy's weeks start on Sunday); a click filters by the view's dimensions and time only", async () => {
+    const r = await run(
+      "// 週ごと\nrun: sales -> { group_by: 週 is order_date.week, m is order_date.month, region, order_id; aggregate: n is count() }",
+    );
+    expect(r.fields.map((f) => [f.name, f.kind, f.grain])).toEqual([
+      ["週", "time", "week"],
+      ["order_date", "time", "month"],
+      ["region", "dimension", undefined],
+      ["order_id", "dimension", undefined],
+      ["n", "measure", undefined],
+    ]);
+    expect([...customSelectable(r.fields, view)]).toEqual(["order_date", "region"]);
+  });
+
+  it("reads a time with a time zone as a time", async () => {
+    const compiled = await compileMalloy("run: t -> { group_by: m is ts.month, ts }", [
+      { name: "t", table: customTable("malloy", "t"), schema: { ts: "TIMESTAMP WITH TIME ZONE" } },
+    ]);
+    expect(compiled.columns.map((c) => c.type)).toEqual(["timestamp", "timestamp"]);
+  });
+
   it("says what is wrong, and on which line", async () => {
     await expect(run("run: sales -> {\n  group_by: 地\n}")).rejects.toThrow(new QueryError("Malloy: '地' is not defined（2 行目）"));
     await expect(run("run: sales -> { group_by: region; nest: x is { aggregate: n is count() } }")).rejects.toThrow(/x は表にできません/);
@@ -140,5 +204,48 @@ describe("SQL", () => {
       ["total_revenue", "売上", "measure", "¥#,##0"],
     ]);
     expect(round(await rows(sql))).toEqual([{ customer_name: "A社", 地方: "東", total_revenue: 600 }]);
+  });
+
+  it("a date is not the time: a click on it filters nothing", () => {
+    const fields = customFields(
+      "sql",
+      sqlColumns([
+        { name: "order_date", type: "DATE" },
+        { name: "n", type: "BIGINT" },
+      ]),
+      view,
+    ).fields;
+    expect(fields.map((f) => [f.name, f.kind, f.grain])).toEqual([
+      ["order_date", "time", undefined],
+      ["n", "measure", undefined],
+    ]);
+    expect([...customSelectable(fields, view)]).toEqual([]);
+  });
+
+  it("knows numbers from DuckDB's and Arrow's type names", () => {
+    const types = [
+      "INTEGER",
+      "UINTEGER",
+      "HUGEINT",
+      "DECIMAL(18,3)",
+      "Int32",
+      "Uint8",
+      "Float64",
+      "Decimal[18e2]",
+      "INTERVAL",
+      "INTEGER[]",
+      "INTEGER[3]",
+      "Interval<DAY_TIME>",
+    ];
+    expect(sqlColumns(types.map((type, i) => ({ name: `c${i}`, type }))).map((c) => c.type)).toEqual([
+      ...Array(8).fill("number"),
+      ...Array(4).fill("other"),
+    ]);
+  });
+});
+
+describe("explore", () => {
+  it("does not take a query in Malloy or SQL", () => {
+    expect(() => compileRows(view, { sql: "SELECT 1" })).toThrow(/malloy と sql は使えません/);
   });
 });

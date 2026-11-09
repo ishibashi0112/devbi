@@ -58,7 +58,11 @@ export function makeChart(kind: Kind) {
       const colored = multi || !!seriesField;
       const anySelected = selection.some((f) => f.field === xField.name);
       const opacity = (d: Datum) => (!anySelected || isSelected(selection, xField.name, d.x) ? 1 : 0.3);
-      const labels = [...new Set(data.map((d) => d.xLabel))];
+      // Bars over time go oldest first, whatever the rows' order (Malloy sorts time newest first).
+      const at = (v: unknown) => (v instanceof Date ? v.getTime() : Infinity);
+      const labels = time
+        ? [...new Map(data.map((d) => [d.xLabel, at(d.x)])).entries()].sort((a, b) => a[1] - b[1] || 0).map(([l]) => l)
+        : [...new Set(data.map((d) => d.xLabel))];
       const xTime = !!time && kind !== "bar";
       const xChannel = xTime ? (d: Datum) => d.x as Date : (d: Datum) => d.xLabel;
       const title = (d: Datum) => `${d.xLabel}${d.series ? `　${d.series}` : ""}\n${format(d.y, d.measure)}`;

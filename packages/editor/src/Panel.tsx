@@ -464,7 +464,7 @@ function QueryEditor({
   return (
     <>
       <h3>データ</h3>
-      {!rows && <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view))} />}
+      {!rows && <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view, metrics))} />}
       {problem && <p className="devbi-ed-warn">{problem}</p>}
       {unused.length > 0 && (
         <p className="devbi-ed-warn">
@@ -571,7 +571,7 @@ function CustomQueryEditor({
   return (
     <>
       <h3>データ</h3>
-      <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view ?? (names.length === 1 ? metrics[names[0]!] : undefined)))} />
+      <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view ?? (names.length === 1 ? metrics[names[0]!] : undefined), metrics))} />
       <Field
         label={lang}
         hint={

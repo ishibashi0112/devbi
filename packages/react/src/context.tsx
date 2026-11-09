@@ -122,7 +122,7 @@ export interface QueryState {
 }
 
 /** The fields of a view that selections are on: its dimensions and its time. */
-export function viewFields(view: MetricsView): Set<string> {
+function viewFields(view: MetricsView): Set<string> {
   return new Set([...Object.keys(view.dimensions), ...(view.time ? [view.time.name] : [])]);
 }
 

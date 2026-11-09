@@ -42,6 +42,7 @@ export {
   customQuery,
   customViews,
   customMainView,
+  customSelectable,
   customTable,
   customWords,
   customFields,
@@ -55,6 +56,7 @@ export {
 export {
   compileQuery,
   compileRows,
+  ROWS_CUSTOM,
   compileSource,
   plainColumn,
   compileTimeExtent,

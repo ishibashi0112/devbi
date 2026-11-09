@@ -4,7 +4,7 @@
 // columns DuckDB describes; DuckDB runs the SQL with the rows in front as CTEs.
 import { plainColumn, QueryError } from "./compile.js";
 import type { MetricsView } from "./metrics.js";
-import { ident, trimSql } from "./sql.js";
+import { ident } from "./sql.js";
 import { GRAINS, type FieldInfo, type Grain, type Query } from "./types.js";
 
 export type CustomLang = "malloy" | "sql";
@@ -20,27 +20,42 @@ export function customQuery(query: Query | null | undefined): { lang: CustomLang
 const IDENT_START = /[\p{L}_]/u;
 const IDENT_PART = /[\p{L}\p{N}_$]/u;
 
-/** The names in Malloy or SQL text, outside strings and comments: words, and quoted names ("…" in SQL, `…` in Malloy). */
-export function customWords(lang: CustomLang, text: string): string[] {
-  const out: string[] = [];
+/** A token of Malloy or SQL text: a word, a quoted name ("…" in SQL, `…` in Malloy), or a sign (`(`, `,`, `->`). */
+interface Token {
+  kind: "word" | "quoted" | "sign";
+  text: string;
+}
+
+/** Malloy or SQL text as tokens, without strings and comments; `end` is where the last of them (not `;`) ends. */
+function tokenize(lang: CustomLang, text: string): { tokens: Token[]; end: number } {
+  const tokens: Token[] = [];
   const quote = lang === "sql" ? '"' : "`";
   let i = 0;
-  const skipTo = (end: string, from: number) => {
-    const at = text.indexOf(end, from);
-    return at < 0 ? text.length : at + end.length;
+  let end = 0;
+  const skipTo = (close: string, from: number) => {
+    const at = text.indexOf(close, from);
+    return at < 0 ? text.length : at + close.length;
   };
   while (i < text.length) {
     const ch = text[i]!;
     if ((ch === "-" && text[i + 1] === "-") || (lang === "malloy" && ch === "/" && text[i + 1] === "/")) {
       i = skipTo("\n", i);
-    } else if (ch === "/" && text[i + 1] === "*") {
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
       i = skipTo("*/", i + 2);
-    } else if (lang === "malloy" && text.startsWith('"""', i)) {
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (lang === "malloy" && text.startsWith('"""', i)) {
       i = skipTo('"""', i + 3);
     } else if (ch === "'" || (lang === "malloy" && ch === '"')) {
       i++;
       while (i < text.length && text[i] !== ch) i += text[i] === "\\" && lang === "malloy" ? 2 : 1;
-      i++; // SQL's '' is two strings in a row: the same words
+      i++; // SQL's '' is two strings in a row: the same tokens
     } else if (ch === quote) {
       let name = "";
       i++;
@@ -56,21 +71,104 @@ export function customWords(lang: CustomLang, text: string): string[] {
         name += text[i++];
       }
       i++;
-      out.push(name);
+      tokens.push({ kind: "quoted", text: name });
     } else if (IDENT_START.test(ch)) {
       const start = i;
       while (i < text.length && IDENT_PART.test(text[i]!)) i++;
-      out.push(text.slice(start, i));
+      tokens.push({ kind: "word", text: text.slice(start, i) });
+    } else if (ch === "-" && text[i + 1] === ">") {
+      tokens.push({ kind: "sign", text: "->" });
+      i += 2;
     } else {
+      tokens.push({ kind: "sign", text: ch });
       i++;
+    }
+    if (ch !== ";") end = Math.min(i, text.length);
+  }
+  return { tokens, end };
+}
+
+/** The names in Malloy or SQL text, outside strings and comments: words, and quoted names ("…" in SQL, `…` in Malloy). */
+export function customWords(lang: CustomLang, text: string): string[] {
+  return tokenize(lang, text)
+    .tokens.filter((t) => t.kind !== "sign")
+    .map((t) => t.text);
+}
+
+const isSign = (t: Token | undefined, sign: string) => t?.kind === "sign" && t.text === sign;
+const isWord = (t: Token | undefined, words: ReadonlySet<string>) => t?.kind === "word" && words.has(t.text.toLowerCase());
+
+const SQL_FROM = new Set(["from", "join", "pivot", "unpivot"]);
+const SQL_QUERY = new Set(["select", "from", "with", "values", "table", "pivot", "unpivot"]);
+const AS = new Set(["as"]);
+
+/**
+ * The tables SQL reads: the names after FROM and JOIN (and after a comma in a FROM list), not those of table functions
+ * (`read_csv(…)`), qualified names, or FROM inside a function's parentheses (`EXTRACT(year FROM d)`).
+ */
+function sqlTables(tokens: readonly Token[]): string[] {
+  const out: string[] = [];
+  const query: boolean[] = [true]; // for each parenthesis, whether a query is inside (where FROM names tables)
+  let expect = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (isSign(t, "(")) {
+      const next = tokens[i + 1];
+      query.push(isSign(next, "(") || isWord(next, SQL_QUERY));
+      expect = false;
+    } else if (isSign(t, ")")) {
+      if (query.length > 1) query.pop();
+      expect = false;
+    } else if (isWord(t, SQL_FROM)) {
+      expect = query.at(-1)!;
+    } else if (expect) {
+      expect = false;
+      if (t.kind === "sign" || isSign(tokens[i + 1], "(") || isSign(tokens[i + 1], ".")) continue;
+      out.push(t.text);
+      // FROM a [AS] [x], b
+      let j = i + 1;
+      if (isWord(tokens[j], AS)) j++;
+      if (tokens[j] && tokens[j]!.kind !== "sign") j++;
+      if (isSign(tokens[j], ",")) {
+        expect = true;
+        i = j;
+      }
     }
   }
   return out;
 }
 
+const MALLOY_EXTEND = new Set(["extend", "include"]);
+const MALLOY_JOIN = new Set(["join_one", "join_many", "join_cross"]);
+const MALLOY_DEFINE = new Set([...MALLOY_JOIN, "source"]);
+
 /**
- * The metrics views a Malloy or SQL query reads: its `metrics`, then the ones it names (as SQL, names in any case).
- * Empty for a query written with the metrics' names.
+ * The sources Malloy reads: a name before `->`, `extend` or `include`, or the source of `join_one: x` or
+ * `join_one: / source: y is x`.
+ */
+function malloySources(tokens: readonly Token[]): string[] {
+  const out: string[] = [];
+  tokens.forEach((t, i) => {
+    if (t.kind === "sign") return;
+    const next = tokens[i + 1];
+    if (
+      isSign(next, "->") ||
+      isWord(next, MALLOY_EXTEND) ||
+      (isSign(tokens[i - 1], ":") && isWord(tokens[i - 2], MALLOY_JOIN)) ||
+      (tokens[i - 1]?.kind === "word" &&
+        tokens[i - 1]!.text === "is" &&
+        tokens[i - 2]?.kind !== "sign" &&
+        isSign(tokens[i - 3], ":") &&
+        isWord(tokens[i - 4], MALLOY_DEFINE))
+    )
+      out.push(t.text);
+  });
+  return out;
+}
+
+/**
+ * The metrics views a Malloy or SQL query reads: its `metrics`, then the ones it reads as tables (SQL: after FROM and
+ * JOIN, names in any case; Malloy: as sources, before `->`). Empty for a query written with the metrics' names.
  */
 export function customViews(query: Query, names: readonly string[]): string[] {
   const custom = customQuery(query);
@@ -79,7 +177,8 @@ export function customViews(query: Query, names: readonly string[]): string[] {
   const byKey = new Map(names.map((n) => [key(n), n]));
   const out = new Set<string>();
   if (query.metrics && names.includes(query.metrics)) out.add(query.metrics);
-  for (const w of customWords(custom.lang, custom.text)) {
+  const { tokens } = tokenize(custom.lang, custom.text);
+  for (const w of custom.lang === "sql" ? sqlTables(tokens) : malloySources(tokens)) {
     const n = byKey.get(key(w));
     if (n) out.add(n);
   }
@@ -93,12 +192,13 @@ export function customMainView(query: Query, views: readonly string[]): string |
 
 /** The name a view's rows have in the SQL that Malloy writes (and in the SQL query, the view's own name). */
 export function customTable(lang: CustomLang, view: string): string {
-  return ident(lang === "malloy" ? `__devbi_${view}` : view);
+  return ident(lang === "malloy" ? `__devbi_rows_${view}` : view);
 }
 
 /** `sql` with the views' rows in front of it, as CTEs (joined to its own WITH, if it has one). */
 export function withSources(sql: string, sources: readonly { table: string; sql: string }[]): string {
-  const body = trimSql(sql);
+  // Without what follows the last statement (`;`, comments): the SQL is put inside DESCRIBE SELECT * FROM (…).
+  const body = sql.slice(0, tokenize("sql", sql).end).trim();
   if (!sources.length) return body;
   const ctes = sources
     .map(
@@ -168,7 +268,8 @@ export async function compileMalloy(text: string, sources: readonly MalloySource
   const runtime = new malloy.SingleConnectionRuntime({ connection: new Columns() });
   // On one line, so that a problem's line is the line of the text.
   const head = sources.map((s) => `source: \`${s.name}\` is duckdb.table('${s.table.replaceAll("'", "\\'")}')`).join(" ");
-  const body = /^\s*(?:[A-Za-z_]\w*\s*:|import\b|#)/.test(text) ? text : `run: ${text}`;
+  // `run:` when the text (after its comments) does not start with a statement.
+  const body = /^(?:\s|\/\/[^\n]*|--[^\n]*|\/\*[\s\S]*?\*\/)*(?:[A-Za-z_]\w*\s*:|import\b|#)/.test(text) ? text : `run: ${text}`;
   let prepared: Awaited<ReturnType<ReturnType<typeof runtime.loadQuery>["getPreparedResult"]>>;
   try {
     prepared = await runtime.loadQuery(`${head}\n${body}`).getPreparedResult();
@@ -177,9 +278,18 @@ export async function compileMalloy(text: string, sources: readonly MalloySource
   }
   const columns = prepared.resultExplore.structDef.fields.map((f): ResultColumn => {
     const meta = (f as { resultMetadata?: { fieldKind?: string; drillExpression?: Drill } }).resultMetadata;
-    const type = ["number", "string", "date", "timestamp", "boolean"].includes(f.type) ? (f.type as ResultColumn["type"]) : "other";
+    const type =
+      f.type === "timestamptz"
+        ? "timestamp"
+        : ["number", "string", "date", "timestamp", "boolean"].includes(f.type)
+          ? (f.type as ResultColumn["type"])
+          : "other";
     if (type === "other")
-      throw new QueryError(`Malloy: ${f.name} は表にできません（nest などは使えません。group_by と aggregate で書いてください）`);
+      throw new QueryError(
+        ["turtle", "array", "record"].includes(f.type)
+          ? `Malloy: ${f.name} は表にできません（nest などは使えません。group_by と aggregate で書いてください）`
+          : `Malloy: ${f.name} は表にできません（${f.type} の値は出せません）`,
+      );
     const drill = meta?.drillExpression;
     const ref = drill?.kind === "time_truncation" ? drill.field_reference : drill?.kind === "field_reference" ? drill : undefined;
     return {
@@ -221,8 +331,9 @@ function malloyMessage(e: unknown): string {
 export function sqlColumns(columns: readonly { name: string; type: string }[]): ResultColumn[] {
   return columns.map((c) => {
     const t = c.type.toLowerCase();
-    const type: ResultColumn["type"] =
-      /^(int|uint|float|double|decimal|bigint|smallint|tinyint|hugeint|ubigint|usmallint|utinyint|uinteger|integer|real|numeric)/.test(t)
+    const type: ResultColumn["type"] = /\[\d*\]$/.test(t) // DuckDB's lists and arrays (INTEGER[]), not Arrow's Decimal[18e2]
+      ? "other"
+      : /^(u?int(eger|\d+)?|u?(big|small|tiny|huge)int|float\d*|double|decimal|real|numeric)\b/.test(t)
         ? "number"
         : /^date/.test(t)
           ? "date"
@@ -265,12 +376,13 @@ export function customFields(
     const src = c.source?.column ?? c.name;
     const grain =
       c.source?.truncation && (GRAINS as readonly string[]).includes(c.source.truncation) ? (c.source.truncation as Grain) : undefined;
+    // Malloy's weeks start on Sunday, DevBI's on Monday: a week is a date of its own.
     if (
       lang === "malloy" &&
       view?.time &&
       time &&
       src === view.time.column &&
-      (grain || !c.source?.truncation) &&
+      (grain ? grain !== "week" : !c.source?.truncation) &&
       free(view.time.name, c.name)
     ) {
       add(view.time.name, { label: c.name === src ? view.time.label : c.name, kind: "time", grain: grain ?? "day" });
@@ -295,7 +407,23 @@ export function customFields(
       });
       continue;
     }
-    add(c.name, { label: c.name, kind: time ? "time" : "dimension", ...(time && grain ? { grain } : {}) });
+    // A time that is not the view's (SQL's dates, other columns, weeks) has no grain under the time's name: a click on it selects nothing.
+    const own = time && grain && c.name !== view?.time?.name;
+    add(c.name, { label: c.name, kind: time ? "time" : "dimension", ...(own ? { grain } : {}) });
   }
   return { names, fields };
+}
+
+/**
+ * The fields of a Malloy or SQL result that a click filters the other tiles by: the view's dimensions, and its time
+ * (by a grain). A column of the query's own filters nothing.
+ */
+export function customSelectable(fields: readonly FieldInfo[], view: MetricsView | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const f of fields) {
+    if (!view) break;
+    if (f.kind === "dimension" ? Object.hasOwn(view.dimensions, f.name) : f.kind === "time" && !!f.grain && f.name === view.time?.name)
+      out.add(f.name);
+  }
+  return out;
 }

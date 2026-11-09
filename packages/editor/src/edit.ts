@@ -135,9 +135,16 @@ const WRITTEN = ["measures", "dimensions", "time", "sort", "limit", "malloy", "s
 /**
  * The tile's query written another way: with the metrics' names (what a new tile of its type starts with), or in
  * Malloy or SQL (a first query: a count by the metrics file's first dimension, or by month for a chart over time).
- * The metrics file, the filters and the period stay.
+ * `view` is the metrics file it reads; back to names, it is the query's `metrics` when not the dashboard's. The
+ * filters and the period stay.
  */
-export function setQueryMode(spec: RawDashboard, tile: RawTile, mode: QueryMode, view: MetricsView | undefined): RawTile {
+export function setQueryMode(
+  spec: RawDashboard,
+  tile: RawTile,
+  mode: QueryMode,
+  view: MetricsView | undefined,
+  metrics: Record<string, MetricsView> = {},
+): RawTile {
   if (queryMode(tile.query) === mode || typeof tile.type !== "string" || !Object.hasOwn(TILE_TYPES, tile.type)) return tile;
   const type = tile.type as BuiltinTileType;
   let next = tile;
@@ -145,8 +152,19 @@ export function setQueryMode(spec: RawDashboard, tile: RawTile, mode: QueryMode,
   if (mode !== "names") return setQueryKey(next, mode, starterQuery(mode, type, view));
   const fresh = newTile(type, spec, view, false).query;
   for (const k of WRITTEN) if (isObj(fresh) && Object.hasOwn(fresh, k)) next = setQueryKey(next, k, fresh[k]);
+  if (view && view.name !== metricsNameOf(metrics, spec, next)) next = setQueryKey(next, "metrics", view.name);
   return next;
 }
+
+// Names a first query writes quoted (Malloy's and DuckDB's words, as far as a column is likely to be named one).
+const RESERVED = new Set(
+  (
+    "all and any array as asc between boolean by case cast count date day days default desc distinct else end exists extend false for from " +
+    "full group having hour hours in inner is join last left like limit minute minutes month months not now null number on or order " +
+    "outer quarter quarters right run second seconds select source string sum table then timestamp to true union user week weeks when " +
+    "where with year years"
+  ).split(" "),
+);
 
 /** A first Malloy or SQL query over a metrics file, that a tile of this type can show. */
 export function starterQuery(lang: "malloy" | "sql", type: BuiltinTileType, view: MetricsView | undefined): string {
@@ -154,11 +172,11 @@ export function starterQuery(lang: "malloy" | "sql", type: BuiltinTileType, view
   const time = (type === "line" || type === "area" || type === "bar") && view?.time ? view.time.column : undefined;
   const dim = view ? Object.values(view.dimensions)[0] : undefined;
   const col = dim ? (plainColumn(dim.expr) ?? dim.name) : undefined;
-  const bare = (n: string) => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(n);
+  const bare = (n: string) => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(n) && !RESERVED.has(n.toLowerCase());
   if (lang === "malloy") {
     const id = (n: string) => (bare(n) ? n : `\`${n}\``);
     const by = type === "kpi" ? "" : time ? `  group_by: 月 is ${id(time)}.month\n` : col ? `  group_by: ${id(col)}\n` : "";
-    return `run: ${id(name)} -> {\n${by}  aggregate: 件数 is count()\n}`;
+    return `run: ${id(name)} -> {\n${by}  aggregate: 件数 is count()${time && type !== "kpi" ? "\n  order_by: 月" : ""}\n}`;
   }
   const id = (n: string) => (bare(n) ? n : ident(n));
   if (type === "kpi" || (!time && !col)) return `SELECT COUNT(*) AS 件数\nFROM ${id(name)}`;

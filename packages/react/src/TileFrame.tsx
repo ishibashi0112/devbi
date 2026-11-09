@@ -1,6 +1,6 @@
-import { checkQuery, componentProblem, customQuery, resolveComponent, type BuiltinTileType, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
+import { checkQuery, componentProblem, customQuery, customSelectable, resolveComponent, type BuiltinTileType, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
 import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { makeFormatters, queryView, useDevbi, useDevbiQuery, useSelectionVersion, viewFields } from "./context.js";
+import { makeFormatters, queryView, useDevbi, useDevbiQuery, useSelectionVersion } from "./context.js";
 import type { TileModule } from "./project.js";
 import { builtinTiles } from "./tiles/index.js";
 import { TileSizeContext } from "./tiles/util.js";
@@ -84,18 +84,16 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
       return undefined;
     }
   }, [ctx, query, tile.options?.metrics]);
-  // A Malloy or SQL tile selects only on its view's fields (a column of its own filters nothing else).
+  // A Malloy or SQL tile selects only on its view's dimensions and time (a column of its own filters nothing else).
   const custom = !!customQuery(query);
+  const selectable = useMemo(() => (custom ? customSelectable(data.fields, view) : undefined), [custom, data.fields, view]);
   const select = useCallback(
     (f: Filter | Filter[] | null) => {
       let list = f === null ? null : Array.isArray(f) ? f : [f];
-      if (list && custom) {
-        const fields = view ? viewFields(view) : new Set<string>();
-        list = list.filter((x) => fields.has(x.field));
-      }
+      if (list && selectable) list = list.filter((x) => selectable.has(x.field));
       ctx.selection.set(tile.id, list?.length ? list : null);
     },
-    [ctx.selection, tile.id, custom, view],
+    [ctx.selection, tile.id, selectable],
   );
   const { format, label } = useMemo(() => makeFormatters(view, data.fields), [view, data.fields]);
   const [ref, size] = useSize();

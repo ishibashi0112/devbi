@@ -14,6 +14,7 @@ import {
   customFields,
   customMainView,
   customQuery,
+  ROWS_CUSTOM,
   customTable,
   customViews,
   sqlColumns,
@@ -492,6 +493,10 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
 
         const custom = customQuery(query);
         if (custom) {
+          if (t.type && Object.hasOwn(TILE_TYPES, t.type) && (TILE_TYPES[t.type as keyof typeof TILE_TYPES] as TileTypeInfo).rows) {
+            fail(ROWS_CUSTOM);
+            continue;
+          }
           // As the runtime (runCustom): the views it names, each filtered by the first periods that apply to it.
           const lang = custom.lang === "sql" ? "SQL" : "Malloy";
           if (query.metrics && !modelFiles.includes(`${query.metrics}.metrics.yaml`)) {
