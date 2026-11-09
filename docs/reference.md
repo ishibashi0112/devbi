@@ -10,6 +10,7 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [Excel と PDF に書き出す](#excel-と-pdf-に書き出す)
 - [自作タイル（JSX）](#自作タイルjsx)
 - [エディタでの補完と型（pnpm gen）](#エディタでの補完と型pnpm-gen)
+- [ファイルを確かめる（devbi-check）](#ファイルを確かめるdevbi-check)
 - [書式](#書式)
 - [@devbi/vite](#devbivite)
 - [GUI エディタ（@devbi/editor）](#gui-エディタdevbieditor)
@@ -38,7 +39,7 @@ npm run dev                            # http://localhost:5173 。見出しの�
 - Yarn 2 以降では、`node_modules` を作る `.yarnrc.yml`（`nodeLinker: node-modules`）も置きます（Plug'n'Play のままだと、`@devbi/vite` が GUI エディタを見つけられないため）
 - package.json の名前はフォルダ名から作ります（英数字以外は `-`。残らなければ `devbi-reports`）
 - DevBI のパッケージ（`devbi`、`@devbi/react`、`@devbi/vite`、`@devbi/editor`）は `create-devbi` と同じ版を `^` で入れます。React・Vite・TypeScript は、このリポジトリでテストしている版です
-- できるスクリプト: `dev`（開発サーバー）、`build`（`dist/` に静的なサイト）、`preview`（ビルドしたものを開く）、`gen`（[補完と型](#エディタでの補完と型pnpm-gen)）、`typecheck`（`devbi-gen` と `tsc`）
+- できるスクリプト: `dev`（開発サーバー）、`build`（`dist/` に静的なサイト）、`preview`（ビルドしたものを開く）、`gen`（[補完と型](#エディタでの補完と型pnpm-gen)）、`typecheck`（`devbi-gen` と `tsc`）、`check`（[ファイルを確かめる](#ファイルを確かめるdevbi-check)）、`inspect`（[データの中を見る](#データの中を見るdevbi-inspect)）
 - データベースから読むとき（[@devbi/server](#データベースから読むdevbiserver)）は、`npm install -D @devbi/server` とドライバー（`pg` など）を足します
 
 ## プロジェクトの形
@@ -388,6 +389,79 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 読めない metrics.yaml があったときも終了コード 1 です。フォルダに `models/` がないときは、何も書かずに終了コード 2 です。
 
+## ファイルを確かめる（devbi-check）
+
+`pnpm check`（中身は `@devbi/vite` の `devbi-check`）が、ブラウザを開かずに、ダッシュボードが表示できるかを確かめます。metrics.yaml や dash.json を書いたら（人でも AI でも）流し、出たものを直して、もう一度流します。
+
+確かめること:
+
+1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか
+2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
+3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
+
+SQL を流すのは、ブラウザと同じ DuckDB-wasm（Node で動かす）です。xlsx は画面と同じく DevBI が読み、`read_api` は `api/` の SQL を接続先で流します（`devbi-serve` と同じく、環境変数とプロジェクトの `.env`・`.env.local` の `DEVBI_DB…`。Vite の `.env.[mode]` は読みません）。ブラウザと同じく、データのファイルは `read_csv('data/…')` のように `read_` の関数に書いたものだけを読みます（`FROM 'data/x.csv'` はエラー）。
+
+```
+$ pnpm check
+models/sales.metrics.yaml: 6,044 行、指標 7・軸 4
+dashboards/sales.dash.json: タイル 14（クエリを実行 9）
+  kpi-revenue 1 行、kpi-avg 1 行、monthly 31 行、region 0 行、vs-last-year 31 行、…
+  kpi-qty・products: quantity のエラーのため確かめていません
+
+✗ models/sales.metrics.yaml: 指標 quantity: Binder Error: Referenced column "数" not found in FROM clause!
+    Candidate bindings: "数量", "商品", "地域"
+✗ dashboards/sales.dash.json: タイル kpi-orders（受注件数）: 指標 orderz は sales にありません（sales の指標: revenue・orders・quantity・…）
+⚠ dashboards/sales.dash.json: タイル region（地域別売上）: 結果が 0 行です（query.filters や指標の式を確かめてください）
+
+エラー 2 件、注意 1 件
+```
+
+- ✗（エラー）は、そのままだと画面でエラーになるもの。⚠（注意）は、表示はできるが見直したいものと、確かめられなかったもの
+- 一つの間違いは一つのエラーにします。エラーのある指標を使う指標（`revenue / orders` や `of: revenue`）、エラーのある time の列を使う比較・累計の指標、それらを使うタイルは、「… のエラーのため確かめていません」とだけ出します。`model` が 0 行のときの注意も、指標ファイルに 1 つだけです
+- DuckDB のエラー（`Binder Error` など）は DuckDB の英語のままです。`Candidate bindings` は、近い名前の列の候補です
+- 期間（date-range）や、ほかのタイルのクリックでの絞り込みはかけず、全期間で流します
+- 確かめないもの: 接続先がないときの `read_api`（注意）、URL のデータ、DuckDB の拡張（Parquet、JSON、`current_date` の icu など）をインターネットから取ってこられないときのその SQL（注意）、Node で読み込めない自作タイル（`window` を読むなど。プロジェクトの vite.config も使わないので、そこでの設定が要るものも。注意）、自作タイルが `query` の外で読むデータ、見た目（色・幅・高さ）
+
+`devbi-check [--dir <フォルダ>] [--json]`:
+
+| オプション | 中身 |
+| --- | --- |
+| `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
+| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ） |
+
+エラーがあれば終了コード 1、注意だけなら 0 です。フォルダに `models/` がないときや、確かめること自体ができなかったとき（DuckDB が動かないなど）は 2 です。
+
+### データの中を見る（devbi-inspect）
+
+`pnpm inspect <ファイル>`（中身は `devbi-inspect`）が、データのファイルの列を出します。metrics.yaml を書く前に、列の名前と型、どんな値が入っているかを見ます（Excel を開けない AI にも使えます）。
+
+```
+$ pnpm inspect data/sales.xlsx
+data/sales.xlsx（シート「明細」）: 6,044 行、9 列
+  シート: 明細・メモ（ほかのシートは --sheet <名前>）
+
+受注日: DATE、2024-04-01 〜 2026-10-30、672 種類
+顧客: VARCHAR、40 種類
+  多い値: 青葉工業 (276)、三河工業 (256)、青葉商事 (244)、…
+数量: BIGINT、1 〜 40、40 種類
+```
+
+- 列ごとに、`model` の SQL から見える型（xlsx は DevBI の読み方で決まる型）、範囲（文字の列は出さない）、種類の数、空のセルの数。文字と真偽の列は、多い値とその行数
+- ファイルの代わりに指標ファイルの名前（`pnpm inspect sales`）か、そのパス（`models/sales.metrics.yaml`）を書くと、その `model` の SQL の結果の列を出します
+- ファイルは、今のフォルダからのパスか、プロジェクトのフォルダからのパスで書きます。プロジェクトの外のファイルも読めます。xlsx・CSV・TSV・Parquet・Arrow・JSON（Parquet と JSON は DuckDB の拡張をインターネットから取ってきます）
+- 値がそのまま出ます。人に渡すときは気をつけてください（`pnpm try-xlsx` は値を出しません）
+
+`devbi-inspect <ファイル | 指標ファイルの名前> [--dir <フォルダ>] [--sheet <シート名>] [--values <数>] [--json]`:
+
+| オプション | 中身 |
+| --- | --- |
+| `--dir` | プロジェクトのフォルダ。指標ファイルと `.env` をここから読む。既定は今のフォルダ |
+| `--sheet` | Excel のシート。既定は最初のシート |
+| `--values` | 文字の列に出す多い値の数。既定は 8。0 で出さない |
+| `--json` | 結果を JSON で出す |
+
+読めないときは終了コード 1 です。
+
 ## 書式
 
 指標と軸の `format` に書きます。Excel の表示形式の一部と同じ書き方です。
@@ -438,6 +512,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - 開発サーバーでは、npm から入れた `@devbi/editor`・`devbi`・`@devbi/react` を、Vite の `optimizeDeps.include` に足して先にまとめます（エディタを開いたときや、「コードにする」で書き出したファイルを読んだときに、Vite が新しい依存を見つけてページを読み込み直さないように）。DuckDB-wasm も、ほかと同じく先にまとめます（`optimizeDeps.exclude` に入れると、npm で入れたときは集計が動かず、pnpm で入れたときは開けません）。
 - 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
+- コマンド [`devbi-check`](#ファイルを確かめるdevbi-check) と [`devbi-inspect`](#データの中を見るdevbi-inspect) も入っています（DuckDB-wasm を Node で動かすので、`@duckdb/duckdb-wasm` と `apache-arrow` に依存します）。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
 - `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
 - `api/` の SQL の先頭の `-- snapshot:` の行を読み、どの SQL を[スナップショット](#毎朝のスナップショット)から読むかを `virtual:devbi` に入れます（SQL の中身は入れません）。開発サーバーと `vite preview` は、スナップショットのファイルを保存せず、聞かれるたびにデータベースから読んで返します。
@@ -1195,13 +1270,15 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm --filter devbi-example-sales exec devbi-snapshot` | サンプルのスナップショットを、いま `dist/snapshots/` に作る（先にビルド） |
 | `pnpm try-xlsx <Excel> [--sheet 名前] [--name local_名前] [--force]` | 手元の Excel から下書きのダッシュボードを作る。ファイルは git に入らない |
 | `pnpm gen` | パッケージをビルドして、サンプルの `.devbi/`（補完と型）を作り直す。開発サーバーを動かしている間は自動 |
+| `pnpm example:check` | パッケージをビルドして、サンプルの指標とすべてのタイルのクエリをデータに流して確かめる（[devbi-check](#ファイルを確かめるdevbi-check)） |
+| `pnpm --filter devbi-example-sales inspect <ファイル>` | サンプルのフォルダで、データのファイルの列を見る（[devbi-inspect](#データの中を見るdevbi-inspect)） |
 | `pnpm test` | 単体テスト（指標 → SQL を DuckDB で実際に流す、xlsx、書式、API）。パッケージのソースを直接読むので、先にビルドしなくてよい。`DEVBI_TEST_PG`、`DEVBI_TEST_MSSQL`、`DEVBI_TEST_MYSQL`、`DEVBI_TEST_MARIADB`、`DEVBI_TEST_ORACLE` に URL を入れると、そのデータベースのテストも流す（表を作り直すので、テスト用のデータベースで） |
 | `pnpm e2e` | パッケージとサンプルをビルドして `devbi-serve` で開き、ブラウザで操作を確かめる。GUI エディタは、サンプルを `examples/sales/e2e-work/` に写して Vite の開発サーバー（ポート 5179）で確かめる（git に入らない） |
 | `pnpm e2e:nextjs` | Next.js の見本をビルドして `next start` で開き、ブラウザで確かめる |
 | `pnpm --filter devbi-example-sales gen:db` | `data/sales.xlsx` から、サンプルの SQLite（`db/sales.sqlite`）を作り直す |
 | `pnpm --filter devbi-example-sales copy-db <URL>` | サンプルの 4 つの表を、SQL Server・Oracle・MySQL に写す（先に同じ名前の表を消す）。`DEVBI_DB` をその URL にすると、「DB から」のダッシュボードがそのデータベースから読む |
 | `pnpm typecheck` / `pnpm build` | 型チェック（サンプルは `.devbi/` を作ってから） / パッケージのビルド |
-| `pnpm check:packed` | （Mac・Linux）パッケージを npm に出す形（`pnpm pack`）に固め、`create-devbi` で作ったプロジェクトに npm と pnpm で入れて、型チェック・ビルド・開発サーバーと GUI エディタ（「コードにする」でページが読み込み直されないこと）を確かめる。作ったプロジェクトは一時フォルダに残る（場所が最後に出る）。`DEVBI_PACKED_DIR` で場所を決められる |
+| `pnpm check:packed` | （Mac・Linux）パッケージを npm に出す形（`pnpm pack`）に固め、`create-devbi` で作ったプロジェクトに npm と pnpm で入れて、型チェック・`check`・ビルド・開発サーバーと GUI エディタ（「コードにする」でページが読み込み直されないこと）を確かめる。作ったプロジェクトは一時フォルダに残る（場所が最後に出る）。`DEVBI_PACKED_DIR` で場所を決められる |
 | `node scripts/version.mjs <版>` | 公開する 6 つのパッケージの版をそろえて変える。公開のしかたは [releasing.md](releasing.md) |
 | `dotnet test dotnet/DevBI.sln` | C# の見本のテスト（.NET 10 SDK）。SQL ファイルの読み方が TypeScript と同じか（`packages/server/test/fixtures/sqlserver-cases.json` と比べる）と、HTTP の答え方。`DEVBI_TEST_MSSQL` があれば SQL Server でも流す |
 | `dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179` | サンプルのビルド（`dist/`）と API を ASP.NET Core で出す。接続は環境変数 `ConnectionStrings__DEVBI_DB` に ADO.NET の接続文字列で（先に `copy-db` で SQL Server に表を写す） |

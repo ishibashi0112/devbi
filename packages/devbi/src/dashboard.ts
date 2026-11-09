@@ -20,17 +20,23 @@ export function dashboardSchemas(names?: SchemaNames) {
   };
   const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
   const field = nameOf(names?.fields, "軸の名前か、time の列名");
-  const filter = z.union([
-    z.strictObject({ field, in: z.array(scalar).describe("どれかに一致する行。null は空欄に一致") }),
-    z.strictObject({
-      field,
-      between: z.tuple([scalar, scalar]).describe("[始まり, 終わり]。始まり ≦ 値 ＜ 終わり。null の側は無制限"),
-    }),
-  ]);
-  const sort = z.union([
-    z.string().min(1).describe('列の名前。"-revenue" のように先頭に - で降順'),
-    z.strictObject({ field: z.string().min(1).describe("列の名前"), desc: z.boolean().optional().describe("true で降順") }),
-  ]);
+  const filter = z.union(
+    [
+      z.strictObject({ field, in: z.array(scalar).describe("どれかに一致する行。null は空欄に一致") }),
+      z.strictObject({
+        field,
+        between: z.tuple([scalar, scalar]).describe("[始まり, 終わり]。始まり ≦ 値 ＜ 終わり。null の側は無制限"),
+      }),
+    ],
+    { error: '絞り込みは { "field": 名前, "in": [値, …] } か { "field": 名前, "between": [始まり, 終わり] } で書いてください' },
+  );
+  const sort = z.union(
+    [
+      z.string().min(1).describe('列の名前。"-revenue" のように先頭に - で降順'),
+      z.strictObject({ field: z.string().min(1).describe("列の名前"), desc: z.boolean().optional().describe("true で降順") }),
+    ],
+    { error: '並べ替えは "列の名前"（降順は "-列の名前"）か { "field": 列の名前, "desc": true } で書いてください' },
+  );
   const query = z
     .strictObject({
       metrics: nameOf(names?.metrics, "使う指標ファイルの名前（models/<名前>.metrics.yaml）。既定はダッシュボードの metrics").optional(),

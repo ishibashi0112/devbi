@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources, type Dashboard } from "devbi";
+import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources, type Dashboard, type MetricsView } from "devbi";
 import { loadEnv, version as viteVersion, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type UserConfig, type ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
 import { createEditorHandler, versionOf } from "./editor.js";
@@ -151,6 +151,29 @@ export function dashboardProblems(dir: string, rel: string, d: Dashboard): strin
   return problems;
 }
 
+/** The data files a metrics view's model reads (relative to the project), and problems with them. */
+export function modelSources(dir: string, rel: string, view: MetricsView): { data: string[]; problems: string[] } {
+  const data: string[] = [];
+  const problems: string[] = [];
+  for (const s of scanSources(view.model)) {
+    if (s.format === "api") {
+      // Rows from the read-only API: the SQL file stays on the server (never copied into the build).
+      if (!existsSync(path.join(dir, "api", `${s.path}.sql`))) problems.push(`${rel}: API の SQL ファイル api/${s.path}.sql がありません`);
+      continue;
+    }
+    if (hasUrlScheme(s.path)) continue;
+    const p = posix(path.normalize(s.path));
+    if (p.startsWith("..") || path.isAbsolute(s.path)) {
+      problems.push(`${rel}: データのパスはプロジェクトの中を相対パスで書いてください: ${s.path}`);
+    } else if (!existsSync(path.join(dir, p))) {
+      problems.push(`${rel}: データファイル ${s.path} がありません`);
+    } else if (!data.includes(p)) {
+      data.push(p);
+    }
+  }
+  return { data, problems };
+}
+
 /** Read and validate every dashboard and metrics file. Throws one error listing all problems. */
 export async function readProject(dir: string): Promise<ProjectFiles> {
   const problems: string[] = [];
@@ -165,22 +188,9 @@ export async function readProject(dir: string): Promise<ProjectFiles> {
       const spec = parseYaml(await readFile(file, "utf8"));
       const view = defineMetricsView(spec, name, rel);
       out.metrics[name] = { path: `/${rel}`, spec };
-      for (const s of scanSources(view.model)) {
-        if (s.format === "api") {
-          // Rows from the read-only API: the SQL file stays on the server (never copied into the build).
-          if (!existsSync(path.join(dir, "api", `${s.path}.sql`))) problems.push(`${rel}: API の SQL ファイル api/${s.path}.sql がありません`);
-          continue;
-        }
-        if (hasUrlScheme(s.path)) continue;
-        const p = posix(path.normalize(s.path));
-        if (p.startsWith("..") || path.isAbsolute(s.path)) {
-          problems.push(`${rel}: データのパスはプロジェクトの中を相対パスで書いてください: ${s.path}`);
-        } else if (!existsSync(path.join(dir, p))) {
-          problems.push(`${rel}: データファイル ${s.path} がありません`);
-        } else if (!out.data.includes(p)) {
-          out.data.push(p);
-        }
-      }
+      const sources = modelSources(dir, rel, view);
+      problems.push(...sources.problems);
+      for (const p of sources.data) if (!out.data.includes(p)) out.data.push(p);
     } catch (e) {
       problems.push(e instanceof MetricsError ? e.message : `${rel}: ${(e as Error).message}`);
     }

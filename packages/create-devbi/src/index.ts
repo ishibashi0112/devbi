@@ -102,6 +102,8 @@ export function createProject(dir: string, options: CreateOptions = {}): Created
       build: "vite build",
       preview: "vite preview",
       gen: "devbi-gen",
+      check: "devbi-check",
+      inspect: "devbi-inspect",
       typecheck: "devbi-gen && tsc -p tsconfig.json",
     },
     dependencies: sorted({ ...Object.fromEntries(DEVBI_DEPENDENCIES.map((d) => [d, range])), ...DEPENDENCIES }),
