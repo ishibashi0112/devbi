@@ -336,6 +336,8 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `settings` | `false` で、開いたときにタイルの中の設定の欄を閉じておく（既定は開いておく） |
 | `columns_config` | 列ごとの表示（`{ "金額": { "number_format": { "maximumFractionDigits": 0 } } }`）。数の列は、既定で小数を 2 桁まで、整数は `.00` なしで出す |
 
+Perspective が使えない `layout`（ない列の名前、ない `plugin`）は、タイルに「options.layout の並べ方を使えません（…）」「options.layout の plugin "…" はありません（…のどれかにしてください）」と出ます。GUI エディタで直せば、そのまま新しい並べ方になります。
+
 いまの制限:
 
 - タイルの中で変えた並べ方は保存しません（ページを開き直すと `layout` に戻ります）。残したい並べ方は、Perspective の設定の欄で作り、GUI エディタの「最初の並べ方」に JSON で貼ります（ブラウザの開発者ツールで `document.querySelector("perspective-viewer").save()` の結果）。

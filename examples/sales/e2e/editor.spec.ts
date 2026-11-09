@@ -417,8 +417,17 @@ test("the property panel: an explore tile reads the rows, its first layout writt
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByRole("status")).toContainText("保存しました");
   await expect.poll(async () => (await arranged()).group_by).toEqual(["商品分類"]);
+  // A layout Perspective cannot use says so on the tile, and the next one is used.
+  const problem = tile.locator(".devbi-error");
+  await layout.fill('{ "plugin": "Bar" }');
+  await layout.blur();
+  await expect(problem).toContainText('options.layout の plugin "Bar" はありません');
+  await layout.fill('{ "group_by": ["地"] }');
+  await layout.blur();
+  await expect(problem).toContainText("options.layout の並べ方を使えません");
   await layout.fill('{ "group_by": ["地域"], "columns": ["金額"] }');
   await layout.blur();
+  await expect(problem).toHaveCount(0);
   await expect.poll(async () => (await arranged()).group_by).toEqual(["地域"]);
   expect((await arranged()).columns).toEqual(["金額"]);
 

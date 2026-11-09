@@ -91,6 +91,17 @@ export function Explore({ tile }: TileProps) {
   const viewer = useRef<HTMLPerspectiveViewerElement | null>(null);
   // The table the viewer shows, and its number columns.
   const loaded = useRef<PerspectiveTable | null>(null);
+  // Every table made for the viewer. The others are deleted once no view is on them (a failed load can leave one on).
+  const tables = useRef(new Set<PerspectiveTable>());
+  const prune = async () => {
+    for (const t of [...tables.current]) {
+      if (t === loaded.current) continue;
+      await t.delete().then(
+        () => tables.current.delete(t),
+        () => {}, // a view is still on it: the next time
+      );
+    }
+  };
   const numbers = useRef<string[]>([]);
   // Whether the viewer has had its first table (and the layout from dash.json).
   const first = useRef(true);
@@ -127,10 +138,9 @@ export function Explore({ tile }: TileProps) {
       void enqueue(async () => {
         // Before Perspective has loaded, the element is not one of its viewers yet (no delete).
         if (typeof el.delete === "function") await el.delete().catch(() => {});
-        const table = loaded.current;
         loaded.current = null;
         first.current = true;
-        await table?.delete().catch(() => {});
+        await prune();
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -148,20 +158,21 @@ export function Explore({ tile }: TileProps) {
       const worker = await perspectiveClient(bundle);
       const converted = toPerspective(rows);
       const table = await worker.table(converted.ipc.buffer as ArrayBuffer);
-      if (!live || viewer.current !== el) {
-        await table.delete().catch(() => {});
-        return;
+      tables.current.add(table);
+      try {
+        if (!live || viewer.current !== el) return;
+        // First the layout from dash.json (with the settings open, so it is plain that the rows can be rearranged).
+        numbers.current = converted.numbers;
+        const fromLayout = first.current;
+        const config = fromLayout ? start() : ((await el.save()) as Record<string, unknown>);
+        await el.load(table);
+        loaded.current = table;
+        await restore(el, config, fromLayout);
+        first.current = false;
+      } finally {
+        // The viewer shows the new table: no view is left on the old one.
+        await prune();
       }
-      // First the layout from dash.json (with the settings open, so it is plain that the rows can be rearranged).
-      numbers.current = converted.numbers;
-      const config = first.current ? start() : await el.save();
-      await el.load(table);
-      // The viewer shows the new table: no view is left on the old one.
-      const old = loaded.current;
-      loaded.current = table;
-      await old?.delete().catch(() => {});
-      await el.restore(config as never);
-      first.current = false;
     }).then(
       () => {
         if (live) {
@@ -189,10 +200,19 @@ export function Explore({ tile }: TileProps) {
     shown.current = layoutKey;
     enqueue(async () => {
       const el = viewer.current;
-      if (!el || first.current) return; // the first table takes the layout as it is then
+      if (!el || !loaded.current) return; // the first table takes the layout as it is then
+      // Until it is shown, new rows start from it too (a viewer that failed saves only its defaults).
+      first.current = true;
+      const config = start();
+      checkPlugin(el, config);
+      await el.resetError(); // after a layout it could not use, it would not take another
       await el.reset(true);
-      await el.restore(start() as never);
-    }).catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
+      await restore(el, config, true);
+      first.current = false;
+    }).then(
+      () => setError(null),
+      (e: unknown) => setError(e instanceof Error ? e : new Error(String(e))),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutKey]);
 
@@ -220,6 +240,26 @@ export function Explore({ tile }: TileProps) {
       <div className="devbi-explore-viewer" ref={host} hidden={!!problem} data-devbi-snapshot="" />
     </div>
   );
+}
+
+/** Perspective never finishes restoring a plugin it does not have, and the tile would wait for it. */
+function checkPlugin(el: HTMLPerspectiveViewerElement, config: Record<string, unknown>) {
+  const plugin = config.plugin;
+  if (typeof plugin !== "string") return;
+  const names = (el.getAllPlugins() as { name: string }[]).map((p) => p.name);
+  if (names.length && !names.some((n) => n.toLowerCase() === plugin.toLowerCase()))
+    throw new Error(`options.layout の plugin "${plugin}" はありません（${names.join("、")} のどれかにしてください）`);
+}
+
+/** restore, saying so when it is the layout from dash.json that Perspective could not use. */
+async function restore(el: HTMLPerspectiveViewerElement, config: Record<string, unknown>, fromLayout: boolean) {
+  if (!fromLayout) return el.restore(config as never);
+  checkPlugin(el, config);
+  try {
+    await el.restore(config as never);
+  } catch (e) {
+    throw new Error(`options.layout の並べ方を使えません（${e instanceof Error ? e.message : String(e)}）`);
+  }
 }
 
 /** The viewer's first config: the layout from dash.json, with the settings open, numbers without ".00", the theme. */
