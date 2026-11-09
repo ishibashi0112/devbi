@@ -34,14 +34,6 @@ for (const p of packages) {
     });
   }
 }
-const stars = [];
-for (const [repo, n, days] of [
-  ["example/grid", 42, 200],
-  ["example/cli", 7, 90],
-  ["example/docs", 0, 0],
-]) {
-  for (let k = 0; k < n; k++) stars.push({ date: day(new Date(end - Math.floor(rand() * rand() * days) * 86_400_000)), repo });
-}
 const repos = [
   {
     repo: "example/cli",
@@ -78,13 +70,6 @@ const repos = [
 const out = path.join(import.meta.dirname, "..", "data");
 await mkdir(out, { recursive: true });
 await writeFile(path.join(out, "downloads.csv"), toCsv(["date", "package", "repo", "downloads"], downloads));
-await writeFile(
-  path.join(out, "stars.csv"),
-  toCsv(
-    ["date", "repo"],
-    stars.sort((a, b) => a.date.localeCompare(b.date)),
-  ),
-);
 await writeFile(
   path.join(out, "repos.csv"),
   toCsv(["repo", "description", "language", "stars", "forks", "open_issues", "created", "pushed"], repos),

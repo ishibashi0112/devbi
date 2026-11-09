@@ -1,10 +1,11 @@
 // Fetch the numbers of the live demo into data/: each npm package's downloads per day (npm's downloads API), and its
-// GitHub repository's stars, forks and open issues, with the day of each star (GitHub's API).
+// GitHub repository's stars, forks and open issues as of today (GitHub's API). Not the day of each star: GitHub lists
+// stargazers only to a signed-in user, which GitHub Actions' token is not for other repositories.
 //
 //   node scripts/fetch-stats.mjs --npm-user ishibashi0112 [--repo owner/name …]
 //
 // The packages are the ones the npm user maintains; --repo adds a repository without one. GITHUB_TOKEN (optional, as
-// in GitHub Actions) raises GitHub's limit from 60 requests an hour. The GitHub users who starred are not kept.
+// in GitHub Actions) raises GitHub's limit from 60 requests an hour.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -47,14 +48,9 @@ async function json(url, res) {
 
 const get = async (url) => json(url, await request(url));
 
-async function github(p, accept = "application/vnd.github+json") {
+async function github(p) {
   const url = `https://api.github.com/${p}`;
-  if (token) {
-    const res = await request(url, { accept, authorization: `Bearer ${token}` });
-    // GitHub Actions' token reads only its own repository's stargazers (403): the others without it.
-    if (res.status !== 403) return json(url, res);
-  }
-  return json(url, await request(url, { accept }));
+  return json(url, await request(url, { accept: "application/vnd.github+json", ...(token && { authorization: `Bearer ${token}` }) }));
 }
 
 // Yesterday (UTC): npm's last full day.
@@ -82,7 +78,6 @@ for (const name of names) {
 }
 
 const repoRows = [];
-const stars = [];
 for (const repo of [...repos].sort()) {
   const r = await github(`repos/${repo}`);
   if (!r) {
@@ -99,28 +94,11 @@ for (const repo of [...repos].sort()) {
     created: r.created_at.slice(0, 10),
     pushed: r.pushed_at.slice(0, 10),
   });
-  try {
-    for (let page = 1; page <= 100; page++) {
-      const list = await github(`repos/${repo}/stargazers?per_page=100&page=${page}`, "application/vnd.github.star+json");
-      for (const s of list ?? []) stars.push({ date: s.starred_at.slice(0, 10), repo });
-      if (!list || list.length < 100) break;
-    }
-  } catch (e) {
-    // The demo goes out without this repository's star days (its count is in repos.csv); GitHub Actions shows the warning.
-    console.warn(`::warning::${repo} のスターの日付を読めませんでした（${e.message}）`);
-  }
   console.log(`${repo}: ${r.stargazers_count} stars`);
 }
 
 await mkdir(out, { recursive: true });
 await writeFile(path.join(out, "downloads.csv"), toCsv(["date", "package", "repo", "downloads"], downloads));
-await writeFile(
-  path.join(out, "stars.csv"),
-  toCsv(
-    ["date", "repo"],
-    stars.sort((a, b) => a.date.localeCompare(b.date)),
-  ),
-);
 await writeFile(
   path.join(out, "repos.csv"),
   toCsv(["repo", "description", "language", "stars", "forks", "open_issues", "created", "pushed"], repoRows),

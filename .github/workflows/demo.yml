@@ -1,6 +1,6 @@
 name: Demo
 
-# The live demo (examples/oss): the npm downloads and GitHub stars of the author's packages, fetched every morning and
+# The live demo (examples/oss): the npm downloads of the author's packages and their GitHub repositories' stars, fetched every morning and
 # put on GitHub Pages (https://ishibashi0112.github.io/devbi/). On a pull request it fetches, checks and builds, and
 # publishes nothing. Until GitHub Pages is turned on (Settings → Pages → Source: GitHub Actions), it publishes nothing.
 on:
