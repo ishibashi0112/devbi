@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../.devbi/metrics.schema.json
+# npm の 1 日ごとのダウンロード数。data/downloads.csv は scripts/fetch-stats.mjs が npm の API から書く（pnpm fetch）。
+label: npm のダウンロード
+model: |
+  SELECT * FROM read_csv('data/downloads.csv', header = true,
+    columns = {'date': 'DATE', 'package': 'VARCHAR', 'repo': 'VARCHAR', 'downloads': 'BIGINT'})
+time: { column: date, label: 日付 }
+dimensions:
+  package: { column: package, label: パッケージ }
+  repo: { column: repo, label: リポジトリ }
+measures:
+  downloads: { sql: SUM(downloads), label: ダウンロード, format: "#,##0" }
+  downloads_change: { of: downloads, compare: previous_period, as: change }
+  downloads_total: { of: downloads, running: all, label: ダウンロードの累計 }
+  per_day: { sql: SUM(downloads) / COUNT(DISTINCT date), label: 1 日あたり, format: "#,##0" }

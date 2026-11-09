@@ -19,3 +19,6 @@ examples/*/dashboards/local_*
 
 # e2e/editor.spec.ts の GUI エディタが書き込む作業用のコピー
 examples/*/e2e-work/
+
+# examples/oss の数字（scripts/fetch-stats.mjs か fixture.mjs が書く）
+examples/oss/data/

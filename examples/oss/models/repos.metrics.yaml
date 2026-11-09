@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../.devbi/metrics.schema.json
+# GitHub のリポジトリのいまの数字（取った日の時点）。data/repos.csv は scripts/fetch-stats.mjs が書く。
+label: GitHub のリポジトリ
+model: |
+  SELECT * FROM read_csv('data/repos.csv', header = true,
+    columns = {'repo': 'VARCHAR', 'description': 'VARCHAR', 'language': 'VARCHAR', 'stars': 'BIGINT', 'forks': 'BIGINT',
+               'open_issues': 'BIGINT', 'created': 'DATE', 'pushed': 'DATE'})
+dimensions:
+  repo: { column: repo, label: リポジトリ }
+  description: { column: description, label: 説明 }
+  language: { column: language, label: 言語 }
+measures:
+  stars: { sql: SUM(stars), label: スター, format: "#,##0" }
+  forks: { sql: SUM(forks), label: フォーク, format: "#,##0" }
+  open_issues: { sql: SUM(open_issues), label: 未解決の issue と PR, format: "#,##0" }
+  repos: { sql: COUNT(*), label: リポジトリ, format: "#,##0" }
