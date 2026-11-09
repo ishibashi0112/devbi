@@ -159,10 +159,11 @@ export function setQueryMode(
 // Names a first query writes quoted (Malloy's and DuckDB's words, as far as a column is likely to be named one).
 const RESERVED = new Set(
   (
-    "all and any array as asc between boolean by case cast count date day days default desc distinct else end exists extend false for from " +
-    "full group having hour hours in inner is join last left like limit minute minutes month months not now null number on or order " +
-    "outer quarter quarters right run second seconds select source string sum table then timestamp to true union user week weeks when " +
-    "where with year years"
+    "accept aggregate all and any array as asc avg between boolean by calculate case cast check column compose count date day days " +
+    "default desc dimension distinct else end except exclude exists extend false filter for from full group having hour hours import " +
+    "in index inner internal is join last left like limit max measure min minute minutes month months nest not now null number " +
+    "offset on only or order outer pick public quarter quarters query rename right run second seconds select source sql string sum " +
+    "table then timestamp to true union user using view week weeks when where window with year years"
   ).split(" "),
 );
 

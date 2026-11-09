@@ -50,7 +50,10 @@ function tokenize(lang: CustomLang, text: string): { tokens: Token[]; end: numbe
       i++;
       continue;
     }
-    if (lang === "malloy" && text.startsWith('"""', i)) {
+    const dollar = lang === "sql" && ch === "$" ? /^\$(?:[A-Za-z_]\w*)?\$/.exec(text.slice(i, i + 64)) : null;
+    if (dollar) {
+      i = skipTo(dollar[0], i + dollar[0].length);
+    } else if (lang === "malloy" && text.startsWith('"""', i)) {
       i = skipTo('"""', i + 3);
     } else if (ch === "'" || (lang === "malloy" && ch === '"')) {
       i++;
@@ -98,41 +101,62 @@ export function customWords(lang: CustomLang, text: string): string[] {
 const isSign = (t: Token | undefined, sign: string) => t?.kind === "sign" && t.text === sign;
 const isWord = (t: Token | undefined, words: ReadonlySet<string>) => t?.kind === "word" && words.has(t.text.toLowerCase());
 
-const SQL_FROM = new Set(["from", "join", "pivot", "unpivot"]);
-const SQL_QUERY = new Set(["select", "from", "with", "values", "table", "pivot", "unpivot"]);
-const AS = new Set(["as"]);
+// Words after which SQL names a table, and the words that start a query inside parentheses.
+const SQL_FROM = new Set(["from", "join", "pivot", "unpivot", "pivot_wider", "pivot_longer", "table", "summarize", "describe"]);
+const SQL_QUERY = new Set([...SQL_FROM, "select", "with", "values"]);
+// Words that end a FROM clause (its list of tables, and the joins' conditions).
+const SQL_FROM_END = new Set([
+  "where",
+  "group",
+  "having",
+  "qualify",
+  "window",
+  "order",
+  "limit",
+  "offset",
+  "union",
+  "except",
+  "intersect",
+  "select",
+]);
+const SQL_LATERAL = new Set(["lateral", "only"]);
 
 /**
- * The tables SQL reads: the names after FROM and JOIN (and after a comma in a FROM list), not those of table functions
- * (`read_csv(…)`), qualified names, or FROM inside a function's parentheses (`EXTRACT(year FROM d)`).
+ * The tables SQL reads: the names after FROM and JOIN, and after each comma of a FROM clause (also inside
+ * parentheses: `JOIN (a JOIN b USING (x))`). Not table functions (`read_csv(…)`), qualified names, or FROM inside a
+ * function's parentheses (`EXTRACT(year FROM d)`). A name too many does little harm; one missed breaks the query.
  */
 function sqlTables(tokens: readonly Token[]): string[] {
   const out: string[] = [];
-  const query: boolean[] = [true]; // for each parenthesis, whether a query is inside (where FROM names tables)
+  // For each parenthesis: whether a query is inside (where FROM names tables), and whether in its FROM clause.
+  const levels: { query: boolean; from: boolean }[] = [{ query: true, from: false }];
   let expect = false;
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
+    const level = levels.at(-1)!;
     if (isSign(t, "(")) {
       const next = tokens[i + 1];
-      query.push(isSign(next, "(") || isWord(next, SQL_QUERY));
-      expect = false;
+      if (isSign(next, "(") || isWord(next, SQL_QUERY)) {
+        levels.push({ query: true, from: false });
+        expect = false;
+      } else {
+        // FROM (a JOIN b): tables; f(x, y): not.
+        levels.push({ query: expect, from: expect });
+      }
     } else if (isSign(t, ")")) {
-      if (query.length > 1) query.pop();
+      if (levels.length > 1) levels.pop();
       expect = false;
     } else if (isWord(t, SQL_FROM)) {
-      expect = query.at(-1)!;
+      if (level.query) level.from = expect = true;
+    } else if (isWord(t, SQL_FROM_END)) {
+      level.from = expect = false;
+    } else if (isSign(t, ",")) {
+      expect = level.from;
     } else if (expect) {
+      if (isWord(t, SQL_LATERAL)) continue;
       expect = false;
       if (t.kind === "sign" || isSign(tokens[i + 1], "(") || isSign(tokens[i + 1], ".")) continue;
       out.push(t.text);
-      // FROM a [AS] [x], b
-      let j = i + 1;
-      if (isWord(tokens[j], AS)) j++;
-      if (tokens[j] && tokens[j]!.kind !== "sign") j++;
-      if (isSign(tokens[j], ",")) {
-        expect = true;
-        i = j;
-      }
     }
   }
   return out;
@@ -141,25 +165,30 @@ function sqlTables(tokens: readonly Token[]): string[] {
 const MALLOY_EXTEND = new Set(["extend", "include"]);
 const MALLOY_JOIN = new Set(["join_one", "join_many", "join_cross"]);
 const MALLOY_DEFINE = new Set([...MALLOY_JOIN, "source"]);
+const MALLOY_IS = new Set(["is"]);
+const MALLOY_ON = new Set(["on", "with"]);
 
 /**
- * The sources Malloy reads: a name before `->`, `extend` or `include`, or the source of `join_one: x` or
- * `join_one: / source: y is x`.
+ * The sources Malloy reads: a name before `->`, `extend` or `include`; in a `source:` or `join_…:` statement, a name
+ * after `is`; in a `join_…:` statement, a name that starts a join (`join_one: x on …, y with …`).
  */
 function malloySources(tokens: readonly Token[]): string[] {
   const out: string[] = [];
+  const statements: (string | undefined)[] = [undefined]; // the statement (`source`, `join_one` …) at each depth of { }
   tokens.forEach((t, i) => {
+    if (isSign(t, "{")) return void statements.push(undefined);
+    if (isSign(t, "}")) return void (statements.length > 1 && statements.pop());
     if (t.kind === "sign") return;
+    const prev = tokens[i - 1];
     const next = tokens[i + 1];
+    if (t.kind === "word" && isSign(next, ":")) return void (statements[statements.length - 1] = t.text.toLowerCase());
+    const statement = statements.at(-1);
+    const join = statement !== undefined && MALLOY_JOIN.has(statement);
     if (
       isSign(next, "->") ||
       isWord(next, MALLOY_EXTEND) ||
-      (isSign(tokens[i - 1], ":") && isWord(tokens[i - 2], MALLOY_JOIN)) ||
-      (tokens[i - 1]?.kind === "word" &&
-        tokens[i - 1]!.text === "is" &&
-        tokens[i - 2]?.kind !== "sign" &&
-        isSign(tokens[i - 3], ":") &&
-        isWord(tokens[i - 4], MALLOY_DEFINE))
+      (statement !== undefined && MALLOY_DEFINE.has(statement) && isWord(prev, MALLOY_IS)) ||
+      (join && (isSign(prev, ":") || isSign(prev, ",") || isWord(next, MALLOY_ON)))
     )
       out.push(t.text);
   });
@@ -268,8 +297,10 @@ export async function compileMalloy(text: string, sources: readonly MalloySource
   const runtime = new malloy.SingleConnectionRuntime({ connection: new Columns() });
   // On one line, so that a problem's line is the line of the text.
   const head = sources.map((s) => `source: \`${s.name}\` is duckdb.table('${s.table.replaceAll("'", "\\'")}')`).join(" ");
-  // `run:` when the text (after its comments) does not start with a statement.
-  const body = /^(?:\s|\/\/[^\n]*|--[^\n]*|\/\*[\s\S]*?\*\/)*(?:[A-Za-z_]\w*\s*:|import\b|#)/.test(text) ? text : `run: ${text}`;
+  // `run:` when the text (after its comments) does not start with a statement (`run:`, `source:`, `import`, `# tag`).
+  const [first, second] = tokenize("malloy", text).tokens;
+  const statement = isSign(first, "#") || (first?.kind === "word" && (isSign(second, ":") || first.text === "import"));
+  const body = statement ? text : `run: ${text}`;
   let prepared: Awaited<ReturnType<ReturnType<typeof runtime.loadQuery>["getPreparedResult"]>>;
   try {
     prepared = await runtime.loadQuery(`${head}\n${body}`).getPreparedResult();
@@ -370,6 +401,9 @@ export function customFields(
     names.push(name);
     fields.push({ name, ...field });
   };
+  // SQL's names are the same in any case (DuckDB); Malloy's are not.
+  const sameName = (a: string | undefined, b: string) =>
+    a !== undefined && (lang === "sql" ? a.toLowerCase() === b.toLowerCase() : a === b);
   for (const c of columns) {
     const measure = lang === "malloy" ? c.kind === "measure" : c.type === "number";
     const time = c.type === "date" || c.type === "timestamp";
@@ -391,7 +425,7 @@ export function customFields(
     // In SQL, a number can be a dimension (a year): by its name.
     const dim =
       (lang === "sql" || !measure) && !c.source?.truncation && view
-        ? Object.values(view.dimensions).find((d) => d.name === src || plainColumn(d.expr) === src)
+        ? Object.values(view.dimensions).find((d) => sameName(d.name, src) || sameName(plainColumn(d.expr), src))
         : undefined;
     if (dim && free(dim.name, c.name)) {
       add(dim.name, { label: c.name === src ? dim.label : c.name, kind: "dimension", ...(dim.format ? { format: dim.format } : {}) });

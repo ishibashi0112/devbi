@@ -60,6 +60,19 @@ describe("customViews", () => {
     expect(sql("SELECT EXTRACT(month FROM order) FROM main.customers LEFT JOIN 目標 USING (月)")).toEqual(["目標"]);
     expect(sql("WITH t AS (SELECT * FROM sales) SELECT * FROM t WHERE x IN (SELECT y FROM customers)")).toEqual(["sales", "customers"]);
     expect(sql("FROM sales SELECT 1")).toEqual(["sales"]);
+    // Every item of a FROM clause, after subqueries, table functions, joins and parentheses.
+    expect(sql("SELECT * FROM (SELECT 1 AS z) a, generate_series(1, 3) t(z), sales AS s(a, b), LATERAL (SELECT 1) q, customers")).toEqual([
+      "sales",
+      "customers",
+    ]);
+    expect(sql("FROM sales s LEFT JOIN customers c ON s.x = c.x, 目標 t")).toEqual(["sales", "customers", "目標"]);
+    expect(sql("FROM month m JOIN (sales s JOIN 目標 t USING (y)) ON m.x = s.x TABLESAMPLE 50%, customers")).toEqual([
+      "month",
+      "sales",
+      "目標",
+      "customers",
+    ]);
+    expect(sql("SELECT (SELECT max(x) FROM 目標), y FROM (sales) UNION ALL TABLE customers")).toEqual(["目標", "sales", "customers"]);
     const malloy = (text: string) => customViews({ malloy: text }, names);
     expect(malloy("run: sales -> { group_by: month; aggregate: customers is count(); order_by: month }")).toEqual(["sales"]);
     expect(
@@ -68,6 +81,15 @@ describe("customViews", () => {
       ),
     ).toEqual(["sales", "目標", "customers"]);
     expect(malloy("source: s is `sales`\nrun: s -> { group_by: x }")).toEqual(["sales"]);
+    expect(malloy("run: sales extend { join_one: customers on x = customers.x, 目標 on y = 目標.y } -> { group_by: x }")).toEqual([
+      "sales",
+      "customers",
+      "目標",
+    ]);
+    expect(malloy("source:\n  # tag\n  s IS sales extend { dimension: a is b },\n  c is customers\nrun: s -> { group_by: a }")).toEqual([
+      "sales",
+      "customers",
+    ]);
   });
 });
 
@@ -81,6 +103,9 @@ describe("withSources", () => {
     // What follows the last statement goes: the SQL is put in DESCRIBE SELECT * FROM (…).
     expect(withSources("SELECT '--;' AS x FROM sales; -- by region\n/* end */ ;", src)).toBe(
       `WITH "sales" AS (\n  SELECT 1 AS a\n)\nSELECT '--;' AS x FROM sales`,
+    );
+    expect(withSources("SELECT $$a--b$$ AS x FROM sales;", src)).toBe(
+      `WITH "sales" AS (\n  SELECT 1 AS a\n)\nSELECT $$a--b$$ AS x FROM sales`,
     );
   });
 });
@@ -105,17 +130,21 @@ describe("compileSource with a dimension named like a column", () => {
     const named = parseMetricsYaml(
       `
 model: SELECT * FROM sales
+time: order_date
 dimensions:
-  region: { sql: "region || '地方'" }
+  Region: { sql: "region || '地方'" }
   customer_name: { column: region }
+  Order_Date: { sql: "'x'" }
 measures:
   n: { sql: COUNT(*) }
 `,
       "named",
     );
     const columns = Object.keys(await describeSql(named.model));
-    const sql = compileSource(named, { columns, filters: [{ field: "region", in: ["東地方"] }] });
-    expect(await rows(`SELECT DISTINCT region, customer_name FROM (${sql})`)).toEqual([{ region: "東地方", customer_name: "東" }]);
+    const sql = compileSource(named, { columns, filters: [{ field: "Region", in: ["東地方"] }] });
+    // Under the dimension's own name; the time column stays.
+    expect(Object.keys(await describeSql(sql))).toEqual(["order_date", "order_id", "amount", "Region", "customer_name"]);
+    expect(await rows(`SELECT DISTINCT region, customer_name FROM (${sql})`)).toEqual([{ Region: "東地方", customer_name: "東" }]);
   });
 });
 
@@ -163,6 +192,15 @@ describe("Malloy", () => {
     ]);
   });
 
+  it("adds run: only when the text, after its comments, does not start with a statement", async () => {
+    for (const text of [
+      "// TODO: by month\nsales -> { group_by: region; aggregate: n is count() }",
+      "/* 地域別 */ sales -> {\n  /* 軸 */ group_by: region\n  aggregate: n is count()\n}",
+      "-- run: sales -> { group_by: x }\nrun: sales -> { group_by: region; aggregate: n is count() }",
+    ])
+      expect((await run(text)).result).toHaveLength(3);
+  });
+
   it("a week is not the time (Malloy's weeks start on Sunday); a click filters by the view's dimensions and time only", async () => {
     const r = await run(
       "// 週ごと\nrun: sales -> { group_by: 週 is order_date.week, m is order_date.month, region, order_id; aggregate: n is count() }",
@@ -198,6 +236,7 @@ describe("SQL", () => {
     ]);
     const types = await describeSql(sql);
     const columns = sqlColumns(Object.entries(types).map(([name, type]) => ({ name, type })));
+    expect(customFields("sql", sqlColumns([{ name: "REGION", type: "VARCHAR" }]), view).fields.map((f) => f.name)).toEqual(["region"]);
     expect(customFields("sql", columns, view).fields.map((f) => [f.name, f.label, f.kind, f.format])).toEqual([
       ["customer", "顧客", "dimension", undefined],
       ["地方", "地方", "dimension", undefined], // a column renamed in SQL is not known to be the dimension

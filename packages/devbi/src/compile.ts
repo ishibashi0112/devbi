@@ -271,8 +271,8 @@ export function compileRows(view: MetricsView, query: Query, options: CompileOpt
 /**
  * The rows a Malloy or SQL query (`query.malloy`, `query.sql`) reads from a metrics view: every column of its model
  * (`columns`, as DuckDB describes it), then each dimension that is an expression, under its own name (a dimension that
- * is a column is that column; one named like another column replaces it), filtered by `filters` (those on fields the
- * view does not have are left out).
+ * is a column is that column; one named like another column takes its place), filtered by `filters` (those on fields
+ * the view does not have are left out).
  */
 export function compileSource(view: MetricsView, options: CompileOptions & { columns: readonly string[] }): string {
   const time = view.time;
@@ -286,16 +286,21 @@ export function compileSource(view: MetricsView, options: CompileOptions & { col
     return predicate(f, expr, isTime);
   });
   const columns = new Map(options.columns.map((c) => [c.toLowerCase(), c]));
-  const replace: string[] = [];
+  const timeColumn = time?.column.toLowerCase();
+  const exclude: string[] = [];
   const extra: string[] = [];
   for (const d of Object.values(view.dimensions)) {
     const col = plainColumn(d.expr);
     const same = columns.get(d.name.toLowerCase());
     if (col !== undefined && col.toLowerCase() === d.name.toLowerCase()) continue;
-    if (same !== undefined) replace.push(`(${d.expr}) AS ${ident(same)}`);
-    else if (col === undefined) extra.push(`,\n  ${d.expr} AS ${ident(d.name)}`);
+    // Named like a column of the model: the dimension's values under its name, in place of the column's (not the time's).
+    if (same !== undefined) {
+      if (same.toLowerCase() === timeColumn) continue;
+      exclude.push(ident(same));
+    } else if (col !== undefined) continue;
+    extra.push(`,\n  ${d.expr} AS ${ident(d.name)}`);
   }
-  const star = replace.length ? `* REPLACE (${replace.join(", ")})` : "*";
+  const star = exclude.length ? `* EXCLUDE (${exclude.join(", ")})` : "*";
   const model = options.model ?? view.model;
   return `WITH ${ident("__model")} AS (\n${indent(model, "  ")}\n)\nSELECT\n  ${star}${extra.join("")}\nFROM ${ident("__model")}${where(preds, "")}`;
 }
