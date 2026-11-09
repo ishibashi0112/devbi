@@ -18,6 +18,7 @@ import {
   toggle,
   updateTile,
   withKey,
+  type FilterRow,
   TILE_KEYS,
 } from "../src/edit.js";
 import type { RawDashboard, RawTile } from "../src/layout.js";
