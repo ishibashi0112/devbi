@@ -268,7 +268,7 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 | 101 | 埋め込みの見本（上の 35）で「印刷・PDF」を押す | 紺色のヘッダーや左のメニューは入らず、ダッシュボードだけが印刷のプレビューに出る |
 | 102 | ブラウザの幅を狭くして（タイルが 1 列になるまで）「印刷・PDF」 | 1 列のままで、どのタイルもページの境目で切れない（高いタイルは 1 ページに 1 つ） |
 
-### ファイルを確かめる（devbi-check・devbi-inspect）
+### ファイルを確かめる（devbi-check・devbi-inspect）と AI 向けの手順
 
 ブラウザを開かずに、ターミナルで確かめます。`pnpm build` のあと、`examples/sales` のフォルダで動かします（`cd examples/sales`）。
 
@@ -279,6 +279,7 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 | 105 | 104 を戻し、`dashboards/sales.dash.json` の `"measures": ["orders"]` を `["orderz"]` にして `pnpm check` | `✗ dashboards/sales.dash.json: タイル kpi-orders（受注件数）: 指標 orderz は sales にありません（sales の指標: revenue・orders・…）` |
 | 106 | `pnpm inspect data/sales.xlsx` | `data/sales.xlsx（シート「明細」）: 6,044 行、9 列` と、列ごとの型・範囲・種類の数。`地域` には「多い値: 関東 (2,322)、近畿 (1,325)、…」。2 行目に「シート: 明細・メモ」 |
 | 107 | `pnpm inspect sales_daily` | 指標ファイル `sales_daily` の `model` の結果（受注日・地域・商品分類・金額・数量・明細数の 6 列、4,014 行）。サンプルの SQLite から読む |
+| 108 | `examples/sales` を Claude Code（か、AGENTS.md を読むほかの AI）で開き、「data/sales.xlsx から、商品分類ごとの売上と数量を見るダッシュボードを作って」と頼む | AI が `pnpm inspect` でデータを見て、作る指標とタイルを先に示す（売上の列や件数の数え方を聞いてくることもある）。ファイルを書いたあと `pnpm check` を流し、最後に作ったファイル、check の結果、開く URL（`http://localhost:5173/#/…`）を伝える。開くとダッシュボードが出る |
 
 試したあとは `git checkout .` で元に戻せます。
 

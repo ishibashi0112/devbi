@@ -32,6 +32,8 @@ describe("create-devbi", () => {
     expect(created).toEqual({ dir, name: "my-reports", git: false });
     expect(files(dir)).toEqual([
       ".gitignore",
+      "AGENTS.md",
+      "CLAUDE.md",
       "README.md",
       "dashboards/sales.dash.json",
       "dashboards/sales/TopCustomers.tsx",
@@ -55,13 +57,30 @@ describe("create-devbi", () => {
     expect(readme).toMatch(/^# my-reports\n/);
     expect(readme).toContain("pnpm install\npnpm dev ");
     expect(readme).not.toContain("{{");
+    // The procedure for AI, with the package manager's commands; Claude Code reads it through CLAUDE.md.
+    const agents = readFileSync(path.join(dir, "AGENTS.md"), "utf8");
+    expect(agents).toContain("`pnpm check`");
+    expect(agents).not.toContain("{{");
+    expect(readFileSync(path.join(dir, "CLAUDE.md"), "utf8")).toContain("\n@AGENTS.md\n");
     expect(readFileSync(path.join(dir, "index.html"), "utf8")).toContain("<title>my-reports</title>");
   });
 
   it("copies the sample as examples/sales has it, and the dashboard loads", async () => {
-    for (const f of ["dashboards/sales.dash.json", "dashboards/sales/TopCustomers.tsx", "data/sales.xlsx", "models/sales.metrics.yaml", "src/main.tsx", "src/app.css"]) {
+    for (const f of [
+      "dashboards/sales.dash.json",
+      "dashboards/sales/TopCustomers.tsx",
+      "data/sales.xlsx",
+      "models/sales.metrics.yaml",
+      "src/main.tsx",
+      "src/app.css",
+      "CLAUDE.md",
+    ]) {
       expect(readFileSync(path.join(templateDir, f)), f).toEqual(readFileSync(path.join(example, f)));
     }
+    // The sample's AGENTS.md is the template's with pnpm (edit the template and copy it over).
+    expect(readFileSync(path.join(templateDir, "AGENTS.md"), "utf8").replaceAll("{{run}}", "pnpm")).toBe(
+      readFileSync(path.join(example, "AGENTS.md"), "utf8"),
+    );
     const dir = path.join(tmp(), "p");
     createProject(dir, { git: false });
     // As the dev server and the build read it: every file checked, and the files it points at there.
@@ -105,7 +124,7 @@ describe("create-devbi", () => {
     expect(packageManagerOf("yarn/1.22.22 npm/? node/v22")).toBe("yarn");
     expect(packageManagerOf(undefined)).toBe("npm");
     expect(commandsOf("npm")).toEqual({ install: "npm install", run: "npm run" });
-    expect(commandsOf("yarn")).toEqual({ install: "yarn", run: "yarn" });
+    expect(commandsOf("yarn")).toEqual({ install: "yarn", run: "yarn run" });
     expect(commandsOf("bun")).toEqual({ install: "bun install", run: "bun run" });
   });
 

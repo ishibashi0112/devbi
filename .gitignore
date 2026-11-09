@@ -7,6 +7,8 @@ dist/
 test-results/
 playwright-report/
 .DS_Store
+# The build copies docs/reference.md into the devbi package (edit docs/reference.md)
+packages/devbi/docs/
 # 本物の接続先（パスワードを含む）を書く .env.local は git に入れない
 .env*.local
 

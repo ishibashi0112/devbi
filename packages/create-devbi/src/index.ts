@@ -40,7 +40,8 @@ export function isYarnBerry(userAgent: string | undefined): boolean {
 
 /** The commands to install and to run a script, as the README and the last message show them. */
 export function commandsOf(pm: PackageManager): { install: string; run: string } {
-  return { install: pm === "yarn" ? "yarn" : `${pm} install`, run: pm === "npm" || pm === "bun" ? `${pm} run` : pm };
+  // `yarn check` is Yarn 1's own command, not the script: `yarn run` for Yarn.
+  return { install: pm === "yarn" ? "yarn" : `${pm} install`, run: pm === "pnpm" ? pm : `${pm} run` };
 }
 
 /** A package name (package.json "name") from the folder's name: `My Reports` → `my-reports`. */
@@ -91,6 +92,7 @@ export function createProject(dir: string, options: CreateOptions = {}): Created
     writeFileSync(p, readFileSync(p, "utf8").replace(/\{\{(\w+)\}\}/g, (m, k: string) => values[k] ?? m));
   };
   fill("README.md", { name, install, run });
+  fill("AGENTS.md", { run });
   fill("index.html", { name: escapeHtml(name) });
   const range = `^${version}`;
   const pkg = {

@@ -15,6 +15,8 @@ const usage = (message?: string): never => {
 let dir = ".";
 let json = false;
 for (let i = 0; i < args.length; i++) {
+  // `npm run check -- --json` may pass the "--" on (pnpm does): not an argument.
+  if (args[i] === "--") continue;
   if (args[i] === "--dir") dir = args[++i] ?? usage("--dir のあとにフォルダを書いてください");
   else if (args[i] === "--json") json = true;
   else usage();

@@ -22,6 +22,8 @@ let values: number | undefined;
 let target: string | undefined;
 for (let i = 0; i < args.length; i++) {
   const a = args[i]!;
+  // `npm run inspect -- <file> --sheet …` may pass the "--" on (pnpm does): not an argument.
+  if (a === "--") continue;
   if (a === "--dir") dir = args[++i] ?? usage("--dir のあとにフォルダを書いてください");
   else if (a === "--sheet") sheet = args[++i] ?? usage("--sheet のあとにシート名を書いてください");
   else if (a === "--values") {

@@ -29,4 +29,8 @@ data/sales.xlsx                # データ（架空の受注明細）。CSV・Pa
 - `{{run}} dev` で開いたページの「編集」で、タイルを足して指標と軸を選ぶ。保存すると dash.json に書かれる
 - 組み込みのタイルで足りない表示は、エディタの「コードにする」で .tsx に書き出し、React で描く
 
+## AI に頼む
+
+`AGENTS.md` に、AI（Claude Code、Codex、Cursor など）がダッシュボードを作るときの手順があります。「data/ の Excel から〇〇のダッシュボードを作って」と頼むと、データを `{{run}} inspect` で調べ、方針を示してから書き、`{{run}} check` で確かめます。データの意味や社内の言葉など、このプロジェクトのことを `AGENTS.md` に書き足すと、AI がそれに沿います。
+
 ファイルの書き方と API は [リファレンス](https://github.com/ishibashi0112/devbi/blob/main/docs/reference.md)。

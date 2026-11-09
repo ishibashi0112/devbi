@@ -11,6 +11,7 @@ DevBI のファイル形式と API の一覧です。v0 なので、1.0 まで�
 - [自作タイル（JSX）](#自作タイルjsx)
 - [エディタでの補完と型（pnpm gen）](#エディタでの補完と型pnpm-gen)
 - [ファイルを確かめる（devbi-check）](#ファイルを確かめるdevbi-check)
+- [AI に作らせる（AGENTS.md）](#ai-に作らせるagentsmd)
 - [書式](#書式)
 - [@devbi/vite](#devbivite)
 - [GUI エディタ（@devbi/editor）](#gui-エディタdevbieditor)
@@ -35,6 +36,7 @@ npm run dev                            # http://localhost:5173 。見出しの�
 `my-reports/` に、サンプルの売上ダッシュボード（架空の受注明細の Excel、自作タイル 1 つ）と、Vite・React・GUI エディタの設定が入ったプロジェクトができます。中身はこのリポジトリの `examples/sales` の売上ダッシュボードと同じです。
 
 - フォルダは、ないか空のものにします（`.git` だけはあってよい）。名前を書かなければ聞かれます（ターミナルでないときは `my-reports`）
+- AI 向けの作業手順 `AGENTS.md` と、Claude Code がそれを読むための `CLAUDE.md` も置きます（[AI に作らせる](#ai-に作らせるagentsmd)）
 - `git init` もします。git のリポジトリの中（モノレポなど）ではしません。`--no-git` でしない（`npm create` では `npm create devbi@latest my-reports -- --no-git` のように `--` のあとに）
 - Yarn 2 以降では、`node_modules` を作る `.yarnrc.yml`（`nodeLinker: node-modules`）も置きます（Plug'n'Play のままだと、`@devbi/vite` が GUI エディタを見つけられないため）
 - package.json の名前はフォルダ名から作ります（英数字以外は `-`。残らなければ `devbi-reports`）
@@ -461,6 +463,19 @@ data/sales.xlsx（シート「明細」）: 6,044 行、9 列
 | `--json` | 結果を JSON で出す |
 
 読めないときは終了コード 1 です。
+
+## AI に作らせる（AGENTS.md）
+
+`create-devbi` で作ったプロジェクトと `examples/sales` には、AI がダッシュボードを作るときの作業手順 `AGENTS.md` があります。Codex・Cursor など多くの AI が読み、Claude Code は `CLAUDE.md`（中身は `@AGENTS.md` の読み込み）から読みます。AI に「data/ の Excel から〇〇のダッシュボードを作って」と頼むと、この手順で進みます。
+
+1. 調べる: `inspect` でデータの列と値を見て、今の `models/`・`dashboards/` を読み、`check` で今の状態を知る
+2. 方針を伝える: 指標ファイル（読むデータ、日付の列、軸、指標）とタイルの並びを先に示す。データから決められないこと（どの列が売上か、件数は何を数えるか、年度の始まりなど）は聞く
+3. 書く: 書き方の決まり（`read_` の関数で読む、`time` は日付に、前年比は `compare` で、12 列のグリッドの並べ方の目安、自作タイルは最後の手段、など）に従う
+4. 確かめる: `check` のエラーがなくなるまで直し、作ったファイル・`check` の結果・`dev` で見てほしいところを伝える
+
+- 手順の中のファイルの書き方は、`node_modules/devbi/docs/reference.md`（このリファレンスと同じもの。`devbi` のパッケージに入っていて、入れた版に合う）を見るように書いてあります
+- プロジェクトに合わせて書き足してかまいません（データの意味、社内の言葉、ダッシュボードを見る人など）。`create-devbi` の版を上げても `AGENTS.md` は書き換わりません
+- コマンドは作ったときのパッケージマネージャーに合わせてあります（`npm run check`、`pnpm check` など。Yarn は `yarn run check`。Yarn 1 の `yarn check` は Yarn 自身のコマンドのため）。`check` と `inspect` の引数は `--` のあとに書きます（`npm run inspect -- data/x.xlsx --sheet 明細`）
 
 ## 書式
 
