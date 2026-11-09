@@ -12,8 +12,15 @@ type Viewer = HTMLElement & {
   restore(c: object): Promise<void>;
 };
 const viewer = (page: Page) => page.locator("perspective-viewer");
-/** The viewer's total row (the first of a grouped view). */
-const totals = (page: Page) => viewer(page).evaluate(async (el) => (await (await (el as Viewer).getView()).to_json({ start_row: 0, end_row: 1 }))[0]);
+/** The viewer's total row (the first of a grouped view); none while it is loading new rows ("No table set"). */
+const totals = (page: Page) =>
+  viewer(page).evaluate(async (el) => {
+    try {
+      return (await (await (el as Viewer).getView()).to_json({ start_row: 0, end_row: 1 }))[0];
+    } catch {
+      return undefined;
+    }
+  });
 const loaded = (page: Page) => viewer(page).evaluate(async (el) => (await (el as Viewer).getTable()).size());
 /** ¥18,599,290 → 18599290 */
 const yen = (text: string) => Number(text.replace(/[^\d]/g, ""));
@@ -54,6 +61,7 @@ test("clicking a region filters the explore tile, which keeps how the viewer was
   await expect(page.locator(".devbi-filters")).toContainText("地域: 関東");
   const kanto = (await regions(page)).get("関東")!;
   await expect.poll(async () => (await totals(page))?.["金額"]).toBe(kanto);
+  await expect(page.locator('.devbi-explore[aria-busy="false"]')).toHaveCount(1);
   expect(await loaded(page)).toBeLessThan(all);
   expect(await viewer(page).evaluate(async (el) => (await (el as Viewer).save()).group_by)).toEqual(["商品"]);
 });
