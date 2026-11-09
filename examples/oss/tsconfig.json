@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client", "@devbi/vite/client"]
+  },
+  "include": ["src", ".devbi/*.d.ts", "vite.config.ts"]
+}

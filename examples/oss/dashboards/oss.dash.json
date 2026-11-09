@@ -1,0 +1,106 @@
+{
+  "$schema": "../.devbi/dash.schema.json",
+  "title": "OSS の npm と GitHub",
+  "description": "ishibashi0112 のパッケージのダウンロード数と、GitHub のリポジトリ（毎朝更新）",
+  "metrics": "downloads",
+  "tiles": [
+    {
+      "id": "period",
+      "x": 0, "y": 0, "w": 12, "h": 1,
+      "type": "date-range",
+      "options": { "default": "last_30_days" }
+    },
+    {
+      "id": "kpi-downloads",
+      "x": 0, "y": 1, "w": 4, "h": 2,
+      "type": "kpi",
+      "title": "ダウンロード",
+      "query": { "measures": ["downloads", "downloads_change", "per_day"] }
+    },
+    {
+      "id": "kpi-total",
+      "x": 4, "y": 1, "w": 4, "h": 2,
+      "type": "kpi",
+      "title": "ダウンロードの累計（全期間）",
+      "query": { "measures": ["downloads_total"], "period": false }
+    },
+    {
+      "id": "kpi-repos",
+      "x": 8, "y": 1, "w": 4, "h": 2,
+      "type": "kpi",
+      "title": "いまのスター",
+      "query": { "metrics": "repos", "measures": ["stars", "forks", "open_issues"] }
+    },
+    {
+      "id": "daily",
+      "x": 0, "y": 3, "w": 8, "h": 4,
+      "type": "line",
+      "title": "パッケージ別のダウンロード（日ごと）",
+      "query": { "measures": ["downloads"], "dimensions": ["package"], "time": "day" }
+    },
+    {
+      "id": "packages",
+      "x": 8, "y": 3, "w": 4, "h": 4,
+      "type": "barlist",
+      "title": "パッケージ別",
+      "query": { "measures": ["downloads"], "dimensions": ["package"], "sort": ["-downloads"] }
+    },
+    {
+      "id": "weekday",
+      "x": 0, "y": 7, "w": 4, "h": 4,
+      "type": "bar",
+      "title": "曜日ごとの 1 日あたり（SQL）",
+      "query": {
+        "sql": "SELECT ['月', '火', '水', '木', '金', '土', '日'][isodow(date)] AS 曜日, ROUND(AVG(n)) AS per_day\nFROM (SELECT date, SUM(downloads) AS n FROM downloads GROUP BY date)\nGROUP BY isodow(date), 曜日\nORDER BY isodow(date)"
+      }
+    },
+    {
+      "id": "by-repo",
+      "x": 4, "y": 7, "w": 4, "h": 4,
+      "type": "table",
+      "title": "リポジトリ別（Malloy）",
+      "query": {
+        "malloy": "run: downloads -> {\n  where: repo != null and repo != ''\n  group_by: repo\n  aggregate:\n    downloads is downloads.sum()\n    パッケージ is count(package)\n  order_by: downloads desc\n}"
+      }
+    },
+    {
+      "id": "growth",
+      "x": 8, "y": 7, "w": 4, "h": 4,
+      "type": "area",
+      "title": "パッケージ別の累計（全期間）",
+      "query": {
+        "measures": ["downloads_total"],
+        "dimensions": ["package"],
+        "time": "day",
+        "period": false
+      }
+    },
+    {
+      "id": "repos",
+      "x": 0, "y": 11, "w": 12, "h": 3,
+      "type": "table",
+      "title": "リポジトリ（いまの数字）",
+      "query": {
+        "metrics": "repos",
+        "dimensions": ["repo", "language", "description"],
+        "measures": ["stars", "forks", "open_issues"],
+        "sort": ["-stars"]
+      }
+    },
+    {
+      "id": "rows",
+      "x": 0, "y": 14, "w": 12, "h": 6,
+      "type": "explore",
+      "title": "明細（行・列・集計を自由に）",
+      "query": {}
+    },
+    {
+      "id": "about",
+      "x": 0, "y": 20, "w": 12, "h": 2,
+      "type": "markdown",
+      "options": {
+        "text": "**DevBI のライブデモ**です。作者（ishibashi0112）の OSS の、npm のダウンロード数と GitHub のリポジトリの数字です。GitHub Actions が毎朝 npm と GitHub の API から数字を取り、静的サイトとして GitHub Pages に置いています。集計は、このブラウザの中の DuckDB-wasm がしています。\n\n棒・点・行を押すと、ほかのタイルがその値で絞られます。いちばん下の「明細」は、行・列・集計を自由に変えられます。この画面のファイルは [examples/oss](https://github.com/ishibashi0112/devbi/tree/main/examples/oss) です。"
+      }
+    }
+  ]
+}
