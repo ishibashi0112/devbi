@@ -1,0 +1,50 @@
+{
+  "$schema": "../.devbi/dash.schema.json",
+  "title": "Malloy と SQL で集計",
+  "description": "指標と軸の名前では言えない集計を、Malloy と SQL で書く",
+  "metrics": "sales",
+  "tiles": [
+    {
+      "id": "period",
+      "x": 0, "y": 0, "w": 12, "h": 1,
+      "type": "date-range",
+      "options": { "default": "latest_fiscal_year" }
+    },
+    {
+      "id": "region",
+      "x": 0, "y": 1, "w": 4, "h": 4,
+      "type": "barlist",
+      "title": "地域別売上",
+      "query": {
+        "malloy": "run: sales -> {\n  group_by: 地域\n  aggregate: revenue is 金額.sum()\n}"
+      }
+    },
+    {
+      "id": "monthly",
+      "x": 4, "y": 1, "w": 8, "h": 4,
+      "type": "line",
+      "title": "月別売上（大口の受注だけ）",
+      "query": {
+        "malloy": "run: sales -> {\n  where: 金額 >= 100000\n  group_by: 月 is 受注日.month\n  aggregate: revenue is 金額.sum()\n}"
+      }
+    },
+    {
+      "id": "repeat",
+      "x": 0, "y": 5, "w": 6, "h": 4,
+      "type": "bar",
+      "title": "受注の回数ごとの顧客数",
+      "query": {
+        "malloy": "run: sales -> {\n  group_by: 顧客\n  aggregate: 受注回数 is count(受注番号)\n} -> {\n  group_by: 受注回数\n  aggregate: 顧客数 is count()\n  order_by: 受注回数\n}"
+      }
+    },
+    {
+      "id": "share",
+      "x": 6, "y": 5, "w": 6, "h": 4,
+      "type": "table",
+      "title": "商品分類ごとの売上と構成比（SQL）",
+      "query": {
+        "sql": "SELECT 商品分類,\n  SUM(金額) AS revenue,\n  ROUND(100 * SUM(金額) / SUM(SUM(金額)) OVER (), 1) AS \"構成比（%）\"\nFROM sales\nGROUP BY ALL\nORDER BY revenue DESC"
+      }
+    }
+  ]
+}

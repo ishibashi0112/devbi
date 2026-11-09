@@ -1,10 +1,10 @@
-import { GRAINS, TILE_TYPES, type BuiltinTileType, type Filter, type Grain, type MetricsView, type Scalar, type SortSpec, type TileTypeInfo } from "devbi";
+import { GRAINS, ident, plainColumn, TILE_TYPES, type BuiltinTileType, type Filter, type Grain, type MetricsView, type Scalar, type SortSpec, type TileTypeInfo } from "devbi";
 import { newTile, type RawDashboard, type RawTile } from "./layout.js";
 
 /** Where each key goes in a hand-written file, so a key the panel adds lands where a person would put it. */
 export const DASHBOARD_KEYS = ["$schema", "title", "description", "metrics", "columns", "rowHeight", "tiles"] as const;
 export const TILE_KEYS = ["id", "x", "y", "w", "h", "type", "component", "title", "query", "options"] as const;
-export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit", "period"] as const;
+export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit", "period", "malloy", "sql"] as const;
 
 type Obj = Record<string, unknown>;
 
@@ -120,6 +120,50 @@ export function changeType(spec: RawDashboard, tile: RawTile, type: BuiltinTileT
   if (!info.query && Object.hasOwn(info.options, "metrics") && metricsName) merged.metrics = metricsName;
   const options = Object.fromEntries(Object.keys(info.options).flatMap((k) => (Object.hasOwn(merged, k) ? [[k, merged[k]]] : [])));
   return setTileKey(next, "options", options);
+}
+
+/** How a tile's query is written: with the metrics' names, or in Malloy or SQL. */
+export type QueryMode = "names" | "malloy" | "sql";
+
+export function queryMode(query: unknown): QueryMode {
+  if (!isObj(query)) return "names";
+  return typeof query.malloy === "string" ? "malloy" : typeof query.sql === "string" ? "sql" : "names";
+}
+
+const WRITTEN = ["measures", "dimensions", "time", "sort", "limit", "malloy", "sql"] as const;
+
+/**
+ * The tile's query written another way: with the metrics' names (what a new tile of its type starts with), or in
+ * Malloy or SQL (a first query: a count by the metrics file's first dimension, or by month for a chart over time).
+ * The metrics file, the filters and the period stay.
+ */
+export function setQueryMode(spec: RawDashboard, tile: RawTile, mode: QueryMode, view: MetricsView | undefined): RawTile {
+  if (queryMode(tile.query) === mode || typeof tile.type !== "string" || !Object.hasOwn(TILE_TYPES, tile.type)) return tile;
+  const type = tile.type as BuiltinTileType;
+  let next = tile;
+  for (const k of WRITTEN) next = setQueryKey(next, k, undefined);
+  if (mode !== "names") return setQueryKey(next, mode, starterQuery(mode, type, view));
+  const fresh = newTile(type, spec, view, false).query;
+  for (const k of WRITTEN) if (isObj(fresh) && Object.hasOwn(fresh, k)) next = setQueryKey(next, k, fresh[k]);
+  return next;
+}
+
+/** A first Malloy or SQL query over a metrics file, that a tile of this type can show. */
+export function starterQuery(lang: "malloy" | "sql", type: BuiltinTileType, view: MetricsView | undefined): string {
+  const name = view?.name ?? "sales";
+  const time = (type === "line" || type === "area" || type === "bar") && view?.time ? view.time.column : undefined;
+  const dim = view ? Object.values(view.dimensions)[0] : undefined;
+  const col = dim ? (plainColumn(dim.expr) ?? dim.name) : undefined;
+  const bare = (n: string) => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(n);
+  if (lang === "malloy") {
+    const id = (n: string) => (bare(n) ? n : `\`${n}\``);
+    const by = type === "kpi" ? "" : time ? `  group_by: 月 is ${id(time)}.month\n` : col ? `  group_by: ${id(col)}\n` : "";
+    return `run: ${id(name)} -> {\n${by}  aggregate: 件数 is count()\n}`;
+  }
+  const id = (n: string) => (bare(n) ? n : ident(n));
+  if (type === "kpi" || (!time && !col)) return `SELECT COUNT(*) AS 件数\nFROM ${id(name)}`;
+  const by = time ? `date_trunc('month', ${id(time)}) AS 月` : id(col!);
+  return `SELECT ${by}, COUNT(*) AS 件数\nFROM ${id(name)}\nGROUP BY ALL\nORDER BY ${time ? "月" : "件数 DESC"}`;
 }
 
 /** Whether a tile type reads the model's rows as they are (explore), not measures and dimensions. */

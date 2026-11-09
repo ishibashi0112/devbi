@@ -36,6 +36,14 @@ export interface Query {
   limit?: number;
   /** `false`: the period (selections on the time column: the date-range tile, a clicked time bucket) does not filter this tile. */
   period?: boolean;
+  /**
+   * The query in Malloy, for what the metrics' names cannot say. Each metrics file it names (`run: sales -> { … }`) is
+   * a source: its model's rows, filtered by the period and the other tiles' selections. Not with measures, dimensions,
+   * time, sort or limit.
+   */
+  malloy?: string;
+  /** The query in SQL (DuckDB), likewise: `FROM sales` reads the rows of `models/sales.metrics.yaml`, filtered. */
+  sql?: string;
 }
 
 /**

@@ -1,6 +1,7 @@
 // The project made by create-devbi, with the packages installed from their tarballs (scripts/check-packed.mjs),
 // without its self-written tile: the file "コードにする" writes is the first .tsx the dev server sees. With an explore
-// dashboard added (dashboards/explore.dash.json): Perspective from the installed packages.
+// dashboard added (dashboards/explore.dash.json): Perspective from the installed packages; and one with Malloy and SQL
+// tiles (dashboards/malloy.dash.json).
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
@@ -51,6 +52,19 @@ test("an explore tile draws with Perspective from the installed packages, withou
   await expect(page.locator('.devbi-explore[aria-busy="false"]')).toHaveCount(1, { timeout: 60_000 });
   await expect(page.locator(".devbi-error")).toHaveCount(0);
   await expect(page.locator("perspective-viewer-datagrid")).toContainText("関東");
+  await page.waitForTimeout(3000);
+  expect(await marked(page)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("Malloy and SQL tiles draw from the installed packages, and a mistake in Malloy says what it is, without a page reload", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/#/malloy");
+  await mark(page);
+  await expect(page.locator('[data-tile="region"] .devbi-barlist')).toContainText("関東", { timeout: 60_000 });
+  await expect(page.locator('[data-tile="share"] [role="grid"]')).toContainText("部品");
+  await expect(page.locator('[data-tile="broken"] .devbi-error')).toHaveText("Malloy: '地' is not defined（2 行目）");
   await page.waitForTimeout(3000);
   expect(await marked(page)).toBe(true);
   expect(errors).toEqual([]);

@@ -1,6 +1,6 @@
-import { checkQuery, componentProblem, resolveComponent, type BuiltinTileType, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
+import { checkQuery, componentProblem, customQuery, resolveComponent, type BuiltinTileType, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
 import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { makeFormatters, useDevbi, useDevbiQuery, useSelectionVersion } from "./context.js";
+import { makeFormatters, queryView, useDevbi, useDevbiQuery, useSelectionVersion, viewFields } from "./context.js";
 import type { TileModule } from "./project.js";
 import { builtinTiles } from "./tiles/index.js";
 import { TileSizeContext } from "./tiles/util.js";
@@ -76,17 +76,27 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
   const data = useDevbiQuery(query, { tileId: tile.id });
   useSelectionVersion();
   const selection = ctx.selection.own(tile.id);
-  const select = useCallback(
-    (f: Filter | Filter[] | null) => ctx.selection.set(tile.id, f === null ? null : Array.isArray(f) ? f : [f]),
-    [ctx.selection, tile.id],
-  );
   const view = useMemo(() => {
+    if (query) return queryView(ctx, query);
     try {
-      return ctx.view(query?.metrics ?? (tile.options?.metrics as string | undefined));
+      return ctx.view(tile.options?.metrics as string | undefined);
     } catch {
       return undefined;
     }
-  }, [ctx, query?.metrics, tile.options?.metrics]);
+  }, [ctx, query, tile.options?.metrics]);
+  // A Malloy or SQL tile selects only on its view's fields (a column of its own filters nothing else).
+  const custom = !!customQuery(query);
+  const select = useCallback(
+    (f: Filter | Filter[] | null) => {
+      let list = f === null ? null : Array.isArray(f) ? f : [f];
+      if (list && custom) {
+        const fields = view ? viewFields(view) : new Set<string>();
+        list = list.filter((x) => fields.has(x.field));
+      }
+      ctx.selection.set(tile.id, list?.length ? list : null);
+    },
+    [ctx.selection, tile.id, custom, view],
+  );
   const { format, label } = useMemo(() => makeFormatters(view, data.fields), [view, data.fields]);
   const [ref, size] = useSize();
 

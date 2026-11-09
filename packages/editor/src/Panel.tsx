@@ -5,6 +5,8 @@ import {
   TILE_TYPE_NAMES,
   compileQuery,
   compileRows,
+  customMainView,
+  customViews,
   EXPLORE_ROWS,
   isoDate,
   resolveComponent,
@@ -24,11 +26,13 @@ import {
   isObj,
   metricsNameOf,
   moveUp,
+  queryMode,
   readsRows,
   rowFilter,
   setDashboardKey,
   setOption,
   setQueryKey,
+  setQueryMode,
   setTileKey,
   sortKeys,
   sortSpecs,
@@ -307,7 +311,7 @@ function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemo
           if (follow) onSelect(id);
         }}
       />
-      {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} />}
+      {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} />}
       {builtin && Object.keys(TILE_TYPES[builtin].options).length > 0 && (
         <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} registerFlush={registerFlush} />
       )}
@@ -420,9 +424,25 @@ function IdField({
 
 type OnTile = (update: (t: RawTile) => RawTile, merge?: string) => void;
 
-function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<string, MetricsView>; spec: RawDashboard; tile: RawTile; live: boolean; onTile: OnTile }) {
+function QueryEditor({
+  metrics,
+  spec,
+  tile,
+  live,
+  onTile,
+  registerFlush,
+}: {
+  metrics: Record<string, MetricsView>;
+  spec: RawDashboard;
+  tile: RawTile;
+  live: boolean;
+  onTile: OnTile;
+  registerFlush(flush: Flush): () => void;
+}) {
   const query = (isObj(tile.query) ? tile.query : {}) as Query;
   const names = Object.keys(metrics).sort();
+  const mode = queryMode(query);
+  if (mode !== "names") return <CustomQueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} />;
   const name = metricsNameOf(metrics, spec, tile);
   const view = name && Object.hasOwn(metrics, name) ? metrics[name] : undefined;
   const set = (key: keyof Query, value: unknown, merge?: string) => onTile((t) => setQueryKey(t, key, value), merge);
@@ -444,6 +464,7 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
   return (
     <>
       <h3>データ</h3>
+      {!rows && <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view))} />}
       {problem && <p className="devbi-ed-warn">{problem}</p>}
       {unused.length > 0 && (
         <p className="devbi-ed-warn">
@@ -500,6 +521,144 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
           </Field>
         </>
       )}
+    </>
+  );
+}
+
+/** How the query is written: by picking measures and dimensions, or as Malloy or SQL. */
+function ModeSelect({ mode, onChange }: { mode: ReturnType<typeof queryMode>; onChange(mode: ReturnType<typeof queryMode>): void }) {
+  return (
+    <Field label="書き方" hint="指標と軸の名前で言えない集計は、Malloy か SQL で書けます（指標ファイルの名前が、その明細の行）">
+      {(ids) => (
+        <select {...ids} value={mode} onChange={(e) => onChange(e.target.value as ReturnType<typeof queryMode>)}>
+          <option value="names">指標と軸を選ぶ</option>
+          <option value="malloy">Malloy で書く</option>
+          <option value="sql">SQL で書く</option>
+        </select>
+      )}
+    </Field>
+  );
+}
+
+/**
+ * A query written in Malloy or SQL: the text (written to dash.json when the box loses focus, on ⌘Enter and on ⌘S),
+ * the metrics file its filters and clicks are on, the period and the filters. The tile shows what is wrong.
+ */
+function CustomQueryEditor({
+  metrics,
+  spec,
+  tile,
+  live,
+  onTile,
+  registerFlush,
+}: {
+  metrics: Record<string, MetricsView>;
+  spec: RawDashboard;
+  tile: RawTile;
+  live: boolean;
+  onTile: OnTile;
+  registerFlush(flush: Flush): () => void;
+}) {
+  const query = (isObj(tile.query) ? tile.query : {}) as Query;
+  const mode = queryMode(query) as "malloy" | "sql";
+  const names = Object.keys(metrics).sort();
+  const own = str(query.metrics);
+  const read = customViews(query, names);
+  const main = customMainView(query, read);
+  const view = main && Object.hasOwn(metrics, main) ? metrics[main] : undefined;
+  const set = (key: keyof Query, value: unknown, merge?: string) => onTile((t) => setQueryKey(t, key, value), merge);
+  const lang = mode === "malloy" ? "Malloy" : "SQL";
+  return (
+    <>
+      <h3>データ</h3>
+      <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view ?? (names.length === 1 ? metrics[names[0]!] : undefined)))} />
+      <Field
+        label={lang}
+        hint={
+          mode === "malloy"
+            ? "run: sales -> { group_by: 地域; aggregate: 売上 is 金額.sum() } のように。欄を出るか ⌘Enter でタイルに出ます"
+            : "SELECT 地域, SUM(金額) AS 売上 FROM sales GROUP BY 1 のように。欄を出るか ⌘Enter でタイルに出ます"
+        }
+      >
+        {(ids) => <CodeInput {...ids} value={(mode === "malloy" ? query.malloy : query.sql) ?? ""} onChange={(v) => set(mode, v)} registerFlush={registerFlush} />}
+      </Field>
+      {read.length === 0 && <p className="devbi-ed-warn">指標ファイルを読んでいません（{names.join("・") || "models/<名前>.metrics.yaml の名前"} のどれかで読みます）</p>}
+      {(read.length > 1 || own) && (
+        <Field label="絞り込みとクリックの指標ファイル" hint="2 つ以上の指標ファイルを読むとき、絞り込みと、タイルのクリックで絞る軸がどの指標ファイルのものか">
+          {(ids) => <MetricsSelect {...ids} metrics={metrics} value={own} empty="なし" onChange={(v) => set("metrics", v)} />}
+        </Field>
+      )}
+      {read.some((n) => metrics[n]?.time) && (
+        <Field label="期間で絞るか" hint="期間は、date-range のタイルで選んだ期間と、時間のグラフでクリックした期間">
+          {(ids) => (
+            <select {...ids} value={query.period === false ? "false" : ""} onChange={(e) => set("period", e.target.value === "false" ? false : undefined)}>
+              <option value="">絞る</option>
+              <option value="false">絞らない（いつも全期間）</option>
+            </select>
+          )}
+        </Field>
+      )}
+      {view && <FiltersEditor view={view} query={query} live={live} set={set} />}
+    </>
+  );
+}
+
+/** Code (Malloy or SQL): written when the box loses focus, on ⌘Enter, and on ⌘S or when another tile is pressed. */
+function CodeInput({ value, onChange, registerFlush, ...rest }: Ids & { value: string; onChange(value: string): void; registerFlush(flush: Flush): () => void }) {
+  const [text, setText] = useState(value);
+  const [error, setError] = useState<string>();
+  const editing = useRef(false);
+  // A change from elsewhere (undo, the file): show it, unless the box is being typed in.
+  useEffect(() => {
+    if (!editing.current) {
+      setText(value);
+      setError(undefined);
+    }
+  }, [value]);
+  const commit = () => {
+    editing.current = false;
+    if (!text.trim()) {
+      setError("空にはできません（名前で選ぶときは「書き方」を戻してください）");
+      return;
+    }
+    setError(undefined);
+    if (text !== value) onChange(text);
+  };
+  const latest = useRef(commit);
+  latest.current = commit;
+  useEffect(
+    () =>
+      registerFlush(() => {
+        if (editing.current) latest.current();
+        return undefined;
+      }),
+    [registerFlush],
+  );
+  return (
+    <>
+      <textarea
+        {...rest}
+        className="devbi-ed-json"
+        spellCheck={false}
+        value={text}
+        rows={Math.min(14, Math.max(4, text.split("\n").length + 1))}
+        onFocus={() => (editing.current = true)}
+        onChange={(e) => {
+          editing.current = true;
+          setText(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            commit();
+            editing.current = true; // still in the box
+          }
+        }}
+        onBlur={() => {
+          if (editing.current) commit();
+        }}
+      />
+      {error && <p className="devbi-ed-warn">{error}</p>}
     </>
   );
 }

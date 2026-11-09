@@ -84,8 +84,11 @@ describe("what the dev server bundles ahead (optimizeDeps.include)", () => {
     expect(await include(project(["@devbi/editor", "@devbi/react", "devbi"]), "build")).toEqual([]);
   });
 
-  it("linked to their source (this repository, pnpm link): only the editor's own dependency", async () => {
-    expect(await include(project(["@devbi/editor", "@devbi/react", "devbi"], true))).toEqual(["@devbi/editor > react-grid-layout"]);
+  it("linked to their source (this repository, pnpm link): only their own CommonJS dependencies", async () => {
+    const malloy = ["devbi > @malloydata/malloy", "devbi > @malloydata/malloy/connection"];
+    expect(await include(project(["@devbi/editor", "@devbi/react", "devbi"], true))).toEqual(["@devbi/editor > react-grid-layout", ...malloy]);
+    expect(await include(project(["@devbi/react", "devbi"], true))).toEqual(malloy);
+    expect(await include(project(["@devbi/react", "devbi"], true), "build")).toEqual([]);
   });
 });
 

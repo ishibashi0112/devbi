@@ -264,6 +264,39 @@ export function compileRows(view: MetricsView, query: Query, options: CompileOpt
   return { sql, limit, newest: !!time };
 }
 
+/**
+ * The rows a Malloy or SQL query (`query.malloy`, `query.sql`) reads from a metrics view: every column of its model
+ * (`columns`, as DuckDB describes it), then each dimension that is an expression, under its own name (a dimension that
+ * is a column is that column), filtered by `filters` (those on fields the view does not have are left out).
+ */
+export function compileSource(view: MetricsView, options: CompileOptions & { columns: readonly string[] }): string {
+  const time = view.time;
+  const fieldOf = (name: string): { expr: string; isTime: boolean } | undefined => {
+    if (time && name === time.name) return { expr: time.expr, isTime: true };
+    const d = getDimension(view, name);
+    return d ? { expr: d.expr, isTime: false } : undefined;
+  };
+  const preds = (options.filters ?? []).filter((f) => fieldOf(f.field)).map((f) => {
+    const { expr, isTime } = fieldOf(f.field)!;
+    return predicate(f, expr, isTime);
+  });
+  const have = new Set(options.columns.map((c) => c.toLowerCase()));
+  const extra = Object.values(view.dimensions)
+    .filter((d) => plainColumn(d.expr) === undefined && !have.has(d.name.toLowerCase()))
+    .map((d) => `,\n  ${d.expr} AS ${ident(d.name)}`)
+    .join("");
+  const model = options.model ?? view.model;
+  return `WITH ${ident("__model")} AS (\n${indent(model, "  ")}\n)\nSELECT\n  *${extra}\nFROM ${ident("__model")}${where(preds, "")}`;
+}
+
+/** The column an expression is, when it is only a column (`"地域"`, `(地域)`). */
+export function plainColumn(expr: string): string | undefined {
+  const e = expr.trim().replace(/^\((.*)\)$/s, "$1").trim();
+  const quoted = /^"((?:[^"]|"")+)"$/.exec(e);
+  if (quoted) return quoted[1]!.replaceAll('""', '"');
+  return /^[\p{L}_][\p{L}\p{N}_$]*$/u.test(e) ? e : undefined;
+}
+
 function indent(text: string, pad: string): string {
   return text
     .split("\n")

@@ -1,8 +1,18 @@
 import type * as arrow from "apache-arrow";
 import {
+  compileMalloy,
   compileQuery,
   compileRows,
+  compileSource,
   compileTimeExtent,
+  customFields,
+  customMainView,
+  customQuery,
+  customTable,
+  customViews,
+  QueryError,
+  sqlColumns,
+  withSources,
   formatValue,
   getDimension,
   getMeasure,
@@ -11,6 +21,7 @@ import {
   type Filter,
   type MetricsView,
   type Query,
+  type ResultColumn,
   type Row,
 } from "devbi";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -110,8 +121,29 @@ export interface QueryState {
   error: Error | null;
 }
 
-function viewFields(view: MetricsView): Set<string> {
+/** The fields of a view that selections are on: its dimensions and its time. */
+export function viewFields(view: MetricsView): Set<string> {
   return new Set([...Object.keys(view.dimensions), ...(view.time ? [view.time.name] : [])]);
+}
+
+/** The metrics views a query reads: its own (or the dashboard's); for Malloy or SQL, the ones it names. */
+function viewsOfQuery(ctx: DevbiContextValue, query: Query): MetricsView[] {
+  if (!customQuery(query)) return [ctx.view(query.metrics)];
+  return customViews(query, Object.keys(ctx.project.metrics)).map((n) => ctx.project.metrics[n]!);
+}
+
+/**
+ * The view a query's fields are of (labels, formats, what a click selects): its own (or the dashboard's); for Malloy
+ * or SQL, its `metrics` or the only view it reads (none when it reads two or more without `metrics`).
+ */
+export function queryView(ctx: DevbiContextValue, query: Query | null | undefined): MetricsView | undefined {
+  try {
+    if (!customQuery(query)) return ctx.view(query?.metrics);
+    const main = customMainView(query!, customViews(query!, Object.keys(ctx.project.metrics)));
+    return main ? ctx.view(main) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -120,25 +152,100 @@ function viewFields(view: MetricsView): Set<string> {
  * view is missing (the query reports that).
  */
 export function crossFilters(ctx: DevbiContextValue, query: Query, tileId: string | undefined): Filter[] {
-  let view: MetricsView;
+  let views: MetricsView[];
   try {
-    view = ctx.view(query.metrics);
+    views = viewsOfQuery(ctx, query);
   } catch {
     return [];
   }
-  const names = viewFields(view);
-  // `period: false`: not the period (the date-range tile, a clicked time bucket).
-  if (query.period === false && view.time) names.delete(view.time.name);
+  const names = new Set<string>();
+  for (const view of views) {
+    const own = viewFields(view);
+    // `period: false`: not the period (the date-range tile, a clicked time bucket).
+    if (query.period === false && view.time) own.delete(view.time.name);
+    for (const n of own) names.add(n);
+  }
   return ctx.selection.filtersFor(tileId).filter((f) => names.has(f.field));
 }
 
 /** Run a query on the dashboard's data with these filters (from {@link crossFilters}) besides its own. */
 export async function runQuery(ctx: DevbiContextValue, query: Query, filters: Filter[]): Promise<{ rows: Row[]; fields: FieldInfo[] }> {
+  if (customQuery(query)) return runCustom(ctx, query, filters);
   const view = ctx.view(query.metrics);
   const engine = await ctx.engine;
   const model = await engine.loadView(view);
   const { sql, fields } = compileQuery(view, query, { filters, model });
   const { rows } = await engine.query(sql);
+  return { rows, fields };
+}
+
+/** Malloy compiled to SQL, by its text and its sources' columns (the same for any filters). */
+const malloyCache = new Map<string, Promise<{ sql: string; columns: ResultColumn[] }>>();
+
+/** The columns of a SELECT and their DuckDB types. */
+async function describe(engine: Engine, sql: string): Promise<Record<string, string>> {
+  const { rows } = await engine.query(`DESCRIBE SELECT * FROM (\n${sql}\n)`);
+  return Object.fromEntries(rows.map((r) => [String(r.column_name), String(r.column_type)]));
+}
+
+/**
+ * A query written in Malloy or SQL: the rows of each view it names (the period and the selections that apply to that
+ * view, and its own `filters` on its main view) in front of it as CTEs, Malloy compiled to SQL first.
+ */
+async function runCustom(ctx: DevbiContextValue, query: Query, filters: Filter[]): Promise<{ rows: Row[]; fields: FieldInfo[] }> {
+  const custom = customQuery(query)!;
+  const lang = custom.lang === "sql" ? "SQL" : "Malloy";
+  if (query.metrics) ctx.view(query.metrics); // a name that is not a metrics file says so
+  const names = customViews(query, Object.keys(ctx.project.metrics));
+  if (!names.length) {
+    const how = custom.lang === "sql" ? "FROM sales" : "run: sales -> { … }";
+    throw new QueryError(`${lang} のクエリが指標ファイルを読んでいません（${how} のように、models/<名前>.metrics.yaml の名前で読みます）`);
+  }
+  const main = customMainView(query, names);
+  if (query.filters?.length && !main)
+    throw new QueryError("2 つ以上の指標ファイルを読むクエリの filters は、metrics でどの指標ファイルかを書いてください");
+  const engine = await ctx.engine;
+  const sources = await Promise.all(
+    names.map(async (name) => {
+      const view = ctx.project.metrics[name]!;
+      const model = await engine.loadView(view);
+      const columns = Object.keys(await describe(engine, model));
+      const fields = viewFields(view);
+      const own = name === main ? (query.filters ?? []) : [];
+      for (const f of own) if (!fields.has(f.field)) throw new QueryError(`フィルタの ${f.field} は ${view.name} の軸にありません`);
+      const schema = custom.lang === "malloy" ? await describe(engine, compileSource(view, { model, columns })) : {};
+      const sql = compileSource(view, { model, columns, filters: [...own, ...filters.filter((f) => fields.has(f.field))] });
+      return { name, sql, schema };
+    }),
+  );
+  let sql = custom.text;
+  let columns: ResultColumn[] | undefined;
+  if (custom.lang === "malloy") {
+    const input = sources.map((s) => ({ name: s.name, table: customTable("malloy", s.name), schema: s.schema }));
+    const key = JSON.stringify([custom.text, input]);
+    let compiled = malloyCache.get(key);
+    if (!compiled) {
+      compiled = compileMalloy(custom.text, input);
+      malloyCache.set(key, compiled);
+      compiled.catch(() => malloyCache.delete(key));
+      if (malloyCache.size > 100) malloyCache.delete(malloyCache.keys().next().value!);
+    }
+    ({ sql, columns } = await compiled);
+  }
+  let result: Awaited<ReturnType<Engine["query"]>>;
+  try {
+    result = await engine.query(
+      withSources(
+        sql,
+        sources.map((s) => ({ table: customTable(custom.lang, s.name), sql: s.sql })),
+      ),
+    );
+  } catch (e) {
+    throw new QueryError(`${lang}: ${(e instanceof Error ? e.message : String(e)).replace(/\n+LINE \d+:[\s\S]*$/, "").trim()}`);
+  }
+  columns ??= sqlColumns(result.table.schema.fields.map((f) => ({ name: f.name, type: String(f.type) })));
+  const { names: out, fields } = customFields(custom.lang, columns, main ? ctx.project.metrics[main] : undefined);
+  const rows = result.rows.map((r) => Object.fromEntries(columns.map((c, i) => [out[i]!, r[c.name] ?? null])));
   return { rows, fields };
 }
 
@@ -154,7 +261,7 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
   const filters = useMemo(
     () => (hasQuery && crossfilter ? crossFilters(ctx, query, tileId) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [version, tileId, crossfilter, hasQuery, query?.metrics, query?.period, ctx],
+    [version, tileId, crossfilter, hasQuery, query?.metrics, query?.period, query?.malloy, query?.sql, ctx],
   );
   const key = JSON.stringify([query ?? null, filters]);
   const [state, setState] = useState<QueryState>({ rows: [], fields: [], filters: [], loading: !!query, error: null });

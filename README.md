@@ -31,7 +31,7 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 
 | パス | npm 名 | 中身 |
 | --- | --- | --- |
-| `packages/devbi` | `devbi` | ファイル形式（metrics.yaml / dash.json の検証）、指標 → DuckDB SQL のコンパイラ、xlsx の読み書き（依存なし。書式つきの書き出しは ashiato のものを流用）、書式、`TileProps` などの型。ブラウザでも Node でも動く |
+| `packages/devbi` | `devbi` | ファイル形式（metrics.yaml / dash.json の検証）、指標 → DuckDB SQL のコンパイラ、Malloy のクエリを SQL にする（Malloy は使うときだけ読み込む）、xlsx の読み書き（依存なし。書式つきの書き出しは ashiato のものを流用）、書式、`TileProps` などの型。ブラウザでも Node でも動く |
 | `packages/react` | `@devbi/react` | DuckDB-wasm のエンジン、Mosaic の Selection でのクロスフィルタ、組み込みタイル、`<Dashboard>` / `<DevbiApp>`、Excel・PDF（印刷）への書き出し、ほかのページへの埋め込み（`mountDashboard`、`startEmbed`） |
 | `packages/vite` | `@devbi/vite` | Vite プラグイン。`virtual:devbi` で dashboards/ と models/ と昇格タイルを渡し、ビルドで data/ をコピー。`embed: true` で埋め込み用の `devbi-embed.js` も作る |
 | `packages/editor` | `@devbi/editor` | GUI エディタ。Vite の開発サーバーでだけ動き、react-grid-layout でタイルを並べ、設定欄でタイルの種類・データを変えて、dash.json を手書きと同じ形で保存する。「コードにする」でタイルを .tsx に書き出す（書き込み口は `@devbi/vite`）。ビルドには入らない |
@@ -101,7 +101,7 @@ measures:
 ] }
 ```
 
-`query` は `measures`、`dimensions`、`time`（day / week / month / quarter / year / fiscal_year）、`filters`、`sort`（`"-revenue"` で降順）、`limit`。12 列のグリッド、行の高さは既定 80px。
+`query` は `measures`、`dimensions`、`time`（day / week / month / quarter / year / fiscal_year）、`filters`、`sort`（`"-revenue"` で降順）、`limit`。名前で言えない集計は `query.malloy`（[Malloy](https://www.malloydata.dev/)）か `query.sql`（DuckDB の SQL）で書けます。指標ファイルの名前（`sales`）が、その明細を期間と選択で絞った行です。12 列のグリッド、行の高さは既定 80px。
 
 組み込みタイル: `kpi`、`bar`、`line`、`area`、`barlist`、`table`、`pivot`（`options.columns` で列にする軸）、`date-range`（`options.default` で最初の期間）、`select`、`markdown`（`options.text`）。
 

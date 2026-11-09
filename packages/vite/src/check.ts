@@ -7,8 +7,17 @@ import path from "node:path";
 import {
   checkQuery,
   compileQuery,
+  compileMalloy,
   compileRows,
+  compileSource,
   compileTimeExtent,
+  customFields,
+  customMainView,
+  customQuery,
+  customTable,
+  customViews,
+  sqlColumns,
+  withSources,
   componentProblem,
   dateRangePresets,
   DashboardError,
@@ -25,6 +34,7 @@ import {
   type Filter,
   type MetricsView,
   type Query,
+  type ResultColumn,
   type TileSpec,
   type TileTypeInfo,
 } from "devbi";
@@ -479,6 +489,99 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
           }
         }
         if (!query) continue;
+
+        const custom = customQuery(query);
+        if (custom) {
+          // As the runtime (runCustom): the views it names, each filtered by the first periods that apply to it.
+          const lang = custom.lang === "sql" ? "SQL" : "Malloy";
+          if (query.metrics && !modelFiles.includes(`${query.metrics}.metrics.yaml`)) {
+            if (listed(query.metrics, t)) tile.note = `指標ファイル models/${query.metrics}.metrics.yaml がないため確かめていません`;
+            else fail(`query.metrics の指標ファイル models/${query.metrics}.metrics.yaml がありません`);
+            continue;
+          }
+          const names = customViews(
+            query,
+            modelFiles.map((f) => f.slice(0, -".metrics.yaml".length)),
+          );
+          if (!names.length) {
+            const how = custom.lang === "sql" ? "FROM sales" : "run: sales -> { … }";
+            fail(`${lang} のクエリが指標ファイルを読んでいません（${how} のように、models/<名前>.metrics.yaml の名前で読みます）`);
+            continue;
+          }
+          const blocked = names.find((n) => !metrics.get(n) || typeof state.get(n)?.model !== "string");
+          if (blocked) {
+            const model = state.get(blocked)?.model;
+            tile.note =
+              model instanceof NotChecked
+                ? `確かめていません（${model.message}）`
+                : `models/${blocked}.metrics.yaml のエラーのため確かめていません`;
+            continue;
+          }
+          const main = customMainView(query, names);
+          if (query.filters?.length && !main) {
+            fail("2 つ以上の指標ファイルを読むクエリの filters は、metrics でどの指標ファイルかを書いてください");
+            continue;
+          }
+          const describe = (sql: string): Record<string, string> =>
+            Object.fromEntries(
+              engine!.query(`DESCRIBE SELECT * FROM (\n${sql}\n)`).map((r) => [String(r.column_name), String(r.column_type)]),
+            );
+          try {
+            const sources = names.map((n) => {
+              const view = metrics.get(n)!.view;
+              const model = state.get(n)!.model as string;
+              const columns = Object.keys(describe(model));
+              const fields = new Set([...Object.keys(view.dimensions), ...(view.time ? [view.time.name] : [])]);
+              const own = n === main ? (query.filters ?? []) : [];
+              for (const f of own) if (!fields.has(f.field)) throw new QueryError(`フィルタの ${f.field} は ${n} の軸にありません`);
+              const period = filters.filter((f) => fields.has(f.field) && !(query.period === false && f.field === view.time?.name));
+              return {
+                name: n,
+                sql: compileSource(view, { model, columns, filters: [...own, ...period] }),
+                schema: custom.lang === "malloy" ? describe(compileSource(view, { model, columns })) : {},
+              };
+            });
+            let sql = custom.text;
+            let columns: ResultColumn[] | undefined;
+            if (custom.lang === "malloy") {
+              ({ sql, columns } = await compileMalloy(
+                custom.text,
+                sources.map((s) => ({ name: s.name, table: customTable("malloy", s.name), schema: s.schema })),
+              ));
+            }
+            const full = withSources(
+              sql,
+              sources.map((s) => ({ table: customTable(custom.lang, s.name), sql: s.sql })),
+            );
+            const rows = engine!.query(full);
+            columns ??= sqlColumns(Object.entries(describe(full)).map(([name, type]) => ({ name, type })));
+            const view = main ? metrics.get(main)!.view : undefined;
+            const shaped = customFields(custom.lang, columns, view);
+            tile.rows = rows.length;
+            if (options.values) {
+              const fy = view?.time?.fiscalYearStart ?? 1;
+              tile.values = rows
+                .slice(0, options.values)
+                .map((r) =>
+                  columns!.map((c, i) => `${shaped.fields[i]!.label} ${formatValue(r[c.name], shaped.fields[i]!, fy)}`).join("、"),
+                );
+            }
+            const shape = t.type ? shapeProblem(t.type, shaped.fields, t.options) : undefined;
+            if (shape) fail(shape);
+            else if (rows.length === 0 && names.every((n) => (state.get(n)?.rows ?? 0) > 0)) {
+              const applied = query.period === false ? [] : [...new Set(names.flatMap((n) => periodsOf(metrics.get(n)!.view)))];
+              const period = applied.length ? `date-range の最初の期間 ${applied.join("・")} で。` : "";
+              add("warning", file, `${where(t)}: 結果が 0 行です（${period}${lang} のクエリを確かめてください）`);
+            }
+          } catch (e) {
+            const ext = missingExtension(e);
+            if (ext) {
+              add("warning", file, `${where(t)}: ${noExtension(ext)}`);
+              tile.note = `DuckDB の拡張 ${ext} を取ってこられないため確かめていません`;
+            } else fail(e instanceof QueryError ? message(e) : `${lang}: ${duckdbMessage(e)}`);
+          }
+          continue;
+        }
 
         const n = viewName(query.metrics);
         if (!n) {

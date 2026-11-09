@@ -3,6 +3,7 @@ import {
   addResultTable,
   checkQuery,
   compileRows,
+  customQuery,
   componentProblem,
   formatValue,
   MAX_COLS,
@@ -25,7 +26,7 @@ import {
   type TileSpec,
   type TileTypeInfo,
 } from "devbi";
-import { crossFilters, fieldInfo, runQuery, type DevbiContextValue } from "../context.js";
+import { crossFilters, fieldInfo, queryView, runQuery, type DevbiContextValue } from "../context.js";
 import { describeFilter, snapshotText } from "../describe.js";
 import { tableToRows } from "../arrow-rows.js";
 import { viewsOf } from "../project.js";
@@ -106,7 +107,7 @@ async function pivotTable(
 ): Promise<{ rows: number; write: (sheet: Sheet) => void } | undefined> {
   const { m, colField, rowFields } = pivotFields(result.fields, typeof tile.options?.columns === "string" ? tile.options.columns : undefined);
   if (!m || !colField) return undefined;
-  const totals = tile.options?.totals !== false;
+  const totals = tile.options?.totals !== false && !customQuery(query);
   const run = async (keep: FieldInfo[]) => (await runQuery(ctx, totalQuery(query, m, keep), filters)).rows;
   const [rowTot, colTot, grand] = await Promise.all([
     totals && rowFields.length ? run(rowFields) : [],
@@ -189,8 +190,8 @@ async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
   if (query === "skip") return undefined;
   if (!query) return { tile, note: "自分でデータを読むタイルなので書き出せません" };
   const filters = crossFilters(ctx, query, tile.id);
-  const view = ctx.view(query.metrics);
-  const fy = view.time?.fiscalYearStart ?? 1;
+  const view = queryView(ctx, query);
+  const fy = view?.time?.fiscalYearStart ?? 1;
   const result = await runQuery(ctx, query, filters);
   const cut = result.rows.length > MAX_ROWS - ROOM;
   if (cut) result.rows = result.rows.slice(0, MAX_ROWS - ROOM);

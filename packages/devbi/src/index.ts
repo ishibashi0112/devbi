@@ -39,8 +39,24 @@ export {
 } from "./dashboard.js";
 export { formatDashboardJson } from "./format-dash.js";
 export {
+  customQuery,
+  customViews,
+  customMainView,
+  customTable,
+  customWords,
+  customFields,
+  compileMalloy,
+  sqlColumns,
+  withSources,
+  type CustomLang,
+  type MalloySource,
+  type ResultColumn,
+} from "./custom.js";
+export {
   compileQuery,
   compileRows,
+  compileSource,
+  plainColumn,
   compileTimeExtent,
   EXPLORE_ROWS,
   grainExpr,

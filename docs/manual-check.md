@@ -32,6 +32,7 @@ pnpm example:dev
 | 期間、KPI ×4、月別売上、地域別売上、売上と前年同月、商品分類別の推移、地域 × 四半期、商品分類、商品別、説明の文 | DevBI の組み込みタイル。何をどこに出すかだけを JSON で書く | `dashboards/sales.dash.json` |
 | 売上・件数・前年比などの計算の定義 | 利用者が YAML で書く。SQL への変換と集計は DevBI | `models/sales.metrics.yaml` |
 | 「明細を自由に集計」のダッシュボードの「明細」（行・列・集計を見る人が選ぶ表とグラフ） | DevBI の組み込みタイル `explore`。中身は [Perspective](https://perspective.finos.org/)（オープンソース、Apache-2.0）で、DevBI は明細の行を期間と選択で絞って渡す | `dashboards/sales-explore.dash.json` |
+| 「Malloy と SQL で集計」のダッシュボードの各タイル（指標と軸の名前では言えない集計） | 利用者が Malloy か SQL で書く。[Malloy](https://www.malloydata.dev/)（オープンソース、MIT）から SQL への変換、明細の行を期間と選択で絞ること、列の名前を指標ファイルの名前・書式にそろえること、描画は DevBI | `dashboards/sales-malloy.dash.json` |
 | 「上位顧客（自作タイル）」 | **自作**。React で 60 行ほど。データの取得と絞り込みは DevBI が渡す | `dashboards/sales/TopCustomers.tsx` |
 | アプリの入口 | `<DevbiApp>` を置くだけ（10 行） | `src/main.tsx`、`src/app.css` |
 
@@ -136,7 +137,7 @@ pnpm example:dev
 | 35 | `pnpm example:serve` を実行して <http://localhost:8080/embed-demo.html> を開く | 紺色のヘッダーと左のメニューの中に「売上ダッシュボード（DB から）」が出る。ページの見出し「売上の集計」は赤のまま、ダッシュボードの中の見出しやタイルの見出しは DevBI の見た目のまま（ページの CSS が入り込まない） |
 | 36 | OS（またはブラウザ）をダークモードにして開き直す | ダッシュボードは明るいまま（`data-devbi-theme="light"`）。同じ状態で <http://localhost:8080/#/sales-db> を開くと、こちらはダークになる |
 | 37 | 「レポート」で「売上ダッシュボード」を選ぶ | 同じ場所が Excel 版のダッシュボードに切り替わり、「上位顧客（自作タイル）」も出る（ページの JavaScript が `mount()` を呼んでいる） |
-| 38 | 開発者ツールのコンソールで `DevBI.dashboards` と打つ | `sales`、`sales-daily`、`sales-db`、`sales-explore` の 4 つが、タイトルつきで出る |
+| 38 | 開発者ツールのコンソールで `DevBI.dashboards` と打つ | `sales`、`sales-daily`、`sales-db`、`sales-explore`、`sales-malloy` の 5 つが、タイトルつきで出る |
 | 39 | 開発者ツールの「ネットワーク」で `devbi-embed.js` を見る | 4KB ほど。残りは `assets/` のファイルを読んでいる（`_` で始まるファイルはない） |
 | 40 | ブラウザの窓を 900px くらいまで狭くする | 左のメニューのぶん、ダッシュボードの幅は 720px より狭くなり、タイルが 1 列に並ぶ（窓はスマートフォンより広いまま） |
 | 41 | 「地域別売上」の地域を 1 つクリックしてから、コンソールで `DevBI.mount("#report-area", { theme: "dark" })` | ダッシュボードがダークになり、上の絞り込みのチップは残る |
@@ -213,8 +214,8 @@ WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだ�
 | 73 | 「閉じる」 | 「保存していない変更があります」と、「保存して閉じる」「保存せずに閉じる」「編集を続ける」が出る。「保存せずに閉じる」で、70 で保存した形のダッシュボードに戻る |
 | 74 | もう一度「編集」を押し、VS Code で `sales.dash.json` の `"title"` を変えて保存 | エディタの見出しがその言葉に変わり、「読み込み直しました」と出る |
 | 75 | エディタでタイルを 1 つ動かしてから、VS Code で `"title"` をもう一度変えて保存 | 「dashboards/sales.dash.json が、ほかで書き換えられました」と、「ファイルの内容を読み込む（ここでの変更は捨てる）」「ここでの内容で上書きする」が出る。「保存」を押しても「エディタで開いたあとに書き換えられています」で断られる。「ファイルの内容を読み込む」で VS Code で直した内容になる |
-| 76 | 「閉じる」→「＋ 新しいダッシュボード」。ファイル名に `月次` と入れる。次に `monthly`、見出しに「月次の売上」と入れて「作って編集する」。「＋ タイルを追加」で「棒グラフ」を選んで保存し、「閉じる」 | `月次` では「半角の英数字と - _ で書いてください」と出て押せない。作ると空の編集画面（「＋ タイルを追加」から…）になり、棒グラフの月別売上が出る。`examples/sales/dashboards/monthly.dash.json` ができ、閉じると「月次の売上」のダッシュボードが出て、「← 一覧へ」の一覧に 5 つ並ぶ |
-| 77 | ターミナルで `git checkout examples/sales/dashboards && rm examples/sales/dashboards/monthly.dash.json` | ページが読み込み直され、一覧が元の 4 つに戻る |
+| 76 | 「閉じる」→「＋ 新しいダッシュボード」。ファイル名に `月次` と入れる。次に `monthly`、見出しに「月次の売上」と入れて「作って編集する」。「＋ タイルを追加」で「棒グラフ」を選んで保存し、「閉じる」 | `月次` では「半角の英数字と - _ で書いてください」と出て押せない。作ると空の編集画面（「＋ タイルを追加」から…）になり、棒グラフの月別売上が出る。`examples/sales/dashboards/monthly.dash.json` ができ、閉じると「月次の売上」のダッシュボードが出て、「← 一覧へ」の一覧に 6 つ並ぶ |
+| 77 | ターミナルで `git checkout examples/sales/dashboards && rm examples/sales/dashboards/monthly.dash.json` | ページが読み込み直され、一覧が元の 5 つに戻る |
 | 78 | `pnpm example:preview` で <http://localhost:4173> を開く | 「編集」も「＋ 新しいダッシュボード」も出ない（ビルドにはエディタが入らない） |
 
 #### 設定欄（プロパティパネル）
@@ -318,6 +319,21 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 | 127 | 126 を戻し、売上ダッシュボードで「編集」→「商品別」のタイルを押し、種類を「探索（自由に集計）」 | タイルに Perspective の表が出る。データの欄は「指標ファイル」「期間で絞るか」「絞り込み」「件数」だけ（指標・軸・期間の単位・並び順は出ない）。表示に「最初の並べ方」の欄が出る |
 | 128 | 「最初の並べ方」に `{ group_by: 地域 }` と入れて欄を出る。次に `{ "group_by": ["地域"], "columns": ["金額"] }` にして欄を出る。保存して `git diff examples/sales/dashboards` | 1 つ目は「JSON として読めません（…）」と出て、タイルもファイルも変わらない。2 つ目でタイルが地域ごとの金額になる。差分は「商品別」の `"type": "explore"` と `"options": { "layout": … }` で、`query` は消える（明細のタイルが使わない指標・軸・件数だったため）。`git checkout examples/sales/dashboards` で戻す |
 | 129 | 127 と同じく「商品別」を「探索（自由に集計）」にして、「最初の並べ方」を `{ "plugin": "Bar" }` にして欄を出る。次に `{ "group_by": ["地"] }`、最後に `{ "group_by": ["地域"], "columns": ["金額"] }` にして、そのつど欄を出る | 1 つ目はタイルに「options.layout の plugin "Bar" はありません（Datagrid、X Bar、…のどれかにしてください）」、2 つ目は「options.layout の並べ方を使えません（Unknown column "地" …）」と出る（どちらもタイルが「読み込み中」のまま止まらない）。3 つ目でエラーが消え、地域ごとの金額になる |
+
+### Malloy と SQL で書いたタイル
+
+`pnpm example:dev` で「Malloy と SQL で集計」（`#/sales-malloy`）を開いて確かめます。ファイルを変えたものは、試したあと `git checkout .` で戻せます。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 130 | 開く（期間は 2026年度） | 「地域別売上」（Malloy）は 関東 ¥18,599,290 から 6 地域で、売上ダッシュボードの「地域別売上」と同じ。「商品分類ごとの売上と構成比（SQL）」は 工具 ¥15,440,040・32.1、保守 ¥15,370,350・32、部品 ¥12,781,900・26.6、消耗品 ¥4,460,300・9.3。「受注の回数ごとの顧客数」は横軸が受注の回数（3〜39）の縦棒。「月別売上（大口の受注だけ）」は 2026年4月〜10月の折れ線 |
+| 131 | 「地域別売上」の「関東」を押す | 上に「地域: 関東」が出て、ほかの 3 つのタイルが関東だけになる（SQL の表の売上の合計が ¥18,599,290） |
+| 132 | 「すべて解除」を押し、「月別売上（大口の受注だけ）」の月の点を押す | 上に「受注日: 2025年6月」のような月のチップが出て、ほかのタイルがその月だけになる |
+| 133 | 「受注の回数ごとの顧客数」の棒を押す | 何も絞られない（受注回数は指標ファイルの軸ではないため） |
+| 134 | `pnpm check -- --values 1` | `dashboards/sales-malloy.dash.json` の行に `region 6 行: 地域 関東、売上 ¥18,599,290`、`share 4 行: 商品分類 工具、売上 ¥15,440,040、構成比（%） 32.1` など |
+| 135 | 売上ダッシュボードで「編集」→「地域別売上」を押し、「書き方」を「Malloy で書く」 | 欄に `run: sales -> { group_by: 顧客 … aggregate: 件数 is count() }` が入り、タイルが顧客ごとの件数になる。指標・軸の欄は消える |
+| 136 | Malloy の欄を `run: sales -> {`・`  group_by: 地`・`}` の 3 行にして欄を出る。次に `run: sales -> { group_by: 地域; aggregate: revenue is 金額.sum() }` にして ⌘Enter | 1 つ目はタイルに「Malloy: '地' is not defined（2 行目）」。2 つ目で関東 ¥18,599,290 からの地域別売上に戻る（`revenue` の名前なので ¥ の書式） |
+| 137 | 「書き方」を「SQL で書く」、次に「指標と軸を選ぶ」。保存して `git diff examples/sales/dashboards` | SQL では `SELECT 顧客, COUNT(*) AS 件数 …` が入り、タイルが顧客ごとの件数になる。戻すと指標「売上」・軸「顧客」がチェックされた状態になり、差分は `"dimensions": ["customer"]` だけ。`git checkout examples/sales/dashboards` で戻す |
 
 ## 4. 自分の Excel で試す
 

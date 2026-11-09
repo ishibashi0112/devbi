@@ -77,6 +77,18 @@ for (const manager of ["npm", "pnpm"]) {
     ],
   });
 
+  // Malloy and SQL tiles: Malloy from the installed devbi, compiled in the browser.
+  const malloyDash = path.join(app, "dashboards/malloy.dash.json");
+  const malloy = {
+    title: "Malloy と SQL",
+    metrics: "sales",
+    tiles: [
+      { id: "region", x: 0, y: 0, w: 6, h: 4, type: "barlist", query: { malloy: "run: sales -> { group_by: 地域; aggregate: revenue is 金額.sum() }" } },
+      { id: "share", x: 6, y: 0, w: 6, h: 4, type: "table", query: { sql: "SELECT 商品分類, SUM(金額) AS revenue FROM sales GROUP BY ALL ORDER BY 2 DESC" } },
+    ],
+  };
+  writeJson(malloyDash, malloy);
+
   // 4. What a user runs first.
   run(manager, ["run", "typecheck"], app);
   run(manager, ["run", "check"], app);
@@ -92,6 +104,9 @@ for (const manager of ["npm", "pnpm"]) {
   spec.tiles = spec.tiles.filter((t) => !t.component);
   writeJson(dash, spec);
   rmSync(path.join(app, "dashboards/sales"), { recursive: true });
+  // And a Malloy query with a mistake, which Malloy says what is (its parser's error path needs no process.env).
+  malloy.tiles.push({ id: "broken", x: 0, y: 4, w: 6, h: 3, type: "barlist", query: { malloy: "run: sales -> {\n  group_by: 地\n}" } });
+  writeJson(malloyDash, malloy);
   run("pnpm", ["exec", "playwright", "test", "--trace", "off"], path.join(repo, "packages/create-devbi"), {
     DEVBI_PACKED_APP: app,
   });
