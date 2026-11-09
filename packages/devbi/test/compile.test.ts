@@ -123,6 +123,16 @@ describe("compileQuery", () => {
     expect(both.rows).toEqual([{ total_revenue: 400, revenue_pp: 200 }]);
   });
 
+  it("takes the unit of the shortest period, whichever was picked last", async () => {
+    // This year so far, and its January clicked on a month chart: January against December (no rows), not last January.
+    const ytd = { field: "order_date", between: ["2026-01-01", "2026-03-04"] as [string, string], unit: "year" as const };
+    const jan = { field: "order_date", between: ["2026-01-01", "2026-02-01"] as [string, string], unit: "month" as const };
+    for (const filters of [[ytd, jan], [jan, ytd]]) {
+      const r = await run({ measures: ["total_revenue", "revenue_pp"] }, { filters });
+      expect(r.rows).toEqual([{ total_revenue: 200, revenue_pp: null }]);
+    }
+  });
+
   it("passes on which way is good, to comparisons too", () => {
     const v = parseMetricsYaml(
       `model: SELECT * FROM sales
@@ -138,6 +148,28 @@ measures:
     expect(v.measures.complaints_pp).toMatchObject({ better: "lower" });
     const c = compileQuery(v, { measures: ["complaints", "complaints_pp", "complaints_ly", "revenue"] });
     expect(c.fields.map((f) => f.better)).toEqual(["lower", "lower", undefined, undefined]);
+  });
+
+  it("compares whole months at month ends, and a week with the same weekdays a year before", async () => {
+    const v = parseMetricsYaml(
+      `model: "SELECT * FROM (VALUES (DATE '2026-01-31', 1), (DATE '2026-02-01', 10), (DATE '2026-02-28', 100), (DATE '2026-03-31', 1000),
+  (DATE '2025-10-26', 50000), (DATE '2025-10-27', 5000), (DATE '2026-10-26', 7)) t(d, amount)"
+time: d
+measures:
+  rev: SUM(amount)
+  pp: { of: rev, compare: previous_period, as: value }
+  ly: { of: rev, compare: previous_year, as: value }
+`,
+      "ends",
+    );
+    const at = async (between: [string, string], unit: "month" | "week") =>
+      round(await rows(compileQuery(v, { measures: ["rev", "pp", "ly"] }, { filters: [{ field: "d", between, unit }] }).sql));
+    // March: all of February (Feb 28 + 1 month is Mar 28), not the 31 days before (which would take Jan 31 too).
+    expect(await at(["2026-03-01", "2026-04-01"], "month")).toEqual([{ rev: 1000, pp: 110, ly: null }]);
+    // February: all of January (Jan 31 + 1 month is Feb 28).
+    expect((await at(["2026-02-01", "2026-03-01"], "month"))[0]).toMatchObject({ rev: 110, pp: 1 });
+    // The week from Monday 2026-10-26: last year's week from Monday 2025-10-27 (52 weeks before), not Sunday the 26th.
+    expect((await at(["2026-10-26", "2026-10-31"], "week"))[0]).toMatchObject({ rev: 7, ly: 5000 });
   });
 
   it("does not count Feb 29 into last year's Feb 28 by the day", async () => {

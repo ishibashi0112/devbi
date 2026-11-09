@@ -1,5 +1,5 @@
 import { dateRangePresets, isoDate, type DateRangeOption, type Filter, type Grain, type TileProps } from "devbi";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDevbi, useTimeExtent } from "../context.js";
 
 const DAY = 86_400_000;
@@ -25,13 +25,18 @@ export function DateRange({ tile, selection, select }: TileProps) {
   const start = asDate(own?.between[0]);
   const end = asDate(own?.between[1]);
   const applied = useRef(false);
+  // The period last picked: of periods with the same days (this year and this year so far), the one pressed.
+  const [pickedKey, setPickedKey] = useState<string>();
 
   // A period's unit goes with it: previous_period then compares with the same days of the month (week…) before.
   const apply = (range: [Date, Date] | null, unit?: Grain) => {
     if (!time) return;
     select(range ? { field: time.name, between: range, ...(unit ? { unit } : {}) } : null);
   };
-  const pick = (p: DateRangeOption) => apply(p.range, p.unit);
+  const pick = (p: DateRangeOption) => {
+    setPickedKey(p.key);
+    apply(p.range, p.unit);
+  };
 
   useEffect(() => {
     if (applied.current || !list.length) return;
@@ -43,11 +48,12 @@ export function DateRange({ tile, selection, select }: TileProps) {
 
   if (!time) return <div className="devbi-empty">指標ファイルに time（日付の列）を書いてください</div>;
   if (extent.error) return <div className="devbi-error">{extent.error.message}</div>;
-  const active = list.find((p) =>
+  const matches = list.filter((p) =>
     p.range === null
       ? !own
       : !!start && !!end && start.getTime() === p.range[0].getTime() && end.getTime() === p.range[1].getTime() && p.unit === own?.unit,
   );
+  const active = matches.find((p) => p.key === pickedKey) ?? matches[0];
   // The main periods (and the first one) are buttons; the rest are in a list.
   const buttons = list.filter((p) => p.button || p.key === tile.options?.default);
   const more = list.filter((p) => !buttons.includes(p));

@@ -152,7 +152,7 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
   const filters = useMemo(
     () => (hasQuery && crossfilter ? crossFilters(ctx, query, tileId) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [version, tileId, crossfilter, hasQuery, query?.metrics, ctx],
+    [version, tileId, crossfilter, hasQuery, query?.metrics, query?.period, ctx],
   );
   const key = JSON.stringify([query ?? null, filters]);
   const [state, setState] = useState<QueryState>({ rows: [], fields: [], filters: [], loading: !!query, error: null });
