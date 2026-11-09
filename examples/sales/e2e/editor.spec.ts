@@ -447,6 +447,50 @@ test("the property panel: an explore tile reads the rows, its first layout writt
   expect(errors).toEqual([]);
 });
 
+test("the property panel: a query written in Malloy or SQL shows on the tile at once, and so does what is wrong with it", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await openEditor(page);
+  await pick(page, "region");
+  const p = panel(page);
+  const tile = item(page, "region");
+  const bars = tile.locator(".devbi-barlist li");
+
+  // A first query: a count by the metrics file's first dimension (顧客, which is the dimension customer).
+  await p.getByLabel("書き方").selectOption({ label: "Malloy で書く" });
+  const malloy = p.getByLabel("Malloy", { exact: true });
+  await expect(malloy).toHaveValue("run: sales -> {\n  group_by: 顧客\n  aggregate: 件数 is count()\n}");
+  await expect(p.getByRole("group", { name: "指標" })).toHaveCount(0);
+  await expect(bars.first()).toBeVisible();
+  await expect(tile.locator(".devbi-error")).toHaveCount(0);
+
+  // What Malloy says is wrong, with its line; then the fixed query (⌘Enter), labelled and formatted as the measure revenue.
+  await malloy.fill("run: sales -> {\n  group_by: 地\n}");
+  await malloy.blur();
+  await expect(tile.locator(".devbi-error")).toHaveText("Malloy: '地' is not defined（2 行目）");
+  await malloy.fill("run: sales -> { group_by: 地域; aggregate: revenue is 金額.sum() }");
+  await malloy.press("ControlOrMeta+Enter");
+  await expect(tile.locator(".devbi-error")).toHaveCount(0);
+  await expect(bars.first()).toContainText("関東");
+  await expect(bars.first()).toContainText(/¥[\d,]+/);
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const saved = () => JSON.parse(readFileSync(salesFile, "utf8")).tiles.find((t: { id: string }) => t.id === "region").query;
+  expect(saved()).toEqual({ malloy: "run: sales -> { group_by: 地域; aggregate: revenue is 金額.sum() }" });
+
+  // SQL, then back to the names: what a new tile of its type starts with.
+  await p.getByLabel("書き方").selectOption({ label: "SQL で書く" });
+  await expect(p.getByLabel("SQL", { exact: true })).toHaveValue("SELECT 顧客, COUNT(*) AS 件数\nFROM sales\nGROUP BY ALL\nORDER BY 件数 DESC");
+  await expect(tile.locator(".devbi-error")).toHaveCount(0);
+  await expect(bars.first()).toBeVisible();
+  await p.getByLabel("書き方").selectOption({ label: "指標と軸を選ぶ" });
+  await expect(p.getByRole("group", { name: "指標" })).toBeVisible();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  expect(saved()).toEqual({ measures: ["revenue"], dimensions: ["customer"] });
+  expect(errors).toEqual([]);
+});
+
 test("the property panel keeps what is being typed: a new name when another tile is pressed, a date typed digit by digit", async ({ page }) => {
   await openEditor(page);
   const p = panel(page);

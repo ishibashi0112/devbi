@@ -1,4 +1,4 @@
-import type { Row, TileProps } from "devbi";
+import { customQuery, type Row, type TileProps } from "devbi";
 import { useMemo } from "react";
 import { useDevbiQuery } from "../context.js";
 import { pivotFields, pivotModel, totalQuery } from "./pivot-model.js";
@@ -12,7 +12,8 @@ export function Pivot({ rows, fields, format, tile, query, selection, select }: 
   const columns = typeof tile.options?.columns === "string" ? tile.options.columns : undefined;
   // Derived from `fields` once, so the model below is rebuilt only when the data changes.
   const { m, colField, rowFields } = useMemo(() => pivotFields(fields, columns), [fields, columns]);
-  const totals = tile.options?.totals !== false && !!colField && !!m;
+  // Totals are queries of the measure by fewer fields: not for Malloy or SQL, which say how they aggregate themselves.
+  const totals = tile.options?.totals !== false && !!colField && !!m && !customQuery(query);
 
   const sub = (keep: typeof fields) => totalQuery(query, m, keep);
   const rowTot = useDevbiQuery(totals && rowFields.length ? sub(rowFields) : null, { tileId: tile.id });

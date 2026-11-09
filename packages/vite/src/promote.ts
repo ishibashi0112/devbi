@@ -88,16 +88,28 @@ export function promotedTileSource(tile: PromotedTile, options: { name: string; 
   const title = oneLine(tile.title || tile.id);
   const hasQuery = info.query;
   const query = hasQuery ? (tile.query ?? {}) : undefined;
+  // Malloy or SQL: its columns are what the query says, not names to type (rows are plain rows).
+  const custom = typeof query?.malloy === "string" ? "Malloy" : typeof query?.sql === "string" ? "SQL" : undefined;
   const opts = tile.options && Object.keys(tile.options).length ? tile.options : undefined;
   const lines = [
     `// 「${title}」のタイル。GUI エディタの「コードにする」で、${what}から書き出したもの。`,
     "// このタイルのデータと描き方は、このファイルで変える（GUI で変えられるのは、位置・大きさ・見出し・名前）。",
     "// 自作タイルの書き方: https://github.com/ishibashi0112/devbi/blob/main/docs/reference.md#自作タイルjsx",
     `import { builtinTiles } from "@devbi/react";`,
-    query ? `import { defineQuery, type RowOf, type TileProps } from "devbi";` : `import type { TileProps } from "devbi";`,
+    custom
+      ? `import type { Query, TileProps } from "devbi";`
+      : query
+        ? `import { defineQuery, type RowOf, type TileProps } from "devbi";`
+        : `import type { TileProps } from "devbi";`,
     "",
   ];
-  if (query) {
+  if (query && custom) {
+    lines.push(
+      `// 何を出すか（${custom} で書いたクエリ。指標ファイルの名前が、その明細の行）`,
+      `export const query: Query = ${literal(query, "")};`,
+      "",
+    );
+  } else if (query) {
     const metrics = typeof query.metrics === "string" ? query.metrics : options.metrics;
     lines.push(
       `// 何を出すか（SQL は書かない）。${metrics ? `指標と軸の名前は models/${oneLine(metrics)}.metrics.yaml のもの` : "指標と軸の名前で書く"}`,
@@ -110,9 +122,9 @@ export function promotedTileSource(tile: PromotedTile, options: { name: string; 
     `// いまは${what}で描いている`,
     `const Builtin = builtinTiles${IDENT.test(tile.type) ? `.${tile.type}` : `[${JSON.stringify(tile.type)}]`}.component;`,
     "",
-    `export default function ${options.name}(props: TileProps${query ? "<RowOf<typeof query>>" : ""}) {`,
+    `export default function ${options.name}(props: TileProps${query && !custom ? "<RowOf<typeof query>>" : ""}) {`,
   );
-  const columns = query ? columnsOf(query, options.view) : [];
+  const columns = query && !custom ? columnsOf(query, options.view) : [];
   if (query) {
     lines.push("  // 自分で描くときは、下の return を書き換える。props.rows が集計済みの行（ほかのタイルの選択で絞ったもの）で、");
     if (columns.length) {
@@ -130,6 +142,8 @@ export function promotedTileSource(tile: PromotedTile, options: { name: string; 
         "  //     </ul>",
         "  //   );",
       );
+    } else if (custom) {
+      lines.push(`  // 列は ${custom} のクエリの結果の列（指標ファイルの軸の列は、その軸の名前）。props.fields に名前と見出しがある。`);
     } else {
       lines.push("  // 列は query に書いた指標・軸・時間。");
     }

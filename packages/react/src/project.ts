@@ -1,5 +1,6 @@
 import {
   apiCalls,
+  customViews,
   defineDashboard,
   defineMetricsView,
   type Dashboard,
@@ -96,7 +97,10 @@ export function viewsOf(project: Project, dashboard: Dashboard): MetricsView[] {
   const names = new Set<string>();
   const own = dashboard.metrics ?? (all.length === 1 ? all[0] : undefined);
   if (own) names.add(own);
-  for (const t of dashboard.tiles) if (t.query?.metrics) names.add(t.query.metrics);
+  for (const t of dashboard.tiles) {
+    if (t.query?.metrics) names.add(t.query.metrics);
+    if (t.query) for (const n of customViews(t.query, all)) names.add(n);
+  }
   return [...names].filter((n) => Object.hasOwn(project.metrics, n)).map((n) => project.metrics[n]!);
 }
 

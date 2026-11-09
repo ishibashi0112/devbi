@@ -236,6 +236,9 @@ export interface CompiledRows {
   newest: boolean;
 }
 
+/** What a tile that reads the model's rows as they are (explore) says to a query written in Malloy or SQL. */
+export const ROWS_CUSTOM = "明細の行をそのまま読むタイルでは malloy と sql は使えません（集計して出すなら、表やグラフのタイルにしてください）";
+
 /**
  * The rows of a metrics view's model, as they are (every column of the model), with the query's fixed filters and
  * the selections of other tiles: what the `explore` tile aggregates in the browser. The latest rows first, so a
@@ -243,6 +246,7 @@ export interface CompiledRows {
  * export and devbi-check). Only `metrics`, `filters` and `limit` of the query are used.
  */
 export function compileRows(view: MetricsView, query: Query, options: CompileOptions = {}): CompiledRows {
+  if (query.malloy !== undefined || query.sql !== undefined) throw new QueryError(ROWS_CUSTOM);
   const time = view.time;
   const fieldOf = (name: string): { expr: string; isTime: boolean } | undefined => {
     if (time && name === time.name) return { expr: time.expr, isTime: true };
@@ -262,6 +266,51 @@ export function compileRows(view: MetricsView, query: Query, options: CompileOpt
   const order = `\nORDER BY ${time ? `${time.expr} DESC NULLS LAST, ` : ""}COLUMNS(*)`;
   const sql = `WITH ${ident("__model")} AS (\n${indent(model, "  ")}\n)\nSELECT *\nFROM ${ident("__model")}${where(preds, "")}${order}\nLIMIT ${limit + 1}`;
   return { sql, limit, newest: !!time };
+}
+
+/**
+ * The rows a Malloy or SQL query (`query.malloy`, `query.sql`) reads from a metrics view: every column of its model
+ * (`columns`, as DuckDB describes it), then each dimension that is an expression, under its own name (a dimension that
+ * is a column is that column; one named like another column takes its place), filtered by `filters` (those on fields
+ * the view does not have are left out).
+ */
+export function compileSource(view: MetricsView, options: CompileOptions & { columns: readonly string[] }): string {
+  const time = view.time;
+  const fieldOf = (name: string): { expr: string; isTime: boolean } | undefined => {
+    if (time && name === time.name) return { expr: time.expr, isTime: true };
+    const d = getDimension(view, name);
+    return d ? { expr: d.expr, isTime: false } : undefined;
+  };
+  const preds = (options.filters ?? []).filter((f) => fieldOf(f.field)).map((f) => {
+    const { expr, isTime } = fieldOf(f.field)!;
+    return predicate(f, expr, isTime);
+  });
+  const columns = new Map(options.columns.map((c) => [c.toLowerCase(), c]));
+  const timeColumn = time?.column.toLowerCase();
+  const exclude: string[] = [];
+  const extra: string[] = [];
+  for (const d of Object.values(view.dimensions)) {
+    const col = plainColumn(d.expr);
+    const same = columns.get(d.name.toLowerCase());
+    if (col !== undefined && col.toLowerCase() === d.name.toLowerCase()) continue;
+    // Named like a column of the model: the dimension's values under its name, in place of the column's (not the time's).
+    if (same !== undefined) {
+      if (same.toLowerCase() === timeColumn) continue;
+      exclude.push(ident(same));
+    } else if (col !== undefined) continue;
+    extra.push(`,\n  ${d.expr} AS ${ident(d.name)}`);
+  }
+  const star = exclude.length ? `* EXCLUDE (${exclude.join(", ")})` : "*";
+  const model = options.model ?? view.model;
+  return `WITH ${ident("__model")} AS (\n${indent(model, "  ")}\n)\nSELECT\n  ${star}${extra.join("")}\nFROM ${ident("__model")}${where(preds, "")}`;
+}
+
+/** The column an expression is, when it is only a column (`"地域"`, `(地域)`). */
+export function plainColumn(expr: string): string | undefined {
+  const e = expr.trim().replace(/^\((.*)\)$/s, "$1").trim();
+  const quoted = /^"((?:[^"]|"")+)"$/.exec(e);
+  if (quoted) return quoted[1]!.replaceAll('""', '"');
+  return /^[\p{L}_][\p{L}\p{N}_$]*$/u.test(e) ? e : undefined;
 }
 
 function indent(text: string, pad: string): string {

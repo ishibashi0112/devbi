@@ -376,7 +376,11 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       // DuckDB-wasm is bundled ahead too (not excluded): with @devbi/react from npm, an excluded one imported its own
       // apache-arrow next to the copy in @devbi/react's bundle, and DuckDB took no table DevBI made (xlsx, the API);
       // with pnpm, the bundle's import of it did not resolve from the project at all.
-      return { optimizeDeps: { include }, server: { fs: { deny } } };
+      // Malloy (a Malloy tile) is bundled ahead too, from a linked devbi (from npm, it is in devbi's bundle).
+      const core = findPackage(root, "devbi");
+      if (command === "serve" && core?.linked) include.push("devbi > @malloydata/malloy", "devbi > @malloydata/malloy/connection");
+      // Malloy's parser uses npm's util, which reads process.env.NODE_DEBUG when it loads: there is no process in a browser.
+      return { define: { "process.env.NODE_DEBUG": "undefined" }, optimizeDeps: { include }, server: { fs: { deny } } };
     },
     configResolved(c) {
       config = c;

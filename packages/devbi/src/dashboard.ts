@@ -54,8 +54,35 @@ export function dashboardSchemas(names?: SchemaNames) {
       sort: z.array(sort).optional().describe("並べ替え。既定は時間の順、軸と指標があれば最初の指標の大きい順"),
       limit: z.number().int().positive().optional().describe("最大の行数"),
       period: z.boolean().optional().describe("false で、期間（date-range や時間のクリックでの選択）で絞らない"),
+      malloy: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "指標と軸の名前で言えない集計を Malloy で書く（run: sales -> { group_by: 地域; aggregate: 売上 is 金額.sum() }）。指標ファイルの名前が、その明細の行（期間と選択で絞ったもの）。measures・dimensions・time・sort・limit とは一緒に使えない",
+        ),
+      sql: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "指標と軸の名前で言えない集計を SQL（DuckDB）で書く（SELECT 地域, SUM(金額) AS 売上 FROM sales GROUP BY 1）。FROM の指標ファイルの名前が、その明細の行（期間と選択で絞ったもの）。measures・dimensions・time・sort・limit とは一緒に使えない",
+        ),
     })
-    .describe("何を出すか。SQL は書かず、指標と軸の名前で指定する");
+    .superRefine((q, ctx) => {
+      if (q.malloy !== undefined && q.sql !== undefined)
+        ctx.addIssue({ code: "custom", message: "malloy と sql はどちらか一つにしてください", path: ["sql"] });
+      if (q.malloy === undefined && q.sql === undefined) return;
+      for (const k of ["measures", "dimensions", "time", "sort", "limit"] as const) {
+        if (q[k] !== undefined)
+          ctx.addIssue({
+            code: "custom",
+            message: `${q.malloy !== undefined ? "malloy" : "sql"} のクエリでは ${k} は使えません（クエリの中に書いてください）`,
+            path: [k],
+          });
+      }
+    })
+    .describe("何を出すか。指標と軸の名前で指定する。名前で言えない集計は malloy か sql で書く");
   const gridInt = z.number().int().nonnegative();
   const tile = z
     .strictObject({

@@ -13,7 +13,9 @@ import {
   setDashboardKey,
   setOption,
   setQueryKey,
+  setQueryMode,
   setTileKey,
+  starterQuery,
   sortKeys,
   sortSpecs,
   toggle,
@@ -152,6 +154,33 @@ it("lists the time column, then the dimensions", () => {
     ["d", "日付"],
     ["region", "地域"],
   ]);
+});
+
+describe("query written in Malloy or SQL", () => {
+  const orders = defineMetricsView(
+    {
+      model: "SELECT 1",
+      time: { column: "date", label: "日付" },
+      dimensions: { status: { column: "状態" } },
+      measures: { n: { sql: "COUNT(*)" } },
+    },
+    "orders",
+  );
+  const both = { sales, orders };
+
+  it("starts with a count by the first dimension, or by month in order for a chart over time; words of the language quoted", () => {
+    expect(starterQuery("malloy", "barlist", sales)).toBe("run: sales -> {\n  group_by: r\n  aggregate: 件数 is count()\n}");
+    expect(starterQuery("malloy", "bar", orders)).toBe("run: orders -> {\n  group_by: 月 is `date`.month\n  aggregate: 件数 is count()\n  order_by: 月\n}");
+    expect(starterQuery("sql", "line", orders)).toBe("SELECT date_trunc('month', \"date\") AS 月, COUNT(*) AS 件数\nFROM orders\nGROUP BY ALL\nORDER BY 月");
+  });
+
+  it("back to names: the metrics file the query read stays the tile's, when not the dashboard's", () => {
+    const spec = { metrics: "sales", tiles: [] } as unknown as RawDashboard;
+    const sql = tile({ query: { sql: "SELECT 状態, COUNT(*) AS n FROM orders GROUP BY 1", filters: [{ field: "status", in: ["済"] }] } });
+    expect(setQueryMode(spec, sql, "names", orders, both).query).toEqual({ filters: [{ field: "status", in: ["済"] }], metrics: "orders", measures: ["n"], time: "month" });
+    const own = tile({ query: { sql: "SELECT 1 FROM sales" } });
+    expect(setQueryMode(spec, own, "names", sales, both).query).not.toHaveProperty("metrics");
+  });
 });
 
 describe("names, lists and sort", () => {

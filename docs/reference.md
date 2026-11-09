@@ -242,8 +242,9 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `limit` | 最大の行数 |
 | `period` | `false` で、期間（`date-range` で選んだ期間と、時間のグラフでクリックした期間）で絞らない。「いま対応中のすべて」「全期間の累計」のように、期間に関係なく出すタイルに。ほかの選択（地域のクリックなど）はかかる |
 | `metrics` | ダッシュボードとは別の指標ファイルを使うとき |
+| `malloy` / `sql` | 指標と軸の名前で言えない集計を、Malloy か SQL で書く（[下記](#malloy-と-sql-で書く)） |
 
-`measures` か `dimensions` か `time` のどれかが要ります（[`explore`](#探索explore) は別で、`metrics`・`filters`・`limit`・`period` だけを使い、`query` は書かなくてもよい）。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
+`measures` か `dimensions` か `time` のどれかが要ります（`malloy` か `sql` を書くときは要らない）（[`explore`](#探索explore) は別で、`metrics`・`filters`・`limit`・`period` だけを使い、`query` は書かなくてもよい）。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
 
 絞り込み（`filters` の要素。クリックでの選択も同じ形）:
 
@@ -258,6 +259,29 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 - `between` は「始まり ≦ 値 ＜ 終わり」で、終わりの日は含みません。どちらかを `null` にすると、その側は無制限です。
 - `between` の `unit`（`day`・`week`・`month`・`quarter`・`year`・`fiscal_year`）は、その期間の単位です。`previous_period` の比較が、同じ日数ではなく、前の単位の同じ日になります（上の `measures` の比較）。
 - タイルの `filters`、期間（`date-range`）、ほかのタイルのクリックでの選択は、すべて重ねてかかります（AND。期間どうしは重なる部分）。選択と期間は、その項目（期間なら `time` の列）を持つ指標ファイルのタイルにだけかかります。期間に関係なく出したいタイル（「いま対応中のすべて」など）は `"period": false` にします（期間だけが外れ、ほかの選択はかかります）。
+
+### Malloy と SQL で書く
+
+構成比や、多段の集計（顧客ごとに受注を数え、その回数ごとに顧客を数える）のような、指標と軸の名前では言えない集計は、`query` に [Malloy](https://www.malloydata.dev/)（MIT）か SQL（DuckDB）で書けます。組み込みタイルが、その結果をいつもどおりに描きます。
+
+```json
+{ "id": "region", "type": "barlist", "title": "地域別売上",
+  "query": { "malloy": "run: sales -> { group_by: 地域; aggregate: revenue is 金額.sum() }" } }
+{ "id": "repeat", "type": "bar", "title": "受注の回数ごとの顧客数",
+  "query": { "malloy": "run: sales -> { group_by: 顧客; aggregate: 受注回数 is count(受注番号) } -> { group_by: 受注回数; aggregate: 顧客数 is count() }" } }
+{ "id": "share", "type": "table", "title": "商品分類ごとの構成比",
+  "query": { "sql": "SELECT 商品分類, SUM(金額) AS revenue, ROUND(100 * SUM(金額) / SUM(SUM(金額)) OVER (), 1) AS \"構成比（%）\" FROM sales GROUP BY ALL ORDER BY 2 DESC" } }
+```
+
+- 指標ファイルの名前（`models/sales.metrics.yaml` なら `sales`）が、その `model` の行（明細）です。Malloy では source（`->` の前、`extend` の前、`join_one:` などの後）、SQL では表（`FROM` と `JOIN` の後）として読みます。列の名前や別名（`AS sales`）は、指標ファイルの名前と同じでも読みません。2 つ以上の指標ファイルを読んでもよい。
+- 読む行には、期間（`date-range`、時間のクリック）と、ほかのタイルの選択が、その指標ファイルの項目ならかかります（`"period": false` で期間を外せる）。期間で絞ったあとの行なので、前の期間と比べる集計は、指標ファイルの比較の指標（`compare:`）で書きます。`filters` も書けます（`metrics` の指標ファイル、なければ読む 1 つの指標ファイルの軸で）。
+- 行の列は `model` の列と、式で書いた軸（`sql:` の軸）をその名前で。`column:` の軸は、その列のまま（`地域`）です。`model` の列と同じ名前の軸（大文字と小文字の違いだけのものも）は、その列の代わりに軸の値が軸の名前で入ります（元の列は読めなくなるので、読みたいときは軸の名前を変えます。`time` の列は置きかえません）。
+- 結果の列のうち、指標ファイルの軸の列（`地域`）か軸の名前（`region`）の列は、その軸になります。見出しは軸の `label` で、クリックするとほかのタイルを絞ります。名前を変えた列（`group_by: エリア is 地域`）は、見出しだけがその名前です。Malloy では、`time` の列を月などで切った列（`group_by: 月 is 受注日.month`）も時間の軸になり、クリックでその月を選びます。SQL の日付の列と、Malloy の週（`.week`。Malloy の週は日曜始まりで、DevBI の週は月曜始まり）は、時間の軸にならず、クリックしても絞りません。
+- 指標は、Malloy では `aggregate:` の列、SQL では数の列です。指標ファイルの指標と同じ名前（`revenue`）にすると、その `label` と `format`（`¥#,##0`）で出ます。
+- `measures`・`dimensions`・`time`・`sort`・`limit` とは一緒に使えません（並べ替えと件数はクエリの中に書く）。`pivot` は、合計の行と列を出しません（集計のしかたをクエリが決めるため）。Malloy の `nest:` は表にならないので使えません。明細の行をそのまま読む `explore` のタイルでも使えません。
+- Malloy の `run:` は省けます。Malloy の間違いは、何行目かとともにタイルに出ます（`Malloy: '地' is not defined（2 行目）`）。
+- Malloy は、最初に Malloy のタイルを出すときに、別のファイルとして読みます（約 1.8MB、圧縮して約 440KB）。Malloy のタイルのないダッシュボードでは読みません。SQL は読み込むものがありません。
+- `devbi-check` も、Malloy と SQL のタイルを実行して確かめます。
 
 ## 組み込みタイル
 
@@ -673,7 +697,9 @@ pnpm add -D @devbi/editor
 | 種類 | `type`。データを使う種類どうしなら `query` はそのまま（`explore` と、ほかのデータを使う種類の間では、`query` の `metrics`・`filters`・`period` だけを残し、ほかは新しいタイルと同じに）。`date-range`・`markdown` にすると `query` を消し、データを使う種類に戻すと、新しいタイルと同じ `query` から始める。`options` は新しい種類にもあるものだけ残し、ほかは新しいタイルと同じ。タイルが自分の指標ファイルを使っていれば、`query.metrics` と `date-range` の `options.metrics` の間で引き継ぐ |
 | 見出し | `title`。空にするとキーを消す |
 | 名前（id） | `id`。Enter を押すか、欄を出たとき（ほかのタイルを押したときも）に変わる。空や、ほかのタイルと同じ名前にはできない |
-| 指標ファイル | `query.metrics`（指標ファイルが 2 つ以上あるときに出る）。「ダッシュボードと同じ」でキーを消す |
+| 書き方 | 「指標と軸を選ぶ」「Malloy で書く」「SQL で書く」。Malloy か SQL にすると、`query` の指標・軸・期間の単位・並び順・件数を消し、`query.malloy`（`query.sql`）に、指標ファイルの最初の軸ごとの件数（時間のグラフなら月ごと）を数えるクエリを書く。戻すと、新しいタイルと同じ指標と軸から始める（クエリが読んでいた指標ファイルがダッシュボードのものでなければ、`query.metrics` に書く）。`explore` では出ない |
+| Malloy / SQL | `query.malloy` / `query.sql`。欄を出たとき（⌘Enter、⌘S、ほかのタイルを押したときも）に書き、タイルに出る。間違いはタイルに出る。空にはできない |
+| 指標ファイル | `query.metrics`（指標ファイルが 2 つ以上あるときに出る）。「ダッシュボードと同じ」でキーを消す。Malloy・SQL では「絞り込みとクリックの指標ファイル」（2 つ以上を読むとき） |
 | 指標 / 軸 | `query.measures` / `query.dimensions`。チェックした順に並び（横の数字が順番）、↑ で 1 つ前へ。最初のものがタイルの主役（KPI の大きな数字、ランキングの軸など）。指標ファイルにない名前は「（ありません）」と出るので外す |
 | 期間の単位 | `query.time`。日・週（月曜始まり）・月・四半期・年・年度。「分けない」でキーを消す |
 | 期間で絞るか | `query.period`。「絞らない（いつも全期間）」で `false`、「絞る」でキーを消す。指標ファイルに `time` があるときに出る |
@@ -685,7 +711,7 @@ pnpm add -D @devbi/editor
 
 - 変えると、そのタイルにすぐ出ます。集計し直すのは変えたタイルだけで、期間などの選択はそのままです（期間のタイルの「最初の期間」を変えたときは、その期間から始め直します）。
 - 見出しなどの文字・数・日付の欄は、打ち始めてから欄を出るまでが 1 回の「元に戻す」です。
-- キーを足すときは、手で書くときと同じ場所に入れます（タイルは `id`、`x`〜`h`、`type`、`title`、`query`、`options` の順、`query` は `metrics`、`measures`、`dimensions`、`time`、`filters`、`sort`、`limit`、`period` の順）。ファイルにあるキーは動かしません。
+- キーを足すときは、手で書くときと同じ場所に入れます（タイルは `id`、`x`〜`h`、`type`、`title`、`query`、`options` の順、`query` は `metrics`、`measures`、`dimensions`、`time`、`filters`、`sort`、`limit`、`period`、`malloy`、`sql` の順）。ファイルにあるキーは動かしません。
 - タイルにデータが出ないとき（指標も軸もない、名前が指標ファイルにない、など）は、そのわけを設定欄の「データ」の下にも出します。指標も軸も外したときは `"query": {}` を残します（タイルがわけを出すように）。
 - `explore` のタイルでは、データの欄は指標ファイル・期間で絞るか・絞り込み・件数だけです（指標・軸・期間の単位・並び順は使わないので出しません。ファイルに書いてあれば、そう出して「消す」で消せます）。
 - 自作タイル（`component`）は、見出しと名前だけ変えられます（中身とデータの指定は、そのファイルで変えます）。
@@ -1327,8 +1353,13 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `formatDashboardJson(spec)` | dash.json を、手で書いたときと同じ形の文字にする（[保存のしかた](#保存のしかたgit-の差分)）。GUI エディタが保存に使う |
 | `checkQuery(obj, source)` | クエリだけを検証する |
 | `compileQuery(view, query, { filters?, model? })` | クエリを DuckDB の SQL にする。戻り値は `{ sql, fields }`。名前の間違いは `QueryError` |
-| `compileRows(view, query, { filters?, model? })` | `model` の行をそのまま読む SQL（`explore`）。`query` の `filters`・`limit`（既定は `EXPLORE_ROWS` = 100,000）だけを使い、新しいほうから（同じ日時は、すべての列の順で）`limit + 1` 行を読む（多かったかが分かるように）。戻り値は `{ sql, limit, newest }`（`newest` は `time` の列で並べたか） |
+| `compileRows(view, query, { filters?, model? })` | `model` の行をそのまま読む SQL（`explore`）。`query` の `filters`・`limit`（既定は `EXPLORE_ROWS` = 100,000）だけを使い、新しいほうから（同じ日時は、すべての列の順で）`limit + 1` 行を読む（多かったかが分かるように）。戻り値は `{ sql, limit, newest }`（`newest` は `time` の列で並べたか）。`malloy`・`sql` のクエリは `QueryError`（`ROWS_CUSTOM`） |
 | `compileTimeExtent(view)` | 日付の最初と最後を出す SQL |
+| `customQuery(query)` / `customViews(query, names)` / `customMainView(query, views)` | `malloy` か `sql` のクエリか（`{ lang, text }`）/ それが表（source）として読む指標ファイルの名前 / その絞り込みとクリックの指標ファイル |
+| `compileSource(view, { columns, filters?, model? })` | Malloy・SQL のクエリが読む行の SQL（`model` の列 `columns` と式の軸、絞り込み。列と同じ名前の軸は、その列を置きかえる） |
+| `compileMalloy(text, [{ name, table, schema }])` | Malloy を DuckDB の SQL にする（Malloy はこのとき読み込む）。戻り値は `{ sql, columns }`。間違いは `QueryError` |
+| `withSources(sql, [{ table, sql }])` / `customTable(lang, name)` | SQL の前に、指標ファイルの行を CTE として足す / その名前 |
+| `customFields(lang, columns, view)` / `sqlColumns(columns)` / `customSelectable(fields, view)` | 結果の列を、指標ファイルの軸・時間・指標の `fields` にする（軸の列はその軸の名前に）/ DuckDB の型から列の種類 / クリックでほかのタイルを絞る列（指標ファイルの軸と、粒度のある時間） |
 | `scanSources(sql)` / `apiParams(source)` | `model` の中の `read_*(...)` と `read_api(...)` を見つける / `read_api` の引数をパラメーターの値にする |
 | `apiCalls(sql)` / `snapshotFile(name, params)` | `model` の中の `read_api` の名前とパラメーター / そのスナップショットのファイル名（ブラウザとサーバーで同じ） |
 | `readXlsx(bytes, { sheet?, range?, header?, allVarchar? })` | Excel を型つきの列で読む。戻り値は `{ sheet, rowCount, columns: [{ name, type, values }], range? }`（`range` は読んだセルの範囲で、見出しの行を含む。`A1:K3068`） |

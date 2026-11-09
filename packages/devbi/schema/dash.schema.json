@@ -262,10 +262,20 @@
               "period": {
                 "description": "false で、期間（date-range や時間のクリックでの選択）で絞らない",
                 "type": "boolean"
+              },
+              "malloy": {
+                "description": "指標と軸の名前で言えない集計を Malloy で書く（run: sales -> { group_by: 地域; aggregate: 売上 is 金額.sum() }）。指標ファイルの名前が、その明細の行（期間と選択で絞ったもの）。measures・dimensions・time・sort・limit とは一緒に使えない",
+                "type": "string",
+                "minLength": 1
+              },
+              "sql": {
+                "description": "指標と軸の名前で言えない集計を SQL（DuckDB）で書く（SELECT 地域, SUM(金額) AS 売上 FROM sales GROUP BY 1）。FROM の指標ファイルの名前が、その明細の行（期間と選択で絞ったもの）。measures・dimensions・time・sort・limit とは一緒に使えない",
+                "type": "string",
+                "minLength": 1
               }
             },
             "additionalProperties": false,
-            "description": "何を出すか。SQL は書かず、指標と軸の名前で指定する"
+            "description": "何を出すか。指標と軸の名前で指定する。名前で言えない集計は malloy か sql で書く"
           },
           "options": {
             "description": "タイルの種類ごとの設定",
