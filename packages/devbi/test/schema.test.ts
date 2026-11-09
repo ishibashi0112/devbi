@@ -32,11 +32,18 @@ describe("JSON Schema", () => {
     expect(dash(tile({ type: "pivot", options: { colums: "region" } }))).toBe(false);
     expect(dash(tile({ type: "date-range", options: { default: "latest_fiscal_year" } }))).toBe(true);
     expect(dash(tile({ type: "date-range", options: { default: "this_year" } }))).toBe(false);
+    expect(dash(tile({ type: "date-range", options: { default: "last_7_days" } }))).toBe(true);
+    expect(dash(tile({ type: "kpi", query: { measures: ["n"], period: false } }))).toBe(true);
+    expect(dash(tile({ type: "kpi", query: { measures: ["n"], period: "no" } }))).toBe(false);
+    expect(dash(tile({ type: "kpi", query: { filters: [{ field: "d", between: ["2026-10-01", null], unit: "month" }] } }))).toBe(true);
+    expect(dash(tile({ type: "kpi", query: { filters: [{ field: "d", in: ["x"], unit: "month" }] } }))).toBe(false);
     expect(dash(tile({ component: "./x.tsx", options: { anything: 1 } }))).toBe(true);
 
     const metrics = ajv().compile(metricsJsonSchema());
     expect(metrics({ model: "SELECT 1", measures: { n: "COUNT(*)" } })).toBe(true);
     expect(metrics({ model: "SELECT 1", measures: { n: { of: "x", compare: "last_year" } } })).toBe(false);
+    expect(metrics({ model: "SELECT 1", measures: { n: { sql: "COUNT(*)", better: "lower" } } })).toBe(true);
+    expect(metrics({ model: "SELECT 1", measures: { n: { sql: "COUNT(*)", better: "less" } } })).toBe(false);
     expect(metrics({ measures: { n: "COUNT(*)" } })).toBe(false);
   });
 

@@ -83,6 +83,7 @@
 - 前年比・前年差・累計は SQL で書かず、`{ of: revenue, compare: previous_year, as: ratio }` や `{ of: revenue, running: fiscal_year }` にする（`time` が要る）
 - 単価や率は、合計どうしの割り算にする（`avg_price: { sql: revenue / quantity }`）。行ごとの比を `AVG` しない。1 行に 1 つの点数（満足度など）の平均は `AVG(列)` でよい（`AVG` と `COUNT(列)` は空欄を数えない）
 - 件数は、数えるものに合わせる（明細の行なら `COUNT(*)`、伝票なら `COUNT(DISTINCT 伝票番号)`）
+- 少ないほうが良い指標（クレームの件数、不良の数、対応にかかった時間など）には `better: lower` を書く。kpi の比較の色が逆になる（増えると赤）。その指標の比較（`of`）にも引き継がれる
 
 ### ダッシュボード（dash.json）
 
@@ -90,8 +91,9 @@
 - グリッドは 12 列。`x + w` は 12 まで、タイルは重ねない
 - 並べ方の目安（上から）: 期間 `date-range`（`w` 12・`h` 1）、数字 `kpi`（`w` 3・`h` 2 を 4 つずつ）、推移とランキング（`bar`・`line` は `w` 8・`h` 4、`barlist` は `w` 4・`h` 4）、表 `table`・`pivot`（`h` 5）、説明の `markdown`（`w` 12・`h` 2）
 - 種類の選び方: 1 つの数字は `kpi`、時間の推移は `bar`（比べる系列があれば `line`）、内訳の推移は `area`、順位は `barlist`（`limit` 10 ほど）、2 つの項目の掛け合わせは `pivot`、一覧は `table`（`limit` を付ける）、値で絞る入口は `select`
-- `date-range` の期間は、その `time` の列を持つ指標ファイルのタイルすべてにかかる（組み込みのタイルでは外せない）。「いま対応中のすべて」のように期間に関係なく出したいものは、そのことを伝える（要るなら自作タイルで `useDevbiQuery(query, { crossfilter: false })`）
-- 比較の指標（`compare`）は、`time` のあるクエリか、`date-range` のあるダッシュボードで使う（全期間のままだと空になる）。kpi の 2 つ目からの指標は、`as` が `ratio`・`change`・`delta` だと、増えたか同じなら緑・減ると赤になる（少ないほうが良い指標でも）。色が合わないときは `as: value`（前の期間の値をそのまま出す）
+- `date-range` の最初の期間（`options.default`）は、見る人の使い方に合わせる。毎日見るなら `latest_day`・`last_7_days`・`latest_week`、月の会議なら `latest_month`・`previous_month`、四半期なら `latest_quarter`、年度なら `latest_fiscal_year`（`time` に `fiscal_year_start` が要る）。「最新」「直近」は、今日ではなくデータの最終日が基準
+- `date-range` の期間は、その `time` の列を持つ指標ファイルのタイルすべてにかかる。「いま対応中のすべて」「全期間の累計」のように期間に関係なく出すタイルは、`query` に `"period": false` を書く（期間だけが外れ、地域のクリックなどほかの選択はかかる）
+- 比較の指標（`compare`）は、`time` のあるクエリか、`date-range` のあるダッシュボードで使う（全期間のままだと空になる）。`previous_period` は、月・週・四半期・年の期間なら前の月（週…）の同じ日と、`last_7_days` などなら同じ日数だけ前と比べる。kpi の 2 つ目からの指標は、`as` が `ratio`・`change`・`delta` だと、増えると緑・減ると赤になる（`better: lower` の指標は逆）
 - `sort` は配列（`["-revenue"]`。`-` で大きい順）
 - タイルの `id` は英小文字と `-`、`title` は日本語
 

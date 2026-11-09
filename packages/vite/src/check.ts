@@ -370,7 +370,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
           continue;
         }
         const [start, end] = preset.range;
-        filters.push({ field: time.name, between: [start, end] });
+        filters.push({ field: time.name, between: [start, end], ...(preset.unit ? { unit: preset.unit } : {}) });
         const day = (d: Date) => d.toISOString().slice(0, 10);
         shown.push({
           field: time.name,
@@ -493,7 +493,9 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
         }
         let compiled;
         try {
-          compiled = compileQuery(entry.view, query, { model: st.model, filters });
+          // `period: false`: not filtered on the time column (crossFilters).
+          const own = query.period === false ? filters.filter((f) => f.field !== entry.view.time?.name) : filters;
+          compiled = compileQuery(entry.view, query, { model: st.model, filters: own });
         } catch (e) {
           fail(`${message(e)}${e instanceof QueryError ? namesHint(entry.view, message(e)) : ""}`);
           continue;
@@ -521,7 +523,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
         if (shape) fail(shape);
         // When the model has no rows, that is the one warning (on the metrics file).
         else if (tile.rows === 0 && st.rows > 0) {
-          const applied = periodsOf(entry.view);
+          const applied = query.period === false ? [] : periodsOf(entry.view);
           const period = applied.length ? `date-range の最初の期間 ${applied.join("・")} で。` : "";
           add("warning", file, `${where(t)}: 結果が 0 行です（${period}query.filters や指標の式を確かめてください）`);
         }

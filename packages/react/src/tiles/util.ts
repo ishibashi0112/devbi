@@ -55,7 +55,8 @@ function same(a: Scalar | undefined, b: Scalar | undefined): boolean {
 /** The filter that selects one row value of a field (a time bucket becomes a range). */
 export function filterFor(field: FieldInfo, value: Scalar): Filter {
   if (field.kind === "time" && value instanceof Date) {
-    return { field: field.name, between: [value, nextBucket(value, field.grain)] };
+    // With its grain as the unit: previous_period on a clicked month is the month before.
+    return { field: field.name, between: [value, nextBucket(value, field.grain)], ...(field.grain ? { unit: field.grain } : {}) };
   }
   return { field: field.name, in: [value] };
 }

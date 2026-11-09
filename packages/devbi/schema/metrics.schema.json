@@ -128,6 +128,14 @@
               "format": {
                 "type": "string",
                 "description": "書式。\"#,##0\"、\"¥#,##0\"、\"0.0%\"、\"compact\" など（Excel の表示形式の一部）"
+              },
+              "better": {
+                "description": "良い向き。lower は少ないほうが良い指標（クレームの件数など）で、kpi の比較の色が逆になる。既定は higher",
+                "type": "string",
+                "enum": [
+                  "higher",
+                  "lower"
+                ]
               }
             },
             "required": [
@@ -173,6 +181,14 @@
               "format": {
                 "type": "string",
                 "description": "書式。\"#,##0\"、\"¥#,##0\"、\"0.0%\"、\"compact\" など（Excel の表示形式の一部）"
+              },
+              "better": {
+                "description": "良い向き。lower は少ないほうが良い指標（クレームの件数など）で、kpi の比較の色が逆になる。既定は of の指標の向き",
+                "type": "string",
+                "enum": [
+                  "higher",
+                  "lower"
+                ]
               }
             },
             "required": [

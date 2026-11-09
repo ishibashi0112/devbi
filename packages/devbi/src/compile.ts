@@ -1,6 +1,6 @@
 import { getDimension, getMeasure, type CompareMeasure, type MeasureDef, type MetricsView, type RunningMeasure, type SqlMeasure } from "./metrics.js";
 import { ident, literal, timeLiteral } from "./sql.js";
-import type { FieldInfo, Filter, Grain, Query, Scalar, SortSpec } from "./types.js";
+import { GRAINS, type FieldInfo, type Filter, type Grain, type Query, type Scalar, type SortSpec } from "./types.js";
 
 export class QueryError extends Error {
   constructor(message: string) {
@@ -161,6 +161,7 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
       kind: "measure" as const,
       ...(m.format ? { format: m.format } : {}),
       ...(m.kind === "compare" ? { compare: m.as } : {}),
+      ...(m.better === "lower" ? { better: "lower" as const } : {}),
     })),
   ];
   const order = resolveSort(query.sort, fields);
@@ -209,7 +210,7 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
     const targets = [...new Set(measures.filter((x): x is CompareMeasure => x.kind === "compare" && x.compare === m.compare).map((x) => x.of))];
     const name = `__${m.compare}`;
     // `+ INTERVAL 1 YEAR` maps Feb 29 onto Feb 28; by the day that would count two days of last year, and Feb 29 has no match anyway.
-    const leapDay = m.compare === "previous_year" && grain === "day" ? [`NOT (month(${time!.expr}) = 2 AND day(${time!.expr}) = 29)`] : [];
+    const leapDay = m.compare === "previous_year" && (grain ?? range.unit) === "day" ? [`NOT (month(${time!.expr}) = 2 AND day(${time!.expr}) = 29)`] : [];
     ctes.push(cte(name, prevKeys, aggCols(targets.map((t) => view.measures[t] as SqlMeasure)), [...preds(shifted), ...leapDay]));
     const on = keys.length ? keys.map((k) => `c.${ident(k.name)} IS NOT DISTINCT FROM ${alias}.${ident(k.name)}`).join("\n  AND ") : "TRUE";
     joins.push(`LEFT JOIN ${ident(name)} AS ${alias}\n  ON ${on}`);
@@ -271,10 +272,15 @@ function runningOut(m: RunningMeasure, cur: string, timeKey: string | undefined,
   return `SUM(${cur}) OVER (${by}ORDER BY ${timeKey} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`;
 }
 
-/** The intersection of `between` filters on the time column. */
-export function timeRange(filters: Filter[], timeName: string | undefined): { start?: Date; end?: Date } {
+/**
+ * The intersection of `between` filters on the time column, and the calendar unit of the narrowest closed one (a
+ * clicked month within the fiscal year picked on the date-range tile: the month). Equally long: the finer unit, so
+ * the result does not depend on the order of the filters (which tile was clicked last).
+ */
+export function timeRange(filters: Filter[], timeName: string | undefined): { start?: Date; end?: Date; unit?: Grain } {
   let start: Date | undefined;
   let end: Date | undefined;
+  let narrowest: { span: number; rank: number; unit?: Grain } | undefined;
   if (!timeName) return {};
   for (const f of filters) {
     if (f.field !== timeName || !("between" in f)) continue;
@@ -282,8 +288,16 @@ export function timeRange(filters: Filter[], timeName: string | undefined): { st
     const hi = f.between[1] === null ? undefined : toDate(f.between[1]);
     if (lo && (!start || lo > start)) start = lo;
     if (hi && (!end || hi < end)) end = hi;
+    if (lo && hi) {
+      const span = hi.getTime() - lo.getTime();
+      const rank = f.unit ? GRAINS.indexOf(f.unit) : GRAINS.length;
+      if (!narrowest || span < narrowest.span || (span === narrowest.span && rank < narrowest.rank)) {
+        narrowest = { span, rank, ...(f.unit ? { unit: f.unit } : {}) };
+      }
+    }
   }
-  return { ...(start ? { start } : {}), ...(end ? { end } : {}) };
+  const unit = narrowest?.unit;
+  return { ...(start ? { start } : {}), ...(end ? { end } : {}), ...(unit ? { unit } : {}) };
 }
 
 const PERIOD_INTERVAL: Record<Grain, string> = {
@@ -302,12 +316,15 @@ const PERIOD_INTERVAL: Record<Grain, string> = {
 function shiftInterval(
   compare: CompareMeasure["compare"],
   grain: Grain | undefined,
-  range: { start?: Date; end?: Date },
+  range: { start?: Date; end?: Date; unit?: Grain },
 ): string | undefined {
   const bounded = !!grain || (!!range.start && !!range.end);
   if (!bounded) return undefined;
-  if (compare === "previous_year") return grain === "week" ? "INTERVAL 364 DAY" : "INTERVAL 1 YEAR";
+  // By the week (a week grain, or the latest week picked): 52 weeks, so weekdays line up.
+  if (compare === "previous_year") return (grain ?? range.unit) === "week" ? "INTERVAL 364 DAY" : "INTERVAL 1 YEAR";
   if (grain) return PERIOD_INTERVAL[grain];
+  // A calendar period (this month so far): the same days of the one before (the previous month's first days).
+  if (range.unit) return PERIOD_INTERVAL[range.unit];
   const days = Math.round((range.end!.getTime() - range.start!.getTime()) / MS_PER_DAY);
   return days > 0 ? `INTERVAL ${days} DAY` : undefined;
 }

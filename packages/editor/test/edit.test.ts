@@ -18,6 +18,7 @@ import {
   toggle,
   updateTile,
   withKey,
+  type FilterRow,
   TILE_KEYS,
 } from "../src/edit.js";
 import type { RawDashboard, RawTile } from "../src/layout.js";
@@ -174,6 +175,15 @@ describe("filters", () => {
     expect(rowFilter({ kind: "period", field: "d", from: "2025-04-01", to: "2026-03-31" })).toEqual({ field: "d", between: ["2025-04-01", "2026-04-01"] });
     expect(rowFilter({ kind: "period", field: "d", from: null, to: "2024-12-31" })).toEqual({ field: "d", between: [null, "2025-01-01"] });
     expect(rowFilter({ kind: "period", field: "d", from: null, to: null })).toBeNull();
+    // A calendar unit stays when the days are changed; an unknown one leaves the filter as written.
+    const month = filterRow({ field: "d", between: ["2026-10-01", "2026-11-01"], unit: "month" }, "d");
+    expect(month).toEqual({ kind: "period", field: "d", from: "2026-10-01", to: "2026-10-31", unit: "month" });
+    expect(rowFilter({ ...(month as Extract<FilterRow, { kind: "period" }>), to: "2026-10-15" })).toEqual({
+      field: "d",
+      between: ["2026-10-01", "2026-10-16"],
+      unit: "month",
+    });
+    expect(filterRow({ field: "d", between: ["2026-10-01", null], unit: "moon" }, "d").kind).toBe("other");
   });
 
   it("picks values of a dimension; nothing picked is no filter", () => {

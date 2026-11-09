@@ -32,6 +32,10 @@ const compareInput = z.strictObject({
   label: label.optional(),
   description: description.optional(),
   format: format.optional(),
+  better: z
+    .enum(["higher", "lower"])
+    .optional()
+    .describe("良い向き。lower は少ないほうが良い指標（クレームの件数など）で、kpi の比較の色が逆になる。既定は of の指標の向き"),
 });
 
 const runningInput = z.strictObject({
@@ -49,6 +53,10 @@ const sqlMeasureInput = z.strictObject({
   label: label.optional(),
   description: description.optional(),
   format: format.optional(),
+  better: z
+    .enum(["higher", "lower"])
+    .optional()
+    .describe("良い向き。lower は少ないほうが良い指標（クレームの件数など）で、kpi の比較の色が逆になる。既定は higher"),
 });
 
 const measureInput = z.union([text.describe("集計の式（sql）"), sqlMeasureInput, compareInput, runningInput]);
@@ -101,6 +109,8 @@ interface MeasureBase {
   label: string;
   format?: string;
   description?: string;
+  /** Which way is good: `lower` for a measure where less is better (complaints). Comparisons take their `of`'s. */
+  better?: "higher" | "lower";
 }
 
 export interface SqlMeasure extends MeasureBase {
@@ -223,11 +233,12 @@ export function defineMetricsView(data: unknown, name: string, source = `${name}
     if (Object.hasOwn(dimensions, mname) || (time && mname === time.name)) {
       issues.push({ path: `measures.${mname}`, message: `軸と同じ名前は使えません: ${mname}` });
     }
-    const base = (def: { label?: string; description?: string; format?: string }) => ({
+    const base = (def: { label?: string; description?: string; format?: string; better?: "higher" | "lower" }) => ({
       name: mname,
       label: def.label ?? mname,
       ...(def.description ? { description: def.description } : {}),
       ...(def.format ? { format: def.format } : {}),
+      ...(def.better ? { better: def.better } : {}),
     });
     if (typeof m === "string" || "sql" in m) {
       const def = typeof m === "string" ? { sql: m } : m;
@@ -293,6 +304,7 @@ export function defineMetricsView(data: unknown, name: string, source = `${name}
     }
     if (m.kind === "compare") {
       if (m.label === m.name) m.label = `${target.label} ${COMPARE_LABEL[m.compare][m.as]}`;
+      if (!m.better && target.better) m.better = target.better;
       if (!m.format) {
         const fmt = m.as === "ratio" || m.as === "change" ? "0.0%" : target.format;
         if (fmt) m.format = fmt;

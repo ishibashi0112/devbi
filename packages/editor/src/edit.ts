@@ -1,10 +1,10 @@
-import { TILE_TYPES, type BuiltinTileType, type Filter, type MetricsView, type Scalar, type SortSpec } from "devbi";
+import { GRAINS, TILE_TYPES, type BuiltinTileType, type Filter, type Grain, type MetricsView, type Scalar, type SortSpec } from "devbi";
 import { newTile, type RawDashboard, type RawTile } from "./layout.js";
 
 /** Where each key goes in a hand-written file, so a key the panel adds lands where a person would put it. */
 export const DASHBOARD_KEYS = ["$schema", "title", "description", "metrics", "columns", "rowHeight", "tiles"] as const;
 export const TILE_KEYS = ["id", "x", "y", "w", "h", "type", "component", "title", "query", "options"] as const;
-export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit"] as const;
+export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit", "period"] as const;
 
 type Obj = Record<string, unknown>;
 
@@ -181,7 +181,7 @@ export function shiftDay(day: string, days: number): string {
  */
 export type FilterRow =
   | { kind: "in"; field: string; values: Scalar[] }
-  | { kind: "period"; field: string; from: string | null; to: string | null }
+  | { kind: "period"; field: string; from: string | null; to: string | null; unit?: Grain }
   | { kind: "other"; filter: unknown };
 
 export function filterRow(filter: unknown, timeName: string | undefined): FilterRow {
@@ -191,7 +191,11 @@ export function filterRow(filter: unknown, timeName: string | undefined): Filter
   if (Array.isArray(filter.between) && field === timeName && filter.between.length === 2) {
     const [lo, hi] = filter.between as unknown[];
     const day = (v: unknown) => v === null || (typeof v === "string" && DAY.test(v));
-    if (day(lo) && day(hi)) return { kind: "period", field, from: lo as string | null, to: hi === null ? null : shiftDay(hi as string, -1) };
+    // A calendar unit (previous_period compares with the month before) stays when the days are changed.
+    const unit = filter.unit === undefined ? undefined : (GRAINS as readonly unknown[]).includes(filter.unit) ? (filter.unit as Grain) : null;
+    if (day(lo) && day(hi) && unit !== null) {
+      return { kind: "period", field, from: lo as string | null, to: hi === null ? null : shiftDay(hi as string, -1), ...(unit ? { unit } : {}) };
+    }
   }
   return { kind: "other", filter };
 }
@@ -200,5 +204,5 @@ export function filterRow(filter: unknown, timeName: string | undefined): Filter
 export function rowFilter(row: Exclude<FilterRow, { kind: "other" }>): Filter | null {
   if (row.kind === "in") return row.values.length ? { field: row.field, in: row.values } : null;
   if (!row.from && !row.to) return null;
-  return { field: row.field, between: [row.from || null, row.to ? shiftDay(row.to, 1) : null] };
+  return { field: row.field, between: [row.from || null, row.to ? shiftDay(row.to, 1) : null], ...(row.unit ? { unit: row.unit } : {}) };
 }

@@ -40,6 +40,21 @@ test("the period presets change every tile; comparisons need a bounded period", 
   await expect(tile(page, "kpi-revenue").locator("dd").last()).toHaveText(/^\d+\.\d%$/);
 });
 
+test("the other periods are in a list beside the buttons", async ({ page }) => {
+  await ready(page);
+  const period = tile(page, "period");
+  const more = period.getByLabel("ほかの期間");
+  await expect(more).toHaveValue("");
+  await more.selectOption({ label: "直近7日" });
+  await expect(more).toHaveAttribute("data-active", "true");
+  await expect(page.locator(".devbi-filters")).toContainText("2026/10/24〜2026/10/30");
+  await expect(period.getByRole("button", { pressed: true })).toHaveCount(0);
+  // A button again: the list shows its placeholder.
+  await period.getByRole("button", { name: "全期間" }).click();
+  await expect(more).toHaveValue("");
+  await expect(more).not.toHaveAttribute("data-active");
+});
+
 test("clicking a region cross-filters the other tiles but not itself", async ({ page }) => {
   await ready(page);
   const kanto = tile(page, "region").getByRole("button", { name: /関東/ });

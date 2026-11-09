@@ -1,5 +1,5 @@
-import { dateRangePresets, isoDate, type Filter, type TileProps } from "devbi";
-import { useEffect, useMemo, useRef } from "react";
+import { dateRangePresets, isoDate, type DateRangeOption, type Filter, type Grain, type TileProps } from "devbi";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDevbi, useTimeExtent } from "../context.js";
 
 const DAY = 86_400_000;
@@ -11,8 +11,8 @@ function asDate(v: unknown): Date | null {
 }
 
 /**
- * A period picker for the time column. `options.default` picks the initial preset:
- * all, latest_month, last_12_months, latest_year, previous_year, year_to_date, latest_fiscal_year, previous_fiscal_year.
+ * A period picker for the time column. `options.default` picks the initial preset (DATE_RANGE_PRESETS). The main
+ * periods are buttons, the others are in a list.
  */
 export function DateRange({ tile, selection, select }: TileProps) {
   const ctx = useDevbi();
@@ -25,34 +25,69 @@ export function DateRange({ tile, selection, select }: TileProps) {
   const start = asDate(own?.between[0]);
   const end = asDate(own?.between[1]);
   const applied = useRef(false);
+  // The period last picked: of periods with the same days (this year and this year so far), the one pressed.
+  const [pickedKey, setPickedKey] = useState<string>();
 
-  const apply = (range: [Date, Date] | null) => {
+  // A period's unit goes with it: previous_period then compares with the same days of the month (week…) before.
+  const apply = (range: [Date, Date] | null, unit?: Grain) => {
     if (!time) return;
-    select(range ? { field: time.name, between: range } : null);
+    select(range ? { field: time.name, between: range, ...(unit ? { unit } : {}) } : null);
+  };
+  const pick = (p: DateRangeOption) => {
+    setPickedKey(p.key);
+    apply(p.range, p.unit);
   };
 
   useEffect(() => {
     if (applied.current || !list.length) return;
     applied.current = true;
     const def = list.find((p) => p.key === tile.options?.default);
-    if (def && !own) apply(def.range);
+    if (def && !own) pick(def);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [list]);
 
   if (!time) return <div className="devbi-empty">指標ファイルに time（日付の列）を書いてください</div>;
   if (extent.error) return <div className="devbi-error">{extent.error.message}</div>;
-  const active = list.find((p) =>
-    p.range === null ? !own : !!start && !!end && start.getTime() === p.range[0].getTime() && end.getTime() === p.range[1].getTime(),
+  const matches = list.filter((p) =>
+    p.range === null
+      ? !own
+      : !!start && !!end && start.getTime() === p.range[0].getTime() && end.getTime() === p.range[1].getTime() && p.unit === own?.unit,
   );
+  const active = matches.find((p) => p.key === pickedKey) ?? matches[0];
+  // The main periods (and the first one) are buttons; the rest are in a list.
+  const buttons = list.filter((p) => p.button || p.key === tile.options?.default);
+  const more = list.filter((p) => !buttons.includes(p));
+  const picked = active && more.includes(active) ? active : undefined;
   const inputEnd = end ? isoDate(new Date(end.getTime() - DAY)) : "";
   return (
     <div className="devbi-daterange">
       <div className="devbi-chips" role="group" aria-label={`${time.label}の期間`}>
-        {list.map((p) => (
-          <button key={p.key} type="button" aria-pressed={active?.key === p.key} onClick={() => apply(p.range)}>
+        {buttons.map((p) => (
+          <button key={p.key} type="button" aria-pressed={active?.key === p.key} onClick={() => pick(p)}>
             {p.label}
           </button>
         ))}
+        {more.length > 0 && (
+          <select
+            name={`${tile.id}-more`}
+            aria-label="ほかの期間"
+            data-active={picked ? true : undefined}
+            value={picked?.key ?? ""}
+            onChange={(e) => {
+              const p = more.find((x) => x.key === e.target.value);
+              if (p) pick(p);
+            }}
+          >
+            <option value="" disabled>
+              ほかの期間
+            </option>
+            {more.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div className="devbi-daterange-inputs">
         <input

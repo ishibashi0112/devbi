@@ -79,7 +79,7 @@
               "markdown"
             ],
             "enumDescriptions": [
-              "大きな数字。最初の指標を大きく、残りの指標をその下に出す。比較の指標は良し悪しで色が付く",
+              "大きな数字。最初の指標を大きく、残りの指標をその下に出す。比較の指標は良し悪しで色が付く（better: lower の指標は減ると良い）",
               "棒グラフ。横軸は time、なければ最初の軸。2 つ目の軸か 2 つ目以降の指標は色分けの系列。棒をクリックで選択",
               "折れ線グラフ。軸の決め方は bar と同じ。点をクリックで選択",
               "積み上げ面グラフ。軸の決め方は bar と同じ。系列は大きい順に積む",
@@ -87,7 +87,7 @@
               "表。すべての列を出す。見出しで並べ替え、行をクリックでその行の軸の値を選択",
               "クロス集計。1 つの項目を列に、残りの軸を行に、最初の指標をセルに。合計の行と列つき",
               "最初の軸の値の一覧から選ぶ。9 件以上で検索欄が出る",
-              "期間の選択。time の列で全タイルを絞る。query は書かない",
+              "期間の選択。time の列を持つ指標ファイルのタイルを絞る（query.period が false のタイルは除く）。主な期間はボタン、ほかは「ほかの期間」から。query は書かない",
               "文章。**太字**、*斜体*、`コード`、[リンク](URL)、# 見出し、- 箇条書き。query は書かない"
             ]
           },
@@ -198,6 +198,18 @@
                           "minItems": 2,
                           "maxItems": 2,
                           "description": "[始まり, 終わり]。始まり ≦ 値 ＜ 終わり。null の側は無制限"
+                        },
+                        "unit": {
+                          "description": "期間の単位（month など）。previous_period の比較は、同じ日数ではなく、この単位で 1 つ前（前の月の同じ日）",
+                          "type": "string",
+                          "enum": [
+                            "day",
+                            "week",
+                            "month",
+                            "quarter",
+                            "year",
+                            "fiscal_year"
+                          ]
                         }
                       },
                       "required": [
@@ -244,6 +256,10 @@
                 "description": "最大の行数",
                 "type": "integer",
                 "exclusiveMinimum": 0
+              },
+              "period": {
+                "description": "false で、期間（date-range や時間のクリックでの選択）で絞らない",
+                "type": "boolean"
               }
             },
             "additionalProperties": false,
@@ -480,7 +496,14 @@
                     "default": {
                       "enum": [
                         "all",
+                        "latest_day",
+                        "last_7_days",
+                        "last_30_days",
+                        "latest_week",
                         "latest_month",
+                        "previous_month",
+                        "latest_quarter",
+                        "previous_quarter",
                         "last_12_months",
                         "latest_year",
                         "previous_year",
@@ -490,7 +513,14 @@
                       ],
                       "enumDescriptions": [
                         "全期間",
+                        "最新の日",
+                        "直近7日",
+                        "直近30日",
+                        "最新の週",
                         "最新の月",
+                        "前の月",
+                        "最新の四半期",
+                        "前の四半期",
                         "直近12ヶ月",
                         "最新の年",
                         "前の年",
@@ -498,7 +528,7 @@
                         "最新の年度",
                         "前の年度"
                       ],
-                      "description": "最初に選ぶ期間。「最新」はデータの最終日が基準"
+                      "description": "最初に選ぶ期間。「最新」「直近」はデータの最終日が基準"
                     },
                     "metrics": {
                       "type": "string",
