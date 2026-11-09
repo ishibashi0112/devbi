@@ -6,7 +6,10 @@ describe("fetch-stats", () => {
     expect(githubRepo("git+https://github.com/ishibashi0112/datasheet-grid.git")).toBe("ishibashi0112/datasheet-grid");
     expect(githubRepo("https://github.com/o/r/tree/main/packages/x")).toBe("o/r");
     expect(githubRepo("git@github.com:o/r.js.git")).toBe("o/r.js");
+    expect(githubRepo("github:o/r")).toBe("o/r");
+    expect(githubRepo("o/r#main")).toBe("o/r");
     expect(githubRepo("https://gitlab.com/o/r")).toBeUndefined();
+    expect(githubRepo("gitlab:o/r")).toBeUndefined();
     expect(githubRepo(undefined)).toBeUndefined();
   });
 

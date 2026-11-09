@@ -1,13 +1,15 @@
 name: Demo
 
-# The live demo (examples/oss): the npm downloads of the author's packages and their GitHub repositories' stars, fetched every morning and
-# put on GitHub Pages (https://ishibashi0112.github.io/devbi/). On a pull request it fetches, checks and builds, and
-# publishes nothing. Until GitHub Pages is turned on (Settings → Pages → Source: GitHub Actions), it publishes nothing.
+# The live demo (examples/oss): the npm downloads of the author's packages and their GitHub repositories' stars,
+# fetched every morning and put on GitHub Pages (https://ishibashi0112.github.io/devbi/). On a pull request it fetches,
+# checks and builds, and publishes nothing. Until GitHub Pages is turned on (Settings → Pages → Source: GitHub
+# Actions), it publishes nothing. GitHub stops the morning runs of a public repository after 60 days without a commit;
+# "Enable workflow" on the Actions page starts them again.
 on:
   push:
     branches: [main]
   pull_request:
-    paths: ["examples/oss/**", "packages/**", ".github/workflows/demo.yml"]
+    paths: ["examples/oss/**", "packages/**", "pnpm-lock.yaml", ".github/workflows/demo.yml"]
   schedule:
     - cron: "0 21 * * *" # 06:00 JST
   workflow_dispatch:
@@ -22,6 +24,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: read
@@ -42,15 +45,23 @@ jobs:
       # Every metrics file and tile run on the fetched numbers: a problem stops the demo before it is published.
       - run: pnpm --filter devbi-example-oss check
       - run: pnpm --filter devbi-example-oss build
+      # Published from main only, and only when Pages takes its site from GitHub Actions (404: Pages is off).
       - id: pages
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "repos/${{ github.repository }}/pages" > /dev/null 2>&1; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
+          if build=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2> err.txt); then
+            if [ "$build" = workflow ]; then
+              echo "enabled=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::GitHub Pages の Source が GitHub Actions ではないため、デモは公開しません（Settings → Pages → Source: GitHub Actions）"
+            fi
+          elif grep -q "HTTP 404" err.txt; then
             echo "::notice::GitHub Pages が有効ではないため、デモは公開しません（Settings → Pages → Source: GitHub Actions）"
+          else
+            cat err.txt
+            exit 1
           fi
       - if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3

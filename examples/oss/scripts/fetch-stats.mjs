@@ -64,7 +64,7 @@ const downloads = [];
 const repos = new Set(values.repo ?? []);
 for (const name of names) {
   const doc = await get(`https://registry.npmjs.org/${name.replace("/", "%2f")}`);
-  const repo = githubRepo(doc?.repository?.url) ?? "";
+  const repo = githubRepo(doc?.repository?.url ?? doc?.repository) ?? "";
   if (repo) repos.add(repo);
   let n = 0;
   for (const [from, to] of downloadRanges(doc?.time?.created ?? end, end)) {
@@ -77,15 +77,19 @@ for (const name of names) {
   console.log(`${name}: ${n.toLocaleString("en-US")} downloads`);
 }
 
+// A repository by GitHub's own name (owner/Repo, and the new name of a renamed one), once: npm's spelling may differ.
 const repoRows = [];
+const fullName = new Map();
 for (const repo of [...repos].sort()) {
   const r = await github(`repos/${repo}`);
   if (!r) {
     console.warn(`${repo}: GitHub にありません（非公開か、名前が違います）`);
     continue;
   }
+  fullName.set(repo, r.full_name);
+  if (repoRows.some((row) => row.repo === r.full_name)) continue;
   repoRows.push({
-    repo,
+    repo: r.full_name,
     description: r.description ?? "",
     language: r.language ?? "",
     stars: r.stargazers_count,
@@ -94,8 +98,12 @@ for (const repo of [...repos].sort()) {
     created: r.created_at.slice(0, 10),
     pushed: r.pushed_at.slice(0, 10),
   });
-  console.log(`${repo}: ${r.stargazers_count} stars`);
+  console.log(`${r.full_name}: ${r.stargazers_count} stars`);
 }
+for (const d of downloads) d.repo = fullName.get(d.repo) ?? d.repo;
+// A demo of nothing is not published: devbi-check only warns about an empty file.
+if (!downloads.length) throw new Error("npm のダウンロード数が 1 日分もありません");
+if (!repoRows.length) throw new Error("GitHub のリポジトリが 1 つもありません");
 
 await mkdir(out, { recursive: true });
 await writeFile(path.join(out, "downloads.csv"), toCsv(["date", "package", "repo", "downloads"], downloads));

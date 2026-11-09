@@ -1,8 +1,13 @@
 // The parts of fetch-stats.mjs that do not touch the network (tested in test/stats.test.ts).
 
-/** `owner/name` of a GitHub repository URL as npm has it (`git+https://github.com/o/r.git`), or undefined. */
+/**
+ * `owner/name` of a GitHub repository as npm has it (`git+https://github.com/o/r.git`, or the shorthands `github:o/r`
+ * and `o/r`), or undefined.
+ */
 export function githubRepo(url) {
-  const m = /github\.com[/:]([^/]+)\/([^/#?]+?)(?:\.git)?(?:[/#?].*)?$/.exec(String(url ?? ""));
+  const s = String(url ?? "");
+  const m =
+    /github\.com[/:]([^/]+)\/([^/#?]+?)(?:\.git)?(?:[/#?].*)?$/.exec(s) ?? /^(?:github:)?([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:#.*)?$/.exec(s);
   return m ? `${m[1]}/${m[2]}` : undefined;
 }
 

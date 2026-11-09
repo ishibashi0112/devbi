@@ -60,18 +60,18 @@
       "type": "table",
       "title": "リポジトリ別（Malloy）",
       "query": {
-        "malloy": "run: downloads -> {\n  where: repo != ''\n  group_by: repo\n  aggregate:\n    downloads is downloads.sum()\n    パッケージ is count(package)\n  order_by: downloads desc\n}"
+        "malloy": "run: downloads -> {\n  where: repo != null and repo != ''\n  group_by: repo\n  aggregate:\n    downloads is downloads.sum()\n    パッケージ is count(package)\n  order_by: downloads desc\n}"
       }
     },
     {
-      "id": "weekly",
+      "id": "growth",
       "x": 8, "y": 7, "w": 4, "h": 4,
       "type": "area",
-      "title": "パッケージ別のダウンロード（週ごと、全期間）",
+      "title": "パッケージ別の累計（全期間）",
       "query": {
-        "measures": ["downloads"],
+        "measures": ["downloads_total"],
         "dimensions": ["package"],
-        "time": "week",
+        "time": "day",
         "period": false
       }
     },

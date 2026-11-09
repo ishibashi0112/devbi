@@ -342,11 +342,11 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 | # | すること | 期待する結果 |
 | --- | --- | --- |
 | 138 | `pnpm --filter devbi-example-oss fixture` のあと `pnpm demo:dev` で <http://localhost:5173> を開く | 一覧を通らずに「OSS の npm と GitHub」が開く（ダッシュボードが 1 つだけのため）。期間は「直近30日」（2026/10/10〜2026/11/8）。「ダウンロード」12,451（前期間増減率 7.7%、1 日あたり 415）、「ダウンロードの累計（全期間）」61,199、「いまのスター」49 |
-| 139 | 「パッケージ別」の「example-cli」を押す | 上に「パッケージ: example-cli」が出て、日ごとの折れ線、週ごとの面グラフ、「リポジトリ別（Malloy）」が example-cli だけになる（example/cli 1,353）。「いまのスター」と「リポジトリ（いまの数字）」は変わらない（パッケージの軸がないため） |
+| 139 | 「パッケージ別」の「example-cli」を押す | 上に「パッケージ: example-cli」が出て、日ごとの折れ線、「パッケージ別の累計（全期間）」、「リポジトリ別（Malloy）」が example-cli だけになる（example/cli 1,353）。「いまのスター」と「リポジトリ（いまの数字）」は変わらない（パッケージの軸がないため） |
 | 140 | 「すべて解除」を押し、「リポジトリ別（Malloy）」の「example/grid」の行を押す | 上に「リポジトリ: example/grid」が出て、「いまのスター」が 42、「リポジトリ（いまの数字）」が example/grid の 1 行になる |
 | 141 | 「曜日ごとの 1 日あたり（SQL）」を見る | 月〜日の 7 本の棒で、土・日が低い |
 | 142 | ネットワークのある所で `pnpm demo:fetch` のあと `pnpm --filter devbi-example-oss check` | 作者のパッケージごとのダウンロード数とリポジトリのスターが出て、最後に「data/ に書きました」。check は「問題はありません」 |
-| 143 | GitHub のリポジトリの Settings → Pages で Source を「GitHub Actions」にし、Actions の「Demo」を「Run workflow」で動かす | <https://ishibashi0112.github.io/devbi/> にデモが出る。Pages が有効でないあいだは、Demo のワークフローは公開せずに「GitHub Pages が有効ではないため…」とだけ出す |
+| 143 | GitHub のリポジトリの Settings → Pages で Source を「GitHub Actions」にし、Actions の「Demo」を「Run workflow」で動かす | <https://ishibashi0112.github.io/devbi/> にデモが出る。Pages が有効でないあいだは、Demo のワークフローは公開せずに「GitHub Pages が有効ではないため…」とだけ出す。GitHub は、60 日コミットのないリポジトリの毎朝の実行を止める。止まったら Actions の「Demo」で「Enable workflow」を押す |
 
 ## 4. 自分の Excel で試す
 
