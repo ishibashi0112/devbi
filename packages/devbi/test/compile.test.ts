@@ -253,6 +253,15 @@ describe("compileRows (the explore tile)", () => {
     expect((await rows(c.sql)).map((r) => r.amount)).toEqual([400, 300, 200]);
   });
 
+  it("orders by every column after the time (the same rows each time), and only by those without a time column", async () => {
+    expect(compileRows(view, {}).newest).toBe(true);
+    const plain = parseMetricsYaml(`model: SELECT * FROM sales\ndimensions:\n  region: { column: region }\nmeasures:\n  n: COUNT(*)\n`, "plain");
+    const c = compileRows(plain, { filters: [{ field: "region", in: ["西"] }], limit: 2 });
+    expect(c.newest).toBe(false);
+    expect(c.sql).toContain("ORDER BY COLUMNS(*)");
+    expect((await rows(c.sql)).map((r) => r.order_id)).toEqual(["o2", "o6", "o7"]);
+  });
+
   it("refuses a fixed filter on a name the view does not have", () => {
     expect(() => compileRows(view, { filters: [{ field: "nope", in: ["x"] }] })).toThrow(QueryError);
     expect(() => compileRows(view, { filters: [{ field: "nope", in: ["x"] }] })).toThrow("フィルタの nope は sales の軸にありません");

@@ -22,6 +22,14 @@ const totals = (page: Page) =>
     }
   });
 const loaded = (page: Page) => viewer(page).evaluate(async (el) => (await (el as Viewer).getTable()).size());
+/** The tables Perspective's engine holds (one per explore tile, however often the rows were loaded). */
+const hosted = (page: Page) =>
+  viewer(page).evaluate(async (el) => {
+    const table = (await (el as Viewer).getTable()) as unknown as {
+      get_client(): Promise<{ get_hosted_table_names(): Promise<string[]> }>;
+    };
+    return (await (await table.get_client()).get_hosted_table_names()).length;
+  });
 /** ¥18,599,290 → 18599290 */
 const yen = (text: string) => Number(text.replace(/[^\d]/g, ""));
 
@@ -64,6 +72,14 @@ test("clicking a region filters the explore tile, which keeps how the viewer was
   await expect(page.locator('.devbi-explore[aria-busy="false"]')).toHaveCount(1);
   expect(await loaded(page)).toBeLessThan(all);
   expect(await viewer(page).evaluate(async (el) => (await (el as Viewer).save()).group_by)).toEqual(["商品"]);
+
+  // Each load replaces the table, and leaving the dashboard deletes it.
+  await expect.poll(() => hosted(page)).toBe(1);
+  await page.evaluate(() => (location.hash = "#/sales"));
+  await expect(page.locator("perspective-viewer")).toHaveCount(0);
+  await page.evaluate(() => (location.hash = "#/sales-explore"));
+  await expect(page.locator('.devbi-explore[aria-busy="false"]')).toHaveCount(1);
+  await expect.poll(() => hosted(page)).toBe(1);
 });
 
 test("Excel writes the explore tile's rows; 印刷・PDF prints its view as a table", async ({ page }) => {

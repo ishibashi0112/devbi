@@ -243,11 +243,14 @@ function resolvePerspective(root: string): { server: string; client: string } {
   };
 }
 
-/** Whether a dashboard has an explore tile (a build then carries Perspective's WebAssembly, about 3 MB). */
-function usesExplore(dashboards: ProjectFiles["dashboards"]): boolean {
+/**
+ * Whether a dashboard may show an explore tile: one in dash.json, or a tile of its own code (a promoted explore tile
+ * draws the built-in one). A build then carries Perspective's WebAssembly (about 3 MB, fetched only for the tile).
+ */
+function mayExplore(dashboards: ProjectFiles["dashboards"]): boolean {
   return Object.values(dashboards).some((d) => {
     const tiles = (d.spec as { tiles?: unknown }).tiles;
-    return Array.isArray(tiles) && tiles.some((t) => (t as { type?: unknown })?.type === "explore");
+    return Array.isArray(tiles) && tiles.some((t) => (t as { type?: unknown })?.type === "explore" || !!(t as { component?: unknown })?.component);
   });
 }
 
@@ -416,8 +419,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       lastData = project.data;
       for (const f of project.watched) this.addWatchFile(f);
       const duck = resolveDuckdb(config.root);
-      // On the dev server always (the GUI editor can add an explore tile); in a build, only when a dashboard has one.
-      const psp = config.command === "serve" || usesExplore(project.dashboards) ? resolvePerspective(config.root) : undefined;
+      // On the dev server always (the GUI editor can add an explore tile); in a build, only when a dashboard may show one.
+      const psp = config.command === "serve" || mayExplore(project.dashboards) ? resolvePerspective(config.root) : undefined;
       const snapshots = await readSnapshots(dir);
       const prefix = relDir ? `/${relDir}` : "";
       const base = relDir ? `${relDir}/` : "";

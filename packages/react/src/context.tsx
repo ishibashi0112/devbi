@@ -186,6 +186,8 @@ export interface RowsState {
   limit: number;
   /** There were more rows than `limit`. */
   truncated: boolean;
+  /** The rows are the newest ones (the view has a time column); else the first by every column. */
+  newest: boolean;
   /** Filters from other tiles that applied to these rows. */
   filters: Filter[];
   loading: boolean;
@@ -206,7 +208,15 @@ export function useDevbiRows(query: Query, options: { tileId?: string } = {}): R
     [version, tileId, query.metrics, query.period, ctx],
   );
   const key = JSON.stringify([query, filters]);
-  const [state, setState] = useState<RowsState>({ table: null, limit: 0, truncated: false, filters: [], loading: true, error: null });
+  const [state, setState] = useState<RowsState>({
+    table: null,
+    limit: 0,
+    truncated: false,
+    newest: true,
+    filters: [],
+    loading: true,
+    error: null,
+  });
   const seq = useRef(0);
   useEffect(() => {
     const mine = ++seq.current;
@@ -215,10 +225,10 @@ export function useDevbiRows(query: Query, options: { tileId?: string } = {}): R
       const view = ctx.view(query.metrics);
       const engine = await ctx.engine;
       const model = await engine.loadView(view);
-      const { sql, limit } = compileRows(view, query, { filters, model });
+      const { sql, limit, newest } = compileRows(view, query, { filters, model });
       const table = await engine.table(sql);
       const truncated = table.numRows > limit;
-      return { table: truncated ? table.slice(0, limit) : table, limit, truncated };
+      return { table: truncated ? table.slice(0, limit) : table, limit, truncated, newest };
     })().then(
       (r) => {
         if (seq.current === mine) setState({ ...r, filters, loading: false, error: null });

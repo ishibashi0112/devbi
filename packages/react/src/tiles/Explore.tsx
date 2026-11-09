@@ -89,13 +89,29 @@ export function Explore({ tile }: TileProps) {
   const data = useDevbiRows(query, { tileId: tile.id });
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<HTMLPerspectiveViewerElement | null>(null);
+  // The table the viewer shows, and its number columns.
   const loaded = useRef<PerspectiveTable | null>(null);
+  const numbers = useRef<string[]>([]);
+  // Whether the viewer has had its first table (and the layout from dash.json).
+  const first = useRef(true);
+  // The viewer's work (load a table, restore a layout, delete), one step after another: a table can only be deleted
+  // once no view is on it, and steps that overlap would leave one behind.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueue = (step: () => Promise<void>): Promise<void> => {
+    const next = queue.current.catch(() => {}).then(step);
+    queue.current = next;
+    return next;
+  };
   const theme = useTheme(host);
   const [error, setError] = useState<Error | null>(null);
   const [drawing, setDrawing] = useState(true);
   const bundle = ctx.project.perspective;
   const layout = tile.options?.layout;
   const layoutKey = JSON.stringify(layout ?? null);
+  // What a step reads when it runs (not when it was queued).
+  const latest = useRef({ layout, theme });
+  latest.current = { layout, theme };
+  const start = () => startConfig(latest.current.layout, numbers.current, latest.current.theme);
 
   // One viewer element for the tile's life (React does not render inside it).
   useLayoutEffect(() => {
@@ -106,46 +122,47 @@ export function Explore({ tile }: TileProps) {
     (box as unknown as Record<symbol, unknown>)[PRINT] = () => printTable(el, box.clientHeight);
     return () => {
       viewer.current = null;
-      // Before Perspective has loaded, the element is not one of its viewers yet (no delete).
-      if (typeof el.delete === "function") void el.delete().catch(() => {});
       el.remove();
-      void loaded.current?.delete().catch(() => {});
-      loaded.current = null;
+      // After the step under way: the viewer (and its view), then its table.
+      void enqueue(async () => {
+        // Before Perspective has loaded, the element is not one of its viewers yet (no delete).
+        if (typeof el.delete === "function") await el.delete().catch(() => {});
+        const table = loaded.current;
+        loaded.current = null;
+        first.current = true;
+        await table?.delete().catch(() => {});
+      });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // New rows (another period, a selection): a new table, keeping how the viewer has arranged it.
-  const first = useRef(true);
   useEffect(() => {
-    const el = viewer.current;
-    if (!el || !data.table || !bundle) return;
+    const rows = data.table;
+    if (!rows || !bundle) return;
     let live = true;
     setDrawing(true);
-    (async () => {
+    enqueue(async () => {
+      const el = viewer.current;
+      if (!live || !el) return;
       const worker = await perspectiveClient(bundle);
-      const { ipc, numbers } = toPerspective(data.table!);
-      const table = await worker.table(ipc.buffer as ArrayBuffer);
-      if (!live) {
-        await table.delete();
+      const converted = toPerspective(rows);
+      const table = await worker.table(converted.ipc.buffer as ArrayBuffer);
+      if (!live || viewer.current !== el) {
+        await table.delete().catch(() => {});
         return;
       }
       // First the layout from dash.json (with the settings open, so it is plain that the rows can be rearranged).
-      const own = isObject(layout) ? layout : {};
-      const config = first.current
-        ? {
-            settings: true,
-            ...own,
-            columns_config: { ...numberFormats(numbers), ...(isObject(own.columns_config) ? own.columns_config : {}) },
-            theme,
-          }
-        : await el.save();
+      numbers.current = converted.numbers;
+      const config = first.current ? start() : await el.save();
       await el.load(table);
-      await el.restore(config as never);
-      first.current = false;
+      // The viewer shows the new table: no view is left on the old one.
       const old = loaded.current;
       loaded.current = table;
       await old?.delete().catch(() => {});
-    })().then(
+      await el.restore(config as never);
+      first.current = false;
+    }).then(
       () => {
         if (live) {
           setError(null);
@@ -165,15 +182,25 @@ export function Explore({ tile }: TileProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.table, bundle]);
 
-  // The layout changed in dash.json (the GUI editor): start again from it.
+  // The layout changed in dash.json (the GUI editor): start again from it (restore alone keeps what it leaves out).
+  const shown = useRef(layoutKey);
   useEffect(() => {
-    if (first.current || !viewer.current) return;
-    void viewer.current.restore({ ...(isObject(layout) ? layout : {}), theme } as never).catch((e: unknown) => setError(e as Error));
+    if (shown.current === layoutKey) return;
+    shown.current = layoutKey;
+    enqueue(async () => {
+      const el = viewer.current;
+      if (!el || first.current) return; // the first table takes the layout as it is then
+      await el.reset(true);
+      await el.restore(start() as never);
+    }).catch((e: unknown) => setError(e instanceof Error ? e : new Error(String(e))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutKey]);
 
   useEffect(() => {
-    if (!first.current) void viewer.current?.restore({ theme } as never).catch(() => {});
+    void enqueue(async () => {
+      if (!first.current) await viewer.current?.restore({ theme } as never);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [theme]);
 
   const problem = !bundle
@@ -185,12 +212,21 @@ export function Explore({ tile }: TileProps) {
       {problem && <div className="devbi-error">{problem}</div>}
       {data.truncated && (
         <p className="devbi-explore-note">
-          新しいほうから {data.limit.toLocaleString("ja-JP")} 行だけを集計しています。期間で絞るか、query の limit を大きくしてください
+          {data.newest ? "新しいほうから " : ""}
+          {data.limit.toLocaleString("ja-JP")} 行だけを集計しています。{data.newest ? "期間で絞るか、" : ""}query の limit
+          を大きくしてください
         </p>
       )}
       <div className="devbi-explore-viewer" ref={host} hidden={!!problem} data-devbi-snapshot="" />
     </div>
   );
+}
+
+/** The viewer's first config: the layout from dash.json, with the settings open, numbers without ".00", the theme. */
+function startConfig(layout: unknown, numbers: string[], theme: string): Record<string, unknown> {
+  const own = isObject(layout) ? layout : {};
+  const columns = isObject(own.columns_config) ? own.columns_config : {};
+  return { settings: true, ...own, columns_config: { ...numberFormats(numbers), ...columns }, theme };
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);

@@ -407,8 +407,20 @@ test("the property panel: an explore tile reads the rows, its first layout writt
   await layout.blur();
   await expect(p.getByText(/JSON として読めません/)).toHaveCount(0);
   const viewer = tile.locator("perspective-viewer");
-  const arranged = () => viewer.evaluate(async (el) => (await (el as unknown as { save(): Promise<{ group_by: string[] }> }).save()).group_by);
-  await expect.poll(arranged).toEqual(["地域"]);
+  type Config = { group_by: string[]; columns: (string | null)[] };
+  const arranged = () => viewer.evaluate(async (el) => (await (el as unknown as { save(): Promise<Config> }).save()) as Config);
+  await expect.poll(async () => (await arranged()).group_by).toEqual(["地域"]);
+  expect((await arranged()).columns).toEqual(["金額"]);
+
+  // Another layout starts over from it (the columns left out are all the columns again). ⌘S takes what is typed.
+  await layout.fill('{ "group_by": ["商品分類"], "columns": ["金額", "数量"] }');
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  await expect.poll(async () => (await arranged()).group_by).toEqual(["商品分類"]);
+  await layout.fill('{ "group_by": ["地域"], "columns": ["金額"] }');
+  await layout.blur();
+  await expect.poll(async () => (await arranged()).group_by).toEqual(["地域"]);
+  expect((await arranged()).columns).toEqual(["金額"]);
 
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("保存しました");

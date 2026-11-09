@@ -232,12 +232,15 @@ export interface CompiledRows {
   sql: string;
   /** The most rows the tile shows. The SQL asks for one more, to tell whether there were more. */
   limit: number;
+  /** The rows come newest first (the view has a time column), so a limit keeps the latest ones. */
+  newest: boolean;
 }
 
 /**
  * The rows of a metrics view's model, as they are (every column of the model), with the query's fixed filters and
  * the selections of other tiles: what the `explore` tile aggregates in the browser. The latest rows first, so a
- * limit keeps the most recent ones. Only `metrics`, `filters` and `limit` of the query are used.
+ * limit keeps the most recent ones; then by every column, so the same rows are kept each time (the screen, the Excel
+ * export and devbi-check). Only `metrics`, `filters` and `limit` of the query are used.
  */
 export function compileRows(view: MetricsView, query: Query, options: CompileOptions = {}): CompiledRows {
   const time = view.time;
@@ -256,9 +259,9 @@ export function compileRows(view: MetricsView, query: Query, options: CompileOpt
   });
   const limit = Math.floor(query.limit ?? EXPLORE_ROWS);
   const model = options.model ?? view.model;
-  const order = time ? `\nORDER BY ${time.expr} DESC NULLS LAST` : "";
+  const order = `\nORDER BY ${time ? `${time.expr} DESC NULLS LAST, ` : ""}COLUMNS(*)`;
   const sql = `WITH ${ident("__model")} AS (\n${indent(model, "  ")}\n)\nSELECT *\nFROM ${ident("__model")}${where(preds, "")}${order}\nLIMIT ${limit + 1}`;
-  return { sql, limit };
+  return { sql, limit, newest: !!time };
 }
 
 function indent(text: string, pad: string): string {

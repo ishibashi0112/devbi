@@ -537,7 +537,9 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
               add(
                 "warning",
                 file,
-                `${where(t)}: 明細が ${n} 行を超えるため、新しいほうから ${n} 行だけを集計します（期間で絞るか、query.limit を大きくしてください）`,
+                compiled.newest
+                  ? `${where(t)}: 明細が ${n} 行を超えるため、新しいほうから ${n} 行だけを集計します（期間で絞るか、query.limit を大きくしてください）`
+                  : `${where(t)}: 明細が ${n} 行を超えるため、${n} 行だけを集計します（query.filters で絞るか、query.limit を大きくしてください）`,
               );
             } else if (rows.length === 0 && st.rows > 0) {
               const applied = query.period === false ? [] : periodsOf(entry.view);

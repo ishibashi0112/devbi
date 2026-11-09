@@ -163,7 +163,7 @@ async function addRows(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
   const filters = crossFilters(ctx, query, tile.id);
   const view = ctx.view(query.metrics);
   const engine = await ctx.engine;
-  const { sql, limit } = compileRows(view, query, { filters, model: await engine.loadView(view) });
+  const { sql, limit, newest } = compileRows(view, query, { filters, model: await engine.loadView(view) });
   const table = await engine.table(sql);
   const max = Math.min(limit, MAX_ROWS - ROOM);
   const rows = tableToRows(table.numRows > max ? table.slice(0, max) : table);
@@ -178,7 +178,7 @@ async function addRows(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
   sheet.skip();
   addResultTable(sheet, rows, fields, { fiscalYearStart: view.time?.fiscalYearStart ?? 1 });
   const cut = table.numRows > max;
-  const note = !cut ? undefined : max < limit ? "Excel の行数の上限までです" : `新しいほうから ${limit.toLocaleString("ja-JP")} 行です`;
+  const note = !cut ? undefined : max < limit ? "Excel の行数の上限までです" : `${newest ? "新しいほうから " : ""}${limit.toLocaleString("ja-JP")} 行までです`;
   return { tile, sheet, rows: rows.length, ...(note ? { note } : {}) };
 }
 

@@ -1,6 +1,7 @@
 import { DevbiProvider, TileFrame, injectStyles, themeAttribute, useDevbi, type DashboardEditorProps } from "@devbi/react";
 import { TILE_TYPES, TILE_TYPE_NAMES, defineDashboard, formatDashboardJson, type BuiltinTileType, type Dashboard, type TileSpec } from "devbi";
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { ReactGridLayout, useContainerWidth, verticalCompactor, type Layout } from "react-grid-layout";
 import { EditorError, readDashboard, writeDashboard, writeTileFile, type DashboardFile, type TileFile } from "./api.js";
 import { metricsNameOf, promoteTile, updateTile, viewFor } from "./edit.js";
@@ -57,13 +58,24 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
   const busy = useRef(false);
   const [closing, setClosing] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  /** The panel's unfinished edit (a tile's new name), taken before the selection changes. */
-  const flush = useRef<Flush | null>(null);
-  const registerFlush = useCallback((f: Flush | null) => void (flush.current = f), []);
-  const select = useCallback((id: string | null) => {
-    const renamed = flush.current?.();
-    setSelected(renamed && id === renamed.from ? renamed.to : id);
+  /** The panel's unfinished edits (a tile's new name, a layout being typed), taken before the selection changes or a save. */
+  const flushes = useRef(new Set<Flush>());
+  const registerFlush = useCallback((f: Flush) => {
+    flushes.current.add(f);
+    return () => void flushes.current.delete(f);
   }, []);
+  const flushAll = useCallback(() => {
+    let renamed: ReturnType<Flush>;
+    for (const f of [...flushes.current]) renamed = f() ?? renamed;
+    return renamed;
+  }, []);
+  const select = useCallback(
+    (id: string | null) => {
+      const renamed = flushAll();
+      setSelected(renamed && id === renamed.from ? renamed.to : id);
+    },
+    [flushAll],
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
   const dirty = !!file && !!spec && !same(file.spec, spec);
   /** Files changed on disk that the page has not taken in: it reloads when the editor closes. */
@@ -283,7 +295,12 @@ export function DashboardEditor({ project: given, name, dev, theme, onSaved, onC
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        void save();
+        // What is being typed in the panel (no blur comes with the shortcut), then the save with it.
+        flushSync(() => {
+          const renamed = flushAll();
+          if (renamed) setSelected((s) => (s === renamed.from ? renamed.to : s));
+        });
+        void latest.current.save();
       } else if (isTyping(e.target)) {
         return;
       } else if (mod && e.key.toLowerCase() === "z") {
@@ -420,7 +437,7 @@ type BodyProps = {
   onSelect(id: string | null): void;
   onChange(next: RawDashboard, merge?: string): void;
   onRemove(id: string): void;
-  registerFlush(flush: Flush | null): void;
+  registerFlush(flush: Flush): () => void;
   onPromote(id: string): Promise<boolean>;
   dirty: boolean;
 };

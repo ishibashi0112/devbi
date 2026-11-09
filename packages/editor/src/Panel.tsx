@@ -65,7 +65,7 @@ export interface PanelProps {
   /** Clear a tile's selection (its period, for instance), so the tile starts over. */
   clearSelection(id: string): void;
   /** What to finish before the selection changes (a new name typed but not yet taken), or null. */
-  registerFlush(flush: Flush | null): void;
+  registerFlush(flush: Flush): () => void;
   /** "コードにする": write the tile out as a .tsx file, point the tile at it and save. Whether it was done. */
   onPromote(id: string): Promise<boolean>;
   /** Whether there are unsaved changes (saved along with "コードにする"). */
@@ -119,10 +119,16 @@ function TextInput({
 }
 
 /**
- * An object written as JSON (an explore tile's layout). It is written to dash.json when the box loses focus and the
- * text is a JSON object; empty removes the key. Until then the text stays as typed, with what is wrong under it.
+ * An object written as JSON (an explore tile's layout). It is written to dash.json when the box loses focus, when
+ * another tile is pressed and on ⌘S (through `registerFlush`), and only when the text is a JSON object; empty removes
+ * the key. Until then the text stays as typed, with what is wrong under it.
  */
-function JsonInput({ value, onChange, ...rest }: Ids & { value: unknown; onChange(value: Record<string, unknown> | undefined): void }) {
+function JsonInput({
+  value,
+  onChange,
+  registerFlush,
+  ...rest
+}: Ids & { value: unknown; onChange(value: Record<string, unknown> | undefined): void; registerFlush(flush: Flush): () => void }) {
   const shown = value === undefined ? "" : JSON.stringify(value, null, 2);
   const [text, setText] = useState(shown);
   const [error, setError] = useState<string>();
@@ -156,6 +162,16 @@ function JsonInput({ value, onChange, ...rest }: Ids & { value: unknown; onChang
     if (JSON.stringify(parsed, null, 2) !== shown) onChange(parsed);
     else setText(shown);
   };
+  const latest = useRef(commit);
+  latest.current = commit;
+  useEffect(
+    () =>
+      registerFlush(() => {
+        if (editing.current) latest.current();
+        return undefined;
+      }),
+    [registerFlush],
+  );
   return (
     <>
       <textarea
@@ -165,8 +181,14 @@ function JsonInput({ value, onChange, ...rest }: Ids & { value: unknown; onChang
         value={text}
         placeholder='{ "group_by": ["地域"], "columns": ["金額"] }'
         onFocus={() => (editing.current = true)}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
+        onChange={(e) => {
+          // Also after ⌘S took the text while the box kept the focus.
+          editing.current = true;
+          setText(e.target.value);
+        }}
+        onBlur={() => {
+          if (editing.current) commit();
+        }}
       />
       {error && <p className="devbi-ed-warn">{error}</p>}
     </>
@@ -287,7 +309,7 @@ function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemo
       />
       {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} />}
       {builtin && Object.keys(TILE_TYPES[builtin].options).length > 0 && (
-        <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} />
+        <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} registerFlush={registerFlush} />
       )}
       {builtin && <Promote folder={`dashboards/${name}/`} dirty={dirty} onPromote={() => onPromote(tile.id)} />}
       <button type="button" className="devbi-button devbi-ed-danger" onClick={() => onRemove(tile.id)}>
@@ -359,7 +381,7 @@ function IdField({
 }: {
   spec: RawDashboard;
   tile: RawTile;
-  registerFlush(flush: Flush | null): void;
+  registerFlush(flush: Flush): () => void;
   /** `follow`: the panel stays on this tile (under its new name). */
   onRename(id: string, follow: boolean): void;
 }) {
@@ -376,10 +398,7 @@ function IdField({
   };
   const latest = useRef(take);
   latest.current = take;
-  useEffect(() => {
-    registerFlush(() => latest.current(false));
-    return () => registerFlush(null);
-  }, [registerFlush]);
+  useEffect(() => registerFlush(() => latest.current(false)), [registerFlush]);
   return (
     <Field label="名前（id）" hint={problem ?? "dash.json でタイルを見分ける名前"}>
       {(ids) => (
@@ -792,6 +811,7 @@ function OptionsEditor({
   type,
   onTile,
   clearSelection,
+  registerFlush,
 }: {
   metrics: Record<string, MetricsView>;
   spec: RawDashboard;
@@ -799,6 +819,7 @@ function OptionsEditor({
   type: BuiltinTileType;
   onTile: OnTile;
   clearSelection(id: string): void;
+  registerFlush(flush: Flush): () => void;
 }) {
   const options = isObj(tile.options) ? tile.options : {};
   const entries = Object.entries(TILE_TYPES[type].options) as [string, TileOptionSchema][];
@@ -850,7 +871,7 @@ function OptionsEditor({
       );
     }
     if (o.input === "metrics") return <MetricsSelect {...ids} metrics={metrics} value={str(value)} empty="ダッシュボードと同じ" onChange={(v) => set(key, v)} />;
-    if (o.input === "json") return <JsonInput {...ids} value={value} onChange={(v) => set(key, v)} />;
+    if (o.input === "json") return <JsonInput {...ids} value={value} onChange={(v) => set(key, v)} registerFlush={registerFlush} />;
     return <TextInput {...ids} multiline={o.input === "text"} value={str(value)} onChange={(v, merge) => set(key, v, merge)} />;
   };
   return (

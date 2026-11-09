@@ -229,11 +229,11 @@ async function printIn(frame: HTMLIFrameElement, root: HTMLElement, title: strin
   const copy = doc.importNode(root, true);
   // Paired with the screen's elements while the copy is still the same tree.
   copyState(root, copy);
+  const scroll = scrollOf(root, copy);
   copy.querySelectorAll("[data-devbi-snapshot]").forEach((el, i) => {
     const part = parts[i];
     if (part) el.replaceChildren(doc.importNode(part, true));
   });
-  const scroll = scrollOf(root, copy);
   copy.setAttribute("data-theme", "light");
   copy.setAttribute("data-devbi-print", "");
   for (const el of copy.querySelectorAll(".ssg-theme-dark")) el.classList.remove("ssg-theme-dark");
