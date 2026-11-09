@@ -16,9 +16,9 @@ if (!user) throw new Error("--npm-user <npm のユーザー名> を指定して�
 const out = path.join(import.meta.dirname, "..", "data");
 const token = process.env.GITHUB_TOKEN;
 
-async function get(url, headers = {}) {
+/** The answer to a GET, asked again after a network error, a limit (429) or a server error (after 2, 4, 8, 16 seconds). */
+async function request(url, headers = {}) {
   for (let attempt = 0; ; attempt++) {
-    // A network error, a limit (429) or a server error: again after 2, 4, 8, 16 seconds.
     const wait = () => new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
     let res;
     try {
@@ -30,17 +30,32 @@ async function get(url, headers = {}) {
       }
       throw new Error(`${url}: ${e.cause?.message ?? e.message}`);
     }
-    if (res.ok) return res.json();
-    if (res.status === 404) return undefined;
     if (attempt < 4 && (res.status === 429 || res.status >= 500)) {
       await wait();
       continue;
     }
-    throw new Error(`${url}: ${res.status} ${await res.text()}`);
+    return res;
   }
 }
-const github = (p, accept = "application/vnd.github+json") =>
-  get(`https://api.github.com/${p}`, { accept, ...(token ? { authorization: `Bearer ${token}` } : {}) });
+
+/** The JSON of an answer; undefined for 404. */
+async function json(url, res) {
+  if (res.ok) return res.json();
+  if (res.status === 404) return undefined;
+  throw new Error(`${url}: ${res.status} ${await res.text()}`);
+}
+
+const get = async (url) => json(url, await request(url));
+
+async function github(p, accept = "application/vnd.github+json") {
+  const url = `https://api.github.com/${p}`;
+  if (token) {
+    const res = await request(url, { accept, authorization: `Bearer ${token}` });
+    // GitHub Actions' token reads only its own repository's stargazers (403): the others without it.
+    if (res.status !== 403) return json(url, res);
+  }
+  return json(url, await request(url, { accept }));
+}
 
 // Yesterday (UTC): npm's last full day.
 const end = day(new Date(Date.now() - 86_400_000));
@@ -84,10 +99,15 @@ for (const repo of [...repos].sort()) {
     created: r.created_at.slice(0, 10),
     pushed: r.pushed_at.slice(0, 10),
   });
-  for (let page = 1; page <= 100; page++) {
-    const list = await github(`repos/${repo}/stargazers?per_page=100&page=${page}`, "application/vnd.github.star+json");
-    for (const s of list ?? []) stars.push({ date: s.starred_at.slice(0, 10), repo });
-    if (!list || list.length < 100) break;
+  try {
+    for (let page = 1; page <= 100; page++) {
+      const list = await github(`repos/${repo}/stargazers?per_page=100&page=${page}`, "application/vnd.github.star+json");
+      for (const s of list ?? []) stars.push({ date: s.starred_at.slice(0, 10), repo });
+      if (!list || list.length < 100) break;
+    }
+  } catch (e) {
+    // The demo goes out without this repository's star days (its count is in repos.csv); GitHub Actions shows the warning.
+    console.warn(`::warning::${repo} のスターの日付を読めませんでした（${e.message}）`);
   }
   console.log(`${repo}: ${r.stargazers_count} stars`);
 }
