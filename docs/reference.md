@@ -168,7 +168,7 @@ revenue_pp:  { of: revenue, compare: previous_period, as: delta }
 - 値が出るのは、期間が決まっているときだけです。つまり、クエリに `time`（時間の粒度）があるか、期間の絞り込みがあるときです。全期間のままだと空（NULL、画面では「—」）になります。
 - `previous_year` を時間の粒度で使うと、同じ月（同じ四半期・同じ年）の 1 年前と比べます。週は 52 週前（364 日前）です。日で比べるとき、前年の 2/29 には対応する日がないので比べません。
 - `previous_period` は、時間の粒度があればその 1 つ前（前月・前四半期など）、期間の絞り込みだけなら同じ日数だけ前と比べます。たとえばデータが 10/30 までで、期間が `latest_month`（10/1〜10/30 の 30 日）なら、その前の 30 日（9/1〜9/30）です。
-- `kpi` では、`as` が `ratio`・`change`・`delta` の指標に色が付きます（増えると緑、減ると赤）。`value` には付きません。少ないほうが良い指標（クレームの件数など）も、増えると緑です。
+- `kpi` では、2 つ目からの指標のうち `as` が `ratio`・`change`・`delta` のものに色が付きます（増えたか同じなら緑、減ると赤）。大きく出す最初の指標と `value` には付きません。少ないほうが良い指標（クレームの件数など）も、増えると緑です。
 
 **累計（`running`）**
 
@@ -248,7 +248,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 - `field` は軸の名前か、`time` の列名です。
 - `in` は値のどれかに一致する行です。`null` は空欄に一致します。
 - `between` は「始まり ≦ 値 ＜ 終わり」で、終わりの日は含みません。どちらかを `null` にすると、その側は無制限です。
-- タイルの `filters`、期間（`date-range`）、ほかのタイルのクリックでの選択は、すべて重ねてかかります（AND。期間どうしは重なる部分）。組み込みのタイルは期間を外せません。期間に関係なく出したいもの（「いま対応中のすべて」など）は、自作タイルで `useDevbiQuery(query, { crossfilter: false })` にします。
+- タイルの `filters`、期間（`date-range`）、ほかのタイルのクリックでの選択は、すべて重ねてかかります（AND。期間どうしは重なる部分）。選択と期間は、その項目（期間なら `time` の列）を持つ指標ファイルのタイルにだけかかります。組み込みのタイルは期間を外せません。期間に関係なく出したいもの（「いま対応中のすべて」など）は、自作タイルで `useDevbiQuery(query, { crossfilter: false })` にします。
 
 ## 組み込みタイル
 
@@ -401,21 +401,21 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか
 2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
-3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。ダッシュボードの `date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じくその期間で流す（比較の指標にも値が出る）。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
+3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。`date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じく、その `time` の列を持つ指標ファイルのタイルをその期間で流す（比較の指標にも値が出る）。画面が使わない `default`（ない期間の名前や、`fiscal_year_start` のない指標ファイルでの年度）は注意タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
 
 SQL を流すのは、ブラウザと同じ DuckDB-wasm（Node で動かす）です。xlsx は画面と同じく DevBI が読み、`read_api` は `api/` の SQL を接続先で流します（`devbi-serve` と同じく、環境変数とプロジェクトの `.env`・`.env.local` の `DEVBI_DB…`。Vite の `.env.[mode]` は読みません）。ブラウザと同じく、データのファイルは `read_csv('data/…')` のように `read_` の関数に書いたものだけを読みます（`FROM 'data/x.csv'` はエラー）。
 
 ```
 $ pnpm check
 models/sales.metrics.yaml: 6,044 行、指標 7・軸 4
-dashboards/sales.dash.json: タイル 14（クエリを実行 9、期間は date-range の最初の 2026年度（2026-04-01〜2026-10-30））
+dashboards/sales.dash.json: タイル 14（クエリを実行 9、date-range の最初の期間: 受注日 2026年度（2026-04-01〜2026-10-30））
   kpi-revenue 1 行、kpi-avg 1 行、monthly 7 行、region 0 行、vs-last-year 7 行、…
   kpi-qty・products: quantity のエラーのため確かめていません
 
 ✗ models/sales.metrics.yaml: 指標 quantity: Binder Error: Referenced column "数" not found in FROM clause!
     Candidate bindings: "数量", "商品", "地域"
 ✗ dashboards/sales.dash.json: タイル kpi-orders（受注件数）: 指標 orderz は sales にありません（sales の指標: revenue・orders・quantity・…）
-⚠ dashboards/sales.dash.json: タイル region（地域別売上）: 結果が 0 行です（最初の期間 2026年度（2026-04-01〜2026-10-30）で。query.filters や指標の式を確かめてください）
+⚠ dashboards/sales.dash.json: タイル region（地域別売上）: 結果が 0 行です（date-range の最初の期間 受注日 2026年度（2026-04-01〜2026-10-30） で。query.filters や指標の式を確かめてください）
 
 エラー 2 件、注意 1 件
 ```
@@ -423,14 +423,14 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 9、期間は date
 - ✗（エラー）は、そのままだと画面でエラーになるもの。⚠（注意）は、表示はできるが見直したいものと、確かめられなかったもの
 - 一つの間違いは一つのエラーにします。エラーのある指標を使う指標（`revenue / orders` や `of: revenue`）、エラーのある time の列を使う比較・累計の指標、それらを使うタイルは、「… のエラーのため確かめていません」とだけ出します。`model` が 0 行のときの注意も、指標ファイルに 1 つだけです
 - DuckDB のエラー（`Binder Error` など）は DuckDB の英語のままです。`Candidate bindings` は、近い名前の列の候補です
-- 期間は `date-range` の最初の期間だけです（`default` がない・`all` なら全期間）。ほかのタイルのクリックでの絞り込みはかけません
+- 期間は `date-range` の最初の期間だけです（`default` がない・`all` なら全期間）。ほかの期間を選んだときの数字と、ほかのタイルのクリックでの絞り込みは確かめません
 - 確かめないもの: 接続先がないときの `read_api`（注意）、URL のデータ、DuckDB の拡張（Parquet、JSON、`current_date` の icu など）をインターネットから取ってこられないときのその SQL（注意）、Node で読み込めない自作タイル（`window` を読むなど。プロジェクトの vite.config も使わないので、そこでの設定が要るものも。注意）、自作タイルが `query` の外で読むデータ、見た目（色・幅・高さ）
 
 `--values` を付けると、タイルごとに、結果の最初の行を画面と同じ書式で出します。作ったダッシュボードの数字を、人が知っている数字や `devbi-inspect --sql` で別に数えた数字と比べるときに使います。
 
 ```
 $ pnpm check -- --values 2
-dashboards/sales.dash.json: タイル 14（クエリを実行 12、期間は date-range の最初の 2026年度（2026-04-01〜2026-10-30））
+dashboards/sales.dash.json: タイル 14（クエリを実行 12、date-range の最初の期間: 受注日 2026年度（2026-04-01〜2026-10-30））
   kpi-revenue: 売上 ¥48,052,590、売上 前年 ¥48,138,860、売上 前年比 99.8%
   monthly 7 行:
     受注日 2026年4月、売上 ¥7,329,090
@@ -443,7 +443,7 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 12、期間は dat
 | --- | --- |
 | `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
 | `--values` | タイルごとに結果の最初の行を、画面と同じ書式で出す。既定は 5 行（`--values 1` で 1 行） |
-| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ。`--values` なら `values` に最初の行）、`periods`（ダッシュボードごとの、流した期間） |
+| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ。`--values` なら `values` に最初の行）、`periods`（ダッシュボードごとの、流した期間の一覧） |
 
 エラーがあれば終了コード 1、注意だけなら 0 です。フォルダに `models/` がないときや、確かめること自体ができなかったとき（DuckDB が動かないなど）は 2 です。
 
@@ -467,7 +467,7 @@ data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列
 ```
 
 - 列ごとに、`model` の SQL から見える型（xlsx は DevBI の読み方で決まる型）、範囲（文字の列は出さない）、種類の数、空のセルの数。文字と真偽の列は、多い値とその行数。そのあとに最初の行
-- Excel は、読んだセルの範囲（見出しの行から）も出します。見出しの行に値が半分以下の列にしかないとき（表の上の表題の行を見出しとして読んだとき）は ⚠ を出し、`--range` で読む範囲（`A2:K` など）を示します
+- Excel は、読んだセルの範囲（見出しの行から）も出します。値のある列の半分以上に見出しがないとき（表の上の表題の行を見出しとして読んだとき。見出しも値もない列は数えない）は ⚠ を出し、`--range` で読む範囲（`A2:K` など）を示します
 - ファイルの代わりに指標ファイルの名前（`pnpm inspect -- sales`）か、そのパス（`models/sales.metrics.yaml`。`models/` の外のものも）を書くと、その `model` の SQL の結果の列を出します。データのパスはプロジェクトからです
 - `--sql "SELECT …"` で、ファイルの代わりに SELECT の結果を出します。`model` と同じく `read_xlsx('data/…')` などでデータを読みます。ファイルを書く前に型の直し方を試すときや、数字を別に数えて確かめるときに使います（`pnpm inspect -- --sql "SELECT 地域, SUM(金額) AS 売上 FROM read_xlsx('data/sales.xlsx', sheet = '明細') GROUP BY 1"`）
 - ファイルは、今のフォルダからのパスか、プロジェクトのフォルダからのパスで書きます。プロジェクトの外のファイルも読めます。xlsx・CSV・TSV・Parquet・Arrow・JSON（Parquet と JSON は DuckDB の拡張をインターネットから取ってきます）

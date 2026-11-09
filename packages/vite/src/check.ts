@@ -67,8 +67,11 @@ export interface CheckReport {
   tiles: TileReport[];
   /** The dashboards that could be read (names). */
   dashboards: string[];
-  /** The period each dashboard's tiles ran in, when its date-range tile starts in one (`2026年10月（2026-10-01〜2026-10-30）`). */
-  periods: Record<string, string>;
+  /**
+   * The periods each dashboard's tiles ran in, when its date-range tiles start in one (`受注日 2026年10月（2026-10-01〜2026-10-30）`).
+   * A period filters the tiles whose metrics file has its time column.
+   */
+  periods: Record<string, string[]>;
 }
 
 export interface CheckOptions {
@@ -149,7 +152,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   const findings: Finding[] = [];
   const views: ViewReport[] = [];
   const tiles: TileReport[] = [];
-  const periods: Record<string, string> = {};
+  const periods: Record<string, string[]> = {};
   const add = (level: Level, file: string, text: string) => findings.push({ level, file, message: text });
   // Each issue of a file is its own finding; the problems of index.ts start with "<file>: ".
   // `ids`: a dashboard's tile ids, to name the tile of a "tiles.3…" path.
@@ -338,25 +341,46 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
       // dash.json's "metrics" and query.metrics are reported with the files (dashboardProblems); other names are not.
       const listed = (n: string, t: TileSpec) => n === dashboard.metrics || n === t.query?.metrics;
 
-      // As the page opens: a date-range tile with a first period (options.default) filters every tile to it, which
-      // is also when comparisons (previous_period…) have a value.
-      let filters: Filter[] = [];
-      const picker = dashboard.tiles.find(
-        (t) => t.type === "date-range" && t.options?.default !== undefined && t.options.default !== "all",
-      );
-      if (picker && (DATE_RANGE_PRESETS as readonly unknown[]).includes(picker.options!.default)) {
-        const n = viewName(picker.query?.metrics ?? (typeof picker.options?.metrics === "string" ? picker.options.metrics : undefined));
+      // As the page opens: each date-range tile with a first period (options.default) selects it, and it filters every
+      // tile whose metrics file has that time column (crossFilters); comparisons (previous_period…) then have a value.
+      const filters: Filter[] = [];
+      const shown: { field: string; text: string }[] = [];
+      for (const t of dashboard.tiles) {
+        const def = t.type === "date-range" ? t.options?.default : undefined;
+        if (def === undefined || def === "all") continue;
+        if (!(DATE_RANGE_PRESETS as readonly unknown[]).includes(def)) {
+          add(
+            "warning",
+            file,
+            `${where(t)}: options.default「${String(def)}」はありません（${DATE_RANGE_PRESETS.join("・")}）。画面は全期間で開きます`,
+          );
+          continue;
+        }
+        const n = viewName(t.query?.metrics ?? (typeof t.options?.metrics === "string" ? t.options.metrics : undefined));
         const time = n ? metrics.get(n)?.view.time : undefined;
         const max = n ? state.get(n)?.timeMax : undefined;
-        const preset =
-          time && max ? dateRangePresets(max, time.fiscalYearStart ?? 1).find((p) => p.key === picker.options!.default) : undefined;
-        if (time && preset?.range) {
-          const [start, end] = preset.range;
-          filters = [{ field: time.name, between: [start, end] }];
-          const day = (d: Date) => d.toISOString().slice(0, 10);
-          periods[dashboard.name] = `${preset.label}（${day(start)}〜${day(new Date(end.getTime() - 86_400_000))}）`;
+        if (!time || !max) continue; // no time column, or its error: reported with the tile and the metrics file
+        const preset = dateRangePresets(max, time.fiscalYearStart).find((p) => p.key === def);
+        if (!preset?.range) {
+          add(
+            "warning",
+            file,
+            `${where(t)}: options.default「${String(def)}」には、models/${n}.metrics.yaml の time に fiscal_year_start（年度の始まりの月）が要ります。画面は全期間で開きます`,
+          );
+          continue;
         }
+        const [start, end] = preset.range;
+        filters.push({ field: time.name, between: [start, end] });
+        const day = (d: Date) => d.toISOString().slice(0, 10);
+        shown.push({
+          field: time.name,
+          text: `${time.name} ${preset.label}（${day(start)}〜${day(new Date(end.getTime() - 86_400_000))}）`,
+        });
       }
+      if (shown.length) periods[dashboard.name] = shown.map((p) => p.text);
+      // The periods that filter a view's tiles: those on its time column or a dimension of that name.
+      const periodsOf = (view: MetricsView) =>
+        shown.filter((p) => view.time?.name === p.field || Object.hasOwn(view.dimensions, p.field)).map((p) => p.text);
 
       for (const t of dashboard.tiles) {
         const tile: TileReport = { dashboard: dashboard.name, id: t.id };
@@ -497,7 +521,8 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
         if (shape) fail(shape);
         // When the model has no rows, that is the one warning (on the metrics file).
         else if (tile.rows === 0 && st.rows > 0) {
-          const period = periods[dashboard.name] ? `最初の期間 ${periods[dashboard.name]} で。` : "";
+          const applied = periodsOf(entry.view);
+          const period = applied.length ? `date-range の最初の期間 ${applied.join("・")} で。` : "";
           add("warning", file, `${where(t)}: 結果が 0 行です（${period}query.filters や指標の式を確かめてください）`);
         }
       }
@@ -522,7 +547,7 @@ export function formatReport(report: CheckReport): string {
   for (const name of report.dashboards) {
     const list = report.tiles.filter((t) => t.dashboard === name);
     const ran = list.filter((t) => t.rows !== undefined);
-    const period = report.periods[name] ? `、期間は date-range の最初の ${report.periods[name]}` : "";
+    const period = Object.hasOwn(report.periods, name) ? `、date-range の最初の期間: ${report.periods[name]!.join("・")}` : "";
     lines.push(`dashboards/${name}.dash.json: タイル ${list.length}（クエリを実行 ${ran.length}${period}）`);
     if (ran.some((t) => t.values)) {
       // --values: each tile's first rows, as the screen shows them.

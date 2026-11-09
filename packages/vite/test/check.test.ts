@@ -252,7 +252,7 @@ describe("devbi-check", () => {
     });
     const r = await checkProject(dir, { values: 2 });
     expect(r.findings).toEqual([]);
-    expect(r.periods).toEqual({ d: "2026年10月（2026-10-01〜2026-10-30）" });
+    expect(r.periods).toEqual({ d: ["受注日 2026年10月（2026-10-01〜2026-10-30）"] });
     const d = r.tiles.filter((t) => t.dashboard === "d");
     // The month of the latest date; the comparisons have a value in it (SUM of integers comes back as a decimal).
     const days = d.find((t) => t.id === "days")!;
@@ -266,12 +266,58 @@ describe("devbi-check", () => {
     expect(r.tiles.find((t) => t.dashboard === "all")?.values).toEqual([expect.stringMatching(/^売上 ¥[\d,]+、売上 前年 —$/)]);
     const text = formatReport(r);
     expect(text).toContain(
-      "dashboards/d.dash.json: タイル 3（クエリを実行 2、期間は date-range の最初の 2026年10月（2026-10-01〜2026-10-30））",
+      "dashboards/d.dash.json: タイル 3（クエリを実行 2、date-range の最初の期間: 受注日 2026年10月（2026-10-01〜2026-10-30））",
     );
     expect(text).toMatch(/\n {2}k: 売上 ¥[\d,]+、/);
     expect(text).toMatch(/\n {2}days \d+ 行:\n {4}受注日 2026\/10\/1、売上 ¥[\d,]+\n {4}受注日 2026\/10\/\d+、売上 ¥[\d,]+ …\n/);
     // Without values: the row counts on one line.
     expect(formatReport(await checkProject(dir))).toMatch(/\n {2}k 1 行、days \d+ 行\n/);
+  }, 60_000);
+
+  it("applies each date-range's first period to the tiles of its time column, and warns about one the page ignores", async () => {
+    const dir = project({
+      // Another metrics file, its time column a day later than 受注日.
+      "models/days.metrics.yaml":
+        "model: SELECT CAST(受注日 AS DATE) + 1 AS 日付, 金額 FROM read_xlsx('data/sales.xlsx', sheet = '明細')\n" +
+        "time: { column: 日付 }\nmeasures:\n  total: SUM(金額)\n",
+      "dashboards/d.dash.json": dash([
+        tile("p1", 0, { type: "date-range", options: { default: "latest_month" } }),
+        tile("p2", 2, { type: "date-range", options: { default: "previous_year", metrics: "days" } }),
+        tile("k1", 4, { type: "kpi", query: { measures: ["orders"] } }),
+        tile("k2", 6, { type: "kpi", query: { measures: ["total"], metrics: "days" } }),
+        tile("none", 8, {
+          type: "bar",
+          query: { measures: ["total"], time: "month", metrics: "days", filters: [{ field: "日付", between: ["2030-01-01", null] }] },
+        }),
+      ]),
+      "dashboards/bad.dash.json": dash([
+        tile("q", 0, { type: "date-range", options: { default: "latest_quarter" } }),
+        tile("fy", 2, { type: "date-range", options: { default: "latest_fiscal_year", metrics: "days" } }),
+      ]),
+    });
+    const r = await checkProject(dir, { values: 1 });
+    expect(r.periods).toEqual({ d: ["受注日 2026年10月（2026-10-01〜2026-10-30）", "日付 2025年（2025-01-01〜2025-12-31）"] });
+    // k2 is on days: filtered by its own date-range (2025), not by 受注日.
+    const sum = async (where: string) =>
+      Number(
+        (
+          await inspectData(dir, {
+            sql: `SELECT SUM(金額) AS s, COUNT(DISTINCT 受注番号) AS n FROM read_xlsx('data/sales.xlsx', sheet = '明細') WHERE ${where}`,
+          })
+        ).head[0]!.s,
+      );
+    const total2025 = await sum("CAST(受注日 AS DATE) + 1 BETWEEN '2025-01-01' AND '2025-12-31'");
+    const k = (id: string) => r.tiles.find((t) => t.dashboard === "d" && t.id === id)!;
+    expect(k("k2").values).toEqual([`total ${total2025.toLocaleString("en-US")}`]);
+    expect(k("k1").values).toEqual([expect.stringMatching(/^受注件数 \d+$/)]);
+    expect(Number(k("k1").values![0]!.split(" ")[1])).toBeLessThan(1000);
+    // A 0-row tile names the period that filtered it.
+    expect(r.findings.map((f) => `${f.level} ${f.file}: ${f.message}`)).toEqual([
+      "warning dashboards/bad.dash.json: タイル q: options.default「latest_quarter」はありません（all・latest_month・last_12_months・latest_year・previous_year・year_to_date・latest_fiscal_year・previous_fiscal_year）。画面は全期間で開きます",
+      "warning dashboards/bad.dash.json: タイル fy: options.default「latest_fiscal_year」には、models/days.metrics.yaml の time に fiscal_year_start（年度の始まりの月）が要ります。画面は全期間で開きます",
+      "warning dashboards/d.dash.json: タイル none: 結果が 0 行です（date-range の最初の期間 日付 2025年（2025-01-01〜2025-12-31） で。query.filters や指標の式を確かめてください）",
+    ]);
+    expect(r.periods).not.toHaveProperty("bad");
   }, 60_000);
 
   it("reports a project without metrics files", async () => {
@@ -299,6 +345,8 @@ describe("devbi-inspect", () => {
     ]);
     expect(r.range).toBe("A1:I6045");
     expect(r.notes).toEqual([]);
+    // A wide range: the empty columns past the table are not taken for a title row.
+    expect((await inspectData(SALES, "data/sales.xlsx", { range: "A:Z", rows: 0, values: 0 })).notes).toEqual([]);
     expect(r.head).toHaveLength(10);
     expect(r.head[0]).toMatchObject({ 受注日: "2024-04-01", 顧客: "青葉商事", 数量: "3" });
     const text = formatInspect(r);

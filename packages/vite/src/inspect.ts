@@ -85,8 +85,12 @@ export async function inspectData(dir: string, target: string | InspectSql, opti
   } else if (target.endsWith(".metrics.yaml") || (!DATA.test(target) && existsSync(path.join(dir, "models", `${target}.metrics.yaml`)))) {
     // A metrics file: named (sales), or its path (models/sales.metrics.yaml, or one elsewhere to try a model).
     const metricsFile = target.endsWith(".metrics.yaml")
-      ? ([path.resolve(target), path.resolve(dir, target), path.join(dir, "models", path.basename(target))].find((p) => existsSync(p)) ??
-        path.resolve(dir, target))
+      ? // A bare file name is the one in models/.
+        ([
+          path.resolve(target),
+          path.resolve(dir, target),
+          ...(path.basename(target) === target ? [path.join(dir, "models", target)] : []),
+        ].find((p) => existsSync(p)) ?? path.resolve(dir, target))
       : path.join(dir, "models", `${target}.metrics.yaml`);
     if (!existsSync(metricsFile)) throw new Error(`指標ファイル ${target} がありません`);
     report.source = relative(metricsFile);
@@ -180,18 +184,23 @@ export async function inspectData(dir: string, target: string | InspectSql, opti
 
 /**
  * An Excel sheet whose header row has a value in at most half of the columns (the rest named column2…) is most
- * likely a title above the table: how to read from the row below it instead.
+ * likely a title above the table: how to read from the row below it instead. Columns with neither a header nor a
+ * value (a wide --range) do not count.
  */
 function titleRow(r: InspectReport): string | undefined {
-  const named = r.columns.filter((c, i) => c.name !== `column${i + 1}`).length;
+  const named = (c: InspectColumn, i: number) => c.name !== `column${i + 1}`;
+  const used = r.columns.filter((c, i) => named(c, i) || c.nulls < r.rows);
+  const unnamed = r.columns.filter((c, i) => !named(c, i) && c.nulls < r.rows);
   const m = /^([A-Z]+)(\d+):([A-Z]+)\d+$/.exec(r.range!);
-  if (r.columns.length < 2 || named > r.columns.length / 2 || !m) return undefined;
+  if (!m || !r.rows || used.length < 2 || unnamed.length < used.length / 2) return undefined;
   const row = Number(m[2]);
   const next = `${m[1]}${row + 1}:${m[3]}`;
-  const sheet = r.sheet ? `, sheet = '${r.sheet}'` : "";
+  const sheet = r.sheet ? `, sheet = '${r.sheet.replaceAll("'", "''")}'` : "";
+  // In a metrics file: the path from the project (not a file outside it).
+  const model = path.isAbsolute(r.source) ? "" : `（指標ファイルでは read_xlsx('${r.source}'${sheet}, range = '${next}')）`;
   return (
-    `見出しとして読んだ ${row} 行目は、${r.columns.length} 列のうち ${named} 列にしか値がありません（ほかの列は column2… という名前になります）。` +
-    `表の上の表題などの行なら、その下の見出しの行から読んでください: --range ${next}（指標ファイルでは read_xlsx('${r.source}'${sheet}, range = '${next}')）`
+    `見出しとして読んだ ${row} 行目は、${used.length} 列のうち ${used.length - unnamed.length} 列にしか値がありません（ほかの列は ${unnamed[0]!.name}… という名前になります）。` +
+    `表の上の表題などの行なら、その下の見出しの行から読んでください: --range ${next}${model}`
   );
 }
 

@@ -274,7 +274,7 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 
 | # | すること | 期待する結果 |
 | --- | --- | --- |
-| 103 | `pnpm check` | 指標ファイル 3 つの行数（`models/sales.metrics.yaml: 6,044 行、指標 7・軸 4` など）と、ダッシュボードごとのタイルの行数が出て、最後に「問題はありません」。ダッシュボードの行には「期間は date-range の最初の 2026年度（2026-04-01〜2026-10-30）」（画面を開いたときと同じ期間で流す）。2 秒ほど |
+| 103 | `pnpm check` | 指標ファイル 3 つの行数（`models/sales.metrics.yaml: 6,044 行、指標 7・軸 4` など）と、ダッシュボードごとのタイルの行数が出て、最後に「問題はありません」。ダッシュボードの行には「date-range の最初の期間: 受注日 2026年度（2026-04-01〜2026-10-30）」（画面を開いたときと同じ期間で流す）。2 秒ほど |
 | 104 | `models/sales.metrics.yaml` の `SUM(数量)` を `SUM(数)` にして、もう一度 `pnpm check` | `✗ models/sales.metrics.yaml: 指標 quantity: Binder Error: Referenced column "数" not found …` と、次の行に `Candidate bindings: "数量", …`。売上ダッシュボードの `kpi-qty`（数量）と `products`（商品別）のタイルは「quantity のエラーのため確かめていません」。最後に「エラー 1 件、注意 0 件」で、`echo $?` は 1 |
 | 105 | 104 を戻し、`dashboards/sales.dash.json` の `"measures": ["orders"]` を `["orderz"]` にして `pnpm check` | `✗ dashboards/sales.dash.json: タイル kpi-orders（受注件数）: 指標 orderz は sales にありません（sales の指標: revenue・orders・…）` |
 | 106 | `pnpm inspect -- data/sales.xlsx` | `data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列` と、列ごとの型・範囲・種類の数。`地域` には「多い値: 関東 (2,322)、近畿 (1,325)、…」。2 行目に「シート: 明細・メモ」。最後に「最初の 10 行」の表（`受注日 \| 受注番号 \| …` の見出しと 10 行） |

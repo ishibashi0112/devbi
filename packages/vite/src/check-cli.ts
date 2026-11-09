@@ -22,7 +22,7 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === "--json") json = true;
   else if (args[i] === "--values") {
     // Each tile's first rows as the screen shows them: 5, or the number after it.
-    values = /^\d+$/.test(args[i + 1] ?? "") ? Number(args[++i]) : 5;
+    values = /^[1-9]\d*$/.test(args[i + 1] ?? "") ? Number(args[++i]) : 5;
   } else usage();
 }
 const root = path.resolve(dir);
