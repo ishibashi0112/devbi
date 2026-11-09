@@ -11,7 +11,7 @@
 {{run}} preview    # ビルドしたものを開く
 {{run}} typecheck  # 自作タイル（.tsx）の型チェック
 {{run}} check      # 指標とすべてのタイルのクエリをデータに流して確かめる（ブラウザを開かずに）
-{{run}} inspect data/sales.xlsx  # データの列・型・値を見る
+{{run}} inspect -- data/sales.xlsx  # データの列・型・値と最初の行を見る
 ```
 
 ## ファイル
@@ -25,7 +25,7 @@ data/sales.xlsx                # データ（架空の受注明細）。CSV・Pa
 
 ## 次にすること
 
-- `data/` に自分の Excel や CSV を置き、`{{run}} inspect data/<ファイル>` で列を見て、`models/` の `model:` をそのファイルに向け、指標と軸を書く。書いたら `{{run}} check`
+- `data/` に自分の Excel や CSV を置き、`{{run}} inspect -- data/<ファイル>` で列を見て、`models/` の `model:` をそのファイルに向け、指標と軸を書く。書いたら `{{run}} check`
 - `{{run}} dev` で開いたページの「編集」で、タイルを足して指標と軸を選ぶ。保存すると dash.json に書かれる
 - 組み込みのタイルで足りない表示は、エディタの「コードにする」で .tsx に書き出し、React で描く
 

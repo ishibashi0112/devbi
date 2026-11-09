@@ -1,48 +1,8 @@
-import { formatTime, isoDate, type Filter, type TileProps } from "devbi";
+import { dateRangePresets, isoDate, type Filter, type TileProps } from "devbi";
 import { useEffect, useMemo, useRef } from "react";
 import { useDevbi, useTimeExtent } from "../context.js";
 
 const DAY = 86_400_000;
-
-function utc(y: number, m: number, d = 1): Date {
-  return new Date(Date.UTC(y, m, d));
-}
-
-interface Preset {
-  key: string;
-  label: string;
-  range: [Date, Date] | null;
-}
-
-/** Period presets relative to the latest date in the data (not today), so daily or monthly updates line up. */
-export function presets(max: Date, fiscalYearStart: number): Preset[] {
-  const y = max.getUTCFullYear();
-  const m = max.getUTCMonth();
-  const monthStart = utc(y, m);
-  const out: Preset[] = [
-    { key: "all", label: "全期間", range: null },
-    { key: "latest_month", label: formatTime(monthStart, "month"), range: [monthStart, utc(y, m + 1)] },
-    { key: "last_12_months", label: "直近12ヶ月", range: [utc(y, m - 11), utc(y, m + 1)] },
-    { key: "latest_year", label: `${y}年`, range: [utc(y, 0), utc(y + 1, 0)] },
-    { key: "previous_year", label: `${y - 1}年`, range: [utc(y - 1, 0), utc(y, 0)] },
-    { key: "year_to_date", label: `${y}年累計`, range: [utc(y, 0), new Date(Date.UTC(y, m, max.getUTCDate()) + DAY)] },
-  ];
-  if (fiscalYearStart !== 1) {
-    const fs = fiscalYearStart - 1;
-    const fy = m >= fs ? y : y - 1;
-    out.push(
-      { key: "latest_fiscal_year", label: `${fy}年度`, range: [utc(fy, fs), utc(fy + 1, fs)] },
-      { key: "previous_fiscal_year", label: `${fy - 1}年度`, range: [utc(fy - 1, fs), utc(fy, fs)] },
-    );
-  }
-  // Periods that contain the latest date end the day after it, so a comparison with
-  // the previous year covers the same stretch of days (year to date vs. same period last year).
-  const cap = Date.UTC(y, m, max.getUTCDate()) + DAY;
-  for (const p of out) {
-    if (p.range && p.range[1].getTime() > cap) p.range = [p.range[0], new Date(cap)];
-  }
-  return out;
-}
 
 function asDate(v: unknown): Date | null {
   if (v instanceof Date) return v;
@@ -60,7 +20,7 @@ export function DateRange({ tile, selection, select }: TileProps) {
   const view = ctx.view(metrics);
   const time = view.time;
   const extent = useTimeExtent(metrics);
-  const list = useMemo(() => (extent.max ? presets(extent.max, time?.fiscalYearStart ?? 1) : []), [extent.max, time]);
+  const list = useMemo(() => (extent.max ? dateRangePresets(extent.max, time?.fiscalYearStart ?? 1) : []), [extent.max, time]);
   const own = selection.find((f): f is Extract<Filter, { between: unknown }> => f.field === time?.name && "between" in f);
   const start = asDate(own?.between[0]);
   const end = asDate(own?.between[1]);

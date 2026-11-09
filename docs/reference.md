@@ -94,7 +94,7 @@ measures:
 
 | 関数 | 読むもの | 補足 |
 | --- | --- | --- |
-| `read_xlsx('data/x.xlsx', sheet = '明細', range = 'A3:K5000', header = true, all_varchar = false)` | Excel | DevBI が自前で読む。引数は `sheet` 以外は省略可 |
+| `read_xlsx('data/x.xlsx', sheet = '明細', range = 'A3:K', header = true, all_varchar = false)` | Excel | DevBI が自前で読む。引数は `sheet` 以外は省略可 |
 | `read_csv('data/x.csv')` / `read_csv_auto(...)` | CSV | DuckDB が読む |
 | `read_arrow('data/x.arrow')` | Arrow IPC | DuckDB が読む |
 | `read_parquet('data/x.parquet')` | Parquet | DuckDB の拡張が要る（[@devbi/vite](#devbivite) の `extensionRepository`） |
@@ -103,7 +103,7 @@ measures:
 
 パスはプロジェクトからの相対パスで、ブラウザが `data/` から取りに行きます。`https://` の URL も書けます。ブラウザではワイルドカード（`*`）は使えません。`model` の中では JOIN や WHERE、列の計算など、DuckDB の SQL が自由に書けます。
 
-Excel の読み方: 見出しは最初の空でない行（`header = false` なら見出しなしで、列名は `column1`、`column2`…）。同じ見出しが重なると `_2` を付けます。型は中身から決めます（文字・整数・数値・真偽・日付・日時）。日付はセルの表示形式（和暦の表示形式を含む）で見分けます。空の行は飛ばします。数式のセルは、Excel が最後に保存した値を使います。
+Excel の読み方: 見出しは最初の空でない行（`range` があればその中の。`header = false` なら見出しなしで、列名は `column1`、`column2`…）。表の上に表題やメモの行があるときは、`range` で見出しの行から読みます。`range` は `A3:K5000` のように書き、終わりの行を省くと最後の行まで（`A3:K`）、行を両方省くと列のすべて（`A:K`）です。同じ見出しが重なると `_2` を付けます。型は中身から決めます（文字・整数・数値・真偽・日付・日時）。日付はセルの表示形式（和暦の表示形式を含む）で見分けます。空の行は飛ばします。数式のセルは、Excel が最後に保存した値を使います。
 
 ### `time`
 
@@ -167,12 +167,13 @@ revenue_pp:  { of: revenue, compare: previous_period, as: delta }
 - 既定の表示名は「売上 前年比」「売上 前期間差」などです。`ratio` と `change` の既定の書式は `0.0%` で、それ以外は `of` の書式を引き継ぎます。
 - 値が出るのは、期間が決まっているときだけです。つまり、クエリに `time`（時間の粒度）があるか、期間の絞り込みがあるときです。全期間のままだと空（NULL、画面では「—」）になります。
 - `previous_year` を時間の粒度で使うと、同じ月（同じ四半期・同じ年）の 1 年前と比べます。週は 52 週前（364 日前）です。日で比べるとき、前年の 2/29 には対応する日がないので比べません。
-- `previous_period` は、時間の粒度があればその 1 つ前（前月・前四半期など）、期間の絞り込みだけなら同じ日数だけ前と比べます。
+- `previous_period` は、時間の粒度があればその 1 つ前（前月・前四半期など）、期間の絞り込みだけなら同じ日数だけ前と比べます。たとえばデータが 10/30 までで、期間が `latest_month`（10/1〜10/30 の 30 日）なら、その前の 30 日（9/1〜9/30）です。
+- `kpi` では、`as` が `ratio`・`change`・`delta` の指標に色が付きます（増えると緑、減ると赤）。`value` には付きません。少ないほうが良い指標（クレームの件数など）も、増えると緑です。
 
 **累計（`running`）**
 
 ```yaml
-revenue_cum:  { of: revenue, running: true }          # 全期間の累計
+revenue_cum:  { of: revenue, running: true }          # 全期間の累計（running: all とも書ける）
 revenue_ytd:  { of: revenue, running: year }          # 1 月で戻る
 revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻る
 ```
@@ -231,7 +232,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `dimensions` | 軸の名前の配列 |
 | `time` | 時間の粒度。`day`、`week`（月曜始まり）、`month`、`quarter`、`year`、`fiscal_year`。結果の列名は `time` の列名 |
 | `filters` | このタイルだけに常にかける絞り込み（下記） |
-| `sort` | 並べ替え。`"revenue"` は昇順、`"-revenue"` は降順。`{ "field": "revenue", "desc": true }` とも書ける |
+| `sort` | 並べ替えの配列（`["-revenue", "region"]`）。`"revenue"` は昇順、`"-revenue"` は降順。`{ "field": "revenue", "desc": true }` とも書ける |
 | `limit` | 最大の行数 |
 | `metrics` | ダッシュボードとは別の指標ファイルを使うとき |
 
@@ -247,6 +248,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 - `field` は軸の名前か、`time` の列名です。
 - `in` は値のどれかに一致する行です。`null` は空欄に一致します。
 - `between` は「始まり ≦ 値 ＜ 終わり」で、終わりの日は含みません。どちらかを `null` にすると、その側は無制限です。
+- タイルの `filters`、期間（`date-range`）、ほかのタイルのクリックでの選択は、すべて重ねてかかります（AND。期間どうしは重なる部分）。組み込みのタイルは期間を外せません。期間に関係なく出したいもの（「いま対応中のすべて」など）は、自作タイルで `useDevbiQuery(query, { crossfilter: false })` にします。
 
 ## 組み込みタイル
 
@@ -399,21 +401,21 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか
 2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
-3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
+3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。ダッシュボードの `date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じくその期間で流す（比較の指標にも値が出る）。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
 
 SQL を流すのは、ブラウザと同じ DuckDB-wasm（Node で動かす）です。xlsx は画面と同じく DevBI が読み、`read_api` は `api/` の SQL を接続先で流します（`devbi-serve` と同じく、環境変数とプロジェクトの `.env`・`.env.local` の `DEVBI_DB…`。Vite の `.env.[mode]` は読みません）。ブラウザと同じく、データのファイルは `read_csv('data/…')` のように `read_` の関数に書いたものだけを読みます（`FROM 'data/x.csv'` はエラー）。
 
 ```
 $ pnpm check
 models/sales.metrics.yaml: 6,044 行、指標 7・軸 4
-dashboards/sales.dash.json: タイル 14（クエリを実行 9）
-  kpi-revenue 1 行、kpi-avg 1 行、monthly 31 行、region 0 行、vs-last-year 31 行、…
+dashboards/sales.dash.json: タイル 14（クエリを実行 9、期間は date-range の最初の 2026年度（2026-04-01〜2026-10-30））
+  kpi-revenue 1 行、kpi-avg 1 行、monthly 7 行、region 0 行、vs-last-year 7 行、…
   kpi-qty・products: quantity のエラーのため確かめていません
 
 ✗ models/sales.metrics.yaml: 指標 quantity: Binder Error: Referenced column "数" not found in FROM clause!
     Candidate bindings: "数量", "商品", "地域"
 ✗ dashboards/sales.dash.json: タイル kpi-orders（受注件数）: 指標 orderz は sales にありません（sales の指標: revenue・orders・quantity・…）
-⚠ dashboards/sales.dash.json: タイル region（地域別売上）: 結果が 0 行です（query.filters や指標の式を確かめてください）
+⚠ dashboards/sales.dash.json: タイル region（地域別売上）: 結果が 0 行です（最初の期間 2026年度（2026-04-01〜2026-10-30）で。query.filters や指標の式を確かめてください）
 
 エラー 2 件、注意 1 件
 ```
@@ -421,46 +423,67 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 9）
 - ✗（エラー）は、そのままだと画面でエラーになるもの。⚠（注意）は、表示はできるが見直したいものと、確かめられなかったもの
 - 一つの間違いは一つのエラーにします。エラーのある指標を使う指標（`revenue / orders` や `of: revenue`）、エラーのある time の列を使う比較・累計の指標、それらを使うタイルは、「… のエラーのため確かめていません」とだけ出します。`model` が 0 行のときの注意も、指標ファイルに 1 つだけです
 - DuckDB のエラー（`Binder Error` など）は DuckDB の英語のままです。`Candidate bindings` は、近い名前の列の候補です
-- 期間（date-range）や、ほかのタイルのクリックでの絞り込みはかけず、全期間で流します
+- 期間は `date-range` の最初の期間だけです（`default` がない・`all` なら全期間）。ほかのタイルのクリックでの絞り込みはかけません
 - 確かめないもの: 接続先がないときの `read_api`（注意）、URL のデータ、DuckDB の拡張（Parquet、JSON、`current_date` の icu など）をインターネットから取ってこられないときのその SQL（注意）、Node で読み込めない自作タイル（`window` を読むなど。プロジェクトの vite.config も使わないので、そこでの設定が要るものも。注意）、自作タイルが `query` の外で読むデータ、見た目（色・幅・高さ）
 
-`devbi-check [--dir <フォルダ>] [--json]`:
+`--values` を付けると、タイルごとに、結果の最初の行を画面と同じ書式で出します。作ったダッシュボードの数字を、人が知っている数字や `devbi-inspect --sql` で別に数えた数字と比べるときに使います。
+
+```
+$ pnpm check -- --values 2
+dashboards/sales.dash.json: タイル 14（クエリを実行 12、期間は date-range の最初の 2026年度（2026-04-01〜2026-10-30））
+  kpi-revenue: 売上 ¥48,052,590、売上 前年 ¥48,138,860、売上 前年比 99.8%
+  monthly 7 行:
+    受注日 2026年4月、売上 ¥7,329,090
+    受注日 2026年5月、売上 ¥7,855,210 …
+```
+
+`devbi-check [--dir <フォルダ>] [--values [行数]] [--json]`:
 
 | オプション | 中身 |
 | --- | --- |
 | `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
-| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ） |
+| `--values` | タイルごとに結果の最初の行を、画面と同じ書式で出す。既定は 5 行（`--values 1` で 1 行） |
+| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ。`--values` なら `values` に最初の行）、`periods`（ダッシュボードごとの、流した期間） |
 
 エラーがあれば終了コード 1、注意だけなら 0 です。フォルダに `models/` がないときや、確かめること自体ができなかったとき（DuckDB が動かないなど）は 2 です。
 
 ### データの中を見る（devbi-inspect）
 
-`pnpm inspect <ファイル>`（中身は `devbi-inspect`）が、データのファイルの列を出します。metrics.yaml を書く前に、列の名前と型、どんな値が入っているかを見ます（Excel を開けない AI にも使えます）。
+`pnpm inspect -- <ファイル>`（中身は `devbi-inspect`）が、データのファイルの列を出します。metrics.yaml を書く前に、列の名前と型、どんな値が入っているかを見ます（Excel を開けない AI にも使えます）。
 
 ```
-$ pnpm inspect data/sales.xlsx
-data/sales.xlsx（シート「明細」）: 6,044 行、9 列
+$ pnpm inspect -- data/sales.xlsx
+data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列
   シート: 明細・メモ（ほかのシートは --sheet <名前>）
 
 受注日: DATE、2024-04-01 〜 2026-10-30、672 種類
 顧客: VARCHAR、40 種類
   多い値: 青葉工業 (276)、三河工業 (256)、青葉商事 (244)、…
 数量: BIGINT、1 〜 40、40 種類
+
+最初の 10 行（6,044 行のうち。--rows <数> で変えられます）:
+受注日 | 受注番号 | 顧客 | …
+2024-04-01 | J10001 | 青葉商事 | …
 ```
 
-- 列ごとに、`model` の SQL から見える型（xlsx は DevBI の読み方で決まる型）、範囲（文字の列は出さない）、種類の数、空のセルの数。文字と真偽の列は、多い値とその行数
-- ファイルの代わりに指標ファイルの名前（`pnpm inspect sales`）か、そのパス（`models/sales.metrics.yaml`）を書くと、その `model` の SQL の結果の列を出します
+- 列ごとに、`model` の SQL から見える型（xlsx は DevBI の読み方で決まる型）、範囲（文字の列は出さない）、種類の数、空のセルの数。文字と真偽の列は、多い値とその行数。そのあとに最初の行
+- Excel は、読んだセルの範囲（見出しの行から）も出します。見出しの行に値が半分以下の列にしかないとき（表の上の表題の行を見出しとして読んだとき）は ⚠ を出し、`--range` で読む範囲（`A2:K` など）を示します
+- ファイルの代わりに指標ファイルの名前（`pnpm inspect -- sales`）か、そのパス（`models/sales.metrics.yaml`。`models/` の外のものも）を書くと、その `model` の SQL の結果の列を出します。データのパスはプロジェクトからです
+- `--sql "SELECT …"` で、ファイルの代わりに SELECT の結果を出します。`model` と同じく `read_xlsx('data/…')` などでデータを読みます。ファイルを書く前に型の直し方を試すときや、数字を別に数えて確かめるときに使います（`pnpm inspect -- --sql "SELECT 地域, SUM(金額) AS 売上 FROM read_xlsx('data/sales.xlsx', sheet = '明細') GROUP BY 1"`）
 - ファイルは、今のフォルダからのパスか、プロジェクトのフォルダからのパスで書きます。プロジェクトの外のファイルも読めます。xlsx・CSV・TSV・Parquet・Arrow・JSON（Parquet と JSON は DuckDB の拡張をインターネットから取ってきます）
 - 値がそのまま出ます。人に渡すときは気をつけてください（`pnpm try-xlsx` は値を出しません）
 
-`devbi-inspect <ファイル | 指標ファイルの名前> [--dir <フォルダ>] [--sheet <シート名>] [--values <数>] [--json]`:
+`devbi-inspect <ファイル | 指標ファイル> [--sheet <シート名>] [--range <セル範囲>] [--values <数>] [--rows <数>] [--dir <フォルダ>] [--json]`、`devbi-inspect --sql "<SELECT>" [...]`:
 
 | オプション | 中身 |
 | --- | --- |
-| `--dir` | プロジェクトのフォルダ。指標ファイルと `.env` をここから読む。既定は今のフォルダ |
+| `--dir` | プロジェクトのフォルダ。指標ファイル、データ、`.env` をここから読む。既定は今のフォルダ |
 | `--sheet` | Excel のシート。既定は最初のシート |
+| `--range` | Excel の読むセルの範囲。`read_xlsx` の `range` と同じ（`A3:K`） |
+| `--sql` | ファイルの代わりに、この SELECT の結果を見る |
 | `--values` | 文字の列に出す多い値の数。既定は 8。0 で出さない |
-| `--json` | 結果を JSON で出す |
+| `--rows` | 出す最初の行の数。既定は 10。0 で出さない |
+| `--json` | 結果を JSON で出す（`head` に最初の行、`notes` に ⚠ の中身） |
 
 読めないときは終了コード 1 です。
 
@@ -468,10 +491,10 @@ data/sales.xlsx（シート「明細」）: 6,044 行、9 列
 
 `create-devbi` で作ったプロジェクトと `examples/sales` には、AI がダッシュボードを作るときの作業手順 `AGENTS.md` があります。Codex・Cursor など多くの AI が読み、Claude Code は `CLAUDE.md`（中身は `@AGENTS.md` の読み込み）から読みます。AI に「data/ の Excel から〇〇のダッシュボードを作って」と頼むと、この手順で進みます。
 
-1. 調べる: `inspect` でデータの列と値を見て、今の `models/`・`dashboards/` を読み、`check` で今の状態を知る
-2. 方針を伝える: 指標ファイル（読むデータ、日付の列、軸、指標）とタイルの並びを先に示す。データから決められないこと（どの列が売上か、件数は何を数えるか、年度の始まりなど）は聞く
+1. 調べる: `inspect` でデータの列と値と最初の行を見て（Excel の表の上の表題の行は `--range` で飛ばす）、今の `models/`・`dashboards/` を読み、`check` で今の状態を知る。型の直し方は `inspect --sql` で試す
+2. 方針を伝える: 指標ファイル（読むデータ、日付の列、軸、指標）とタイルの並びを先に示す。データから決められないこと（何を数えるか、平均の対象、空欄の扱い、どの日付で期間を区切るか、年度の始まりなど）は、聞くことと置いた想定を並べる。答えがないと作れないときだけ、書かずに質問で終える
 3. 書く: 書き方の決まり（`read_` の関数で読む、`time` は日付に、前年比は `compare` で、12 列のグリッドの並べ方の目安、自作タイルは最後の手段、など）に従う
-4. 確かめる: `check` のエラーがなくなるまで直し、作ったファイル・`check` の結果・`dev` で見てほしいところを伝える
+4. 確かめる: `check` のエラーがなくなるまで直し、`check --values` でタイルの数字を見て、主な数字を `inspect --sql` で別に数えて比べる。作ったファイル・`check` の結果・`dev` で見てほしいところと出るはずの数字・置いた想定を伝える
 
 - 手順の中のファイルの書き方は、`node_modules/devbi/docs/reference.md`（このリファレンスと同じもの。`devbi` のパッケージに入っていて、入れた版に合う）を見るように書いてあります
 - プロジェクトに合わせて書き足してかまいません（データの意味、社内の言葉、ダッシュボードを見る人など）。`create-devbi` の版を上げても `AGENTS.md` は書き換わりません
@@ -1226,7 +1249,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `compileTimeExtent(view)` | 日付の最初と最後を出す SQL |
 | `scanSources(sql)` / `apiParams(source)` | `model` の中の `read_*(...)` と `read_api(...)` を見つける / `read_api` の引数をパラメーターの値にする |
 | `apiCalls(sql)` / `snapshotFile(name, params)` | `model` の中の `read_api` の名前とパラメーター / そのスナップショットのファイル名（ブラウザとサーバーで同じ） |
-| `readXlsx(bytes, { sheet?, range?, header?, allVarchar? })` | Excel を型つきの列で読む。戻り値は `{ sheet, rowCount, columns: [{ name, type, values }] }` |
+| `readXlsx(bytes, { sheet?, range?, header?, allVarchar? })` | Excel を型つきの列で読む。戻り値は `{ sheet, rowCount, columns: [{ name, type, values }], range? }`（`range` は読んだセルの範囲で、見出しの行を含む。`A1:K3068`） |
 | `listSheets(bytes)` | シートの名前 |
 | `writeXlsx([{ name, rows }])` | Excel を書く（テストやサンプルデータ用。シートごとに表 1 つ、日付は Excel の日付） |
 | `Workbook` | 書式つきの Excel を書く（依存なし）。`new Workbook({ font? })`（既定は游ゴシック）、`book.sheet(名前)`（Excel で使える名前にして、重なれば `(2)` を付ける）、`sheet.add(...セル)` で 1 行（セルは値か `{ v, s?, link?, text?, noWidth? }`。`s` は `{ bold, italic, underline, strike, size, color, fill, border, wrap, format }`、`format` は Excel の表示形式。`link` は `'シート'!A1` のようなブックの中の場所。`text` は列幅を決める表示の文字）、`sheet.skip(n?)`、`sheet.freeze = { rows, cols? }`、`sheet.filter = [見出しの行, 最後の行, 列の数]`（0 から数える）、`sheet.widths`（列幅を決めるとき）、`await book.toBytes()`。日付は Excel の日付になる（表示形式がなければ `yyyy/m/d`、時刻があれば `yyyy/m/d h:mm`）。数値はどれも数値で書く（Excel は 15 桁まで）。列幅は中身から（全角は 2 文字ぶん、60 まで）。印刷は A4 横で幅に合わせる。1 シートは 1,048,576 行・16,384 列まで（`MAX_ROWS`・`MAX_COLS`。超えると `add` がエラー） |
@@ -1236,6 +1259,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `getMeasure(view, name)` / `getDimension(view, name)` | 名前で引く |
 | `defineQuery(query)` / `RowOf<typeof query>` | 名前を検査するクエリと、その行の型（[自作タイル](#自作タイルjsx)） |
 | `dashboardJsonSchema(names?)` / `metricsJsonSchema()` | dash.json と metrics.yaml の JSON Schema。`names`（`{ metrics, measures, dimensions, fields }`）を渡すと、その名前だけを許す |
+| `dateRangePresets(max, fiscalYearStart?)` | `date-range` の期間の一覧（`{ key, label, range: [始まり, 終わり) \| null }`）。データの最終日 `max` から数える。画面と `devbi-check` が使う |
 | `TILE_TYPES` / `TILE_TYPE_NAMES` / `DATE_RANGE_PRESETS` | 組み込みタイルの種類（`label` は短い名前、`description`、`options`、`size` は GUI エディタで足したときの大きさ）、`date-range` の期間の名前。`options` のそれぞれ（`TileOptionSchema`）には、GUI エディタの設定欄の名前 `label`、`enum` の値の名前 `enumLabels`（JSON Schema の `enumDescriptions` にもなり、VS Code の補完に出る）、入れ方 `input`（`text` は複数行、`field` は軸か時間の列、`metrics` は指標ファイル）がある |
 | 型 | `Query`、`Filter`、`Row`、`Scalar`、`FieldInfo`、`TileSpec`、`TileProps`、`Grain`、`MetricsView`、`Dashboard`、`MetricsRegistry`（`.devbi/env.d.ts` が名前を足す）など |
 

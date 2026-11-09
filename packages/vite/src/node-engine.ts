@@ -19,8 +19,11 @@ export interface NodeEngine {
   query(sql: string): Record<string, unknown>[];
   /** Load a metrics view's data (its model SQL as a table) and return SQL selecting from it. */
   loadView(view: MetricsView): Promise<string>;
-  /** Load one data file (relative to the project, or absolute) as a table: its name. */
-  loadFile(file: string, options?: { sheet?: string }): Promise<string>;
+  /**
+   * Load one data file (relative to the project, or absolute) as a table: its name, and for an Excel file the cells
+   * read (`A1:K3068`, the header row included).
+   */
+  loadFile(file: string, options?: { sheet?: string; range?: string }): Promise<{ table: string; range?: string }>;
   close(): void;
 }
 
@@ -43,6 +46,16 @@ export function missingExtension(e: unknown): string | undefined {
 export function duckdbMessage(e: unknown): string {
   const text = e instanceof Error ? e.message : String(e);
   return text.replace(/\n+LINE \d+:[\s\S]*$/, "").trim();
+}
+
+/**
+ * When DuckDB found no file: the browser reads only the files named in read_xlsx(…), read_csv(…) and the like, so
+ * a path in FROM 'data/x.csv' does not work there (nor here, where statements run from an empty folder).
+ */
+export function fileHint(message: string): string {
+  return /No files found|Cannot open file|No such file/i.test(message)
+    ? "\nデータのファイルは read_csv('data/…') のように read_ の関数で読んでください（ブラウザはそう書いたファイルだけを読み込みます）"
+    : "";
 }
 
 /** As the browser engine converts xlsx to Arrow (engine.ts xlsxToArrow). */
@@ -93,6 +106,8 @@ function duckType(type: arrow.DataType): string {
 function plain(v: unknown, type: arrow.DataType): unknown {
   if (v === null || v === undefined) return null;
   if (arrow.DataType.isDate(type) || arrow.DataType.isTimestamp(type)) return new Date(Number(v));
+  // As the browser engine (tableToRows): SUM of integers is a HUGEINT, a decimal in Arrow.
+  if (arrow.DataType.isDecimal(type)) return arrow.util.bigNumToNumber(v as never, (type as arrow.Decimal).scale);
   if (typeof v === "bigint") return Number(v);
   if (typeof v === "object") return JSON.stringify(v, (_, x) => (typeof x === "bigint" ? Number(x) : x));
   return v;
@@ -243,7 +258,9 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
       const name = `__devbi_file_${++seq}`;
       const bytes = await readFile(path.resolve(dir, file));
       if (/\.xlsx$/i.test(file)) {
-        insert(xlsxToArrow(await readXlsx(bytes, opts.sheet ? { sheet: opts.sheet } : {})), name);
+        const table = await readXlsx(bytes, { ...(opts.sheet ? { sheet: opts.sheet } : {}), ...(opts.range ? { range: opts.range } : {}) });
+        insert(xlsxToArrow(table), name);
+        return { table: ident(name), ...(table.range ? { range: table.range } : {}) };
       } else {
         // Under a name of its own: the file may be outside the project.
         const virtual = `${name}${path.extname(file)}`;
@@ -257,7 +274,7 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
               : "read_csv_auto";
         sql(`CREATE TABLE ${ident(name)} AS SELECT * FROM ${fn}('${virtual}')`);
       }
-      return ident(name);
+      return { table: ident(name) };
     },
     close() {
       conn.close();
