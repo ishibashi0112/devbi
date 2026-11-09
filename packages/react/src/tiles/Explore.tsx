@@ -1,3 +1,4 @@
+/// <reference path="../css.d.ts" />
 import perspective, { type Client, type Table as PerspectiveTable } from "@finos/perspective";
 import perspectiveViewer, { type HTMLPerspectiveViewerElement } from "@finos/perspective-viewer";
 import "@finos/perspective-viewer-datagrid";
