@@ -51,16 +51,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if build=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2> err.txt); then
+          if build=$(gh api "repos/${{ github.repository }}/pages" --jq .build_type 2> "$RUNNER_TEMP/pages.txt"); then
             if [ "$build" = workflow ]; then
               echo "enabled=true" >> "$GITHUB_OUTPUT"
             else
               echo "::notice::GitHub Pages の Source が GitHub Actions ではないため、デモは公開しません（Settings → Pages → Source: GitHub Actions）"
             fi
-          elif grep -q "HTTP 404" err.txt; then
+          elif grep -q "HTTP 404" "$RUNNER_TEMP/pages.txt"; then
             echo "::notice::GitHub Pages が有効ではないため、デモは公開しません（Settings → Pages → Source: GitHub Actions）"
           else
-            cat err.txt
+            cat "$RUNNER_TEMP/pages.txt"
             exit 1
           fi
       - if: steps.pages.outputs.enabled == 'true'
