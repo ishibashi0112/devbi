@@ -70,7 +70,7 @@ export interface PanelProps {
 }
 
 /**
- * The property panel: the selected tile's type, title, data (measures, dimensions, time grain, filters, sort,
+ * The property panel: the selected tile's type, title, data (measures, dimensions, time grain, period, filters, sort,
  * limit) and options, or, with no tile selected, the dashboard's title, description and metrics file. Every change
  * shows on the tiles at once and is one undo step.
  */
@@ -387,6 +387,16 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
                       {GRAIN_LABELS[g]}
                     </option>
                   ))}
+                </select>
+              )}
+            </Field>
+          )}
+          {(view.time || query.period !== undefined) && (
+            <Field label="期間で絞るか" hint="期間は、date-range のタイルで選んだ期間と、時間のグラフでクリックした期間">
+              {(ids) => (
+                <select {...ids} value={query.period === false ? "false" : ""} onChange={(e) => set("period", e.target.value === "false" ? false : undefined)}>
+                  <option value="">絞る</option>
+                  <option value="false">絞らない（いつも全期間）</option>
                 </select>
               )}
             </Field>

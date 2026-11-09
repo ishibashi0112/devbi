@@ -161,6 +161,7 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
       kind: "measure" as const,
       ...(m.format ? { format: m.format } : {}),
       ...(m.kind === "compare" ? { compare: m.as } : {}),
+      ...(m.better === "lower" ? { better: "lower" as const } : {}),
     })),
   ];
   const order = resolveSort(query.sort, fields);
@@ -271,19 +272,26 @@ function runningOut(m: RunningMeasure, cur: string, timeKey: string | undefined,
   return `SUM(${cur}) OVER (${by}ORDER BY ${timeKey} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`;
 }
 
-/** The intersection of `between` filters on the time column. */
-export function timeRange(filters: Filter[], timeName: string | undefined): { start?: Date; end?: Date } {
+/**
+ * The intersection of `between` filters on the time column, and the calendar unit of the filter that starts it
+ * (the narrowest period: a clicked month within the fiscal year picked on the date-range tile).
+ */
+export function timeRange(filters: Filter[], timeName: string | undefined): { start?: Date; end?: Date; unit?: Grain } {
   let start: Date | undefined;
   let end: Date | undefined;
+  let unit: Grain | undefined;
   if (!timeName) return {};
   for (const f of filters) {
     if (f.field !== timeName || !("between" in f)) continue;
     const lo = f.between[0] === null ? undefined : toDate(f.between[0]);
     const hi = f.between[1] === null ? undefined : toDate(f.between[1]);
-    if (lo && (!start || lo > start)) start = lo;
+    if (lo && (!start || lo >= start)) {
+      start = lo;
+      unit = f.unit;
+    }
     if (hi && (!end || hi < end)) end = hi;
   }
-  return { ...(start ? { start } : {}), ...(end ? { end } : {}) };
+  return { ...(start ? { start } : {}), ...(end ? { end } : {}), ...(unit ? { unit } : {}) };
 }
 
 const PERIOD_INTERVAL: Record<Grain, string> = {
@@ -302,12 +310,14 @@ const PERIOD_INTERVAL: Record<Grain, string> = {
 function shiftInterval(
   compare: CompareMeasure["compare"],
   grain: Grain | undefined,
-  range: { start?: Date; end?: Date },
+  range: { start?: Date; end?: Date; unit?: Grain },
 ): string | undefined {
   const bounded = !!grain || (!!range.start && !!range.end);
   if (!bounded) return undefined;
   if (compare === "previous_year") return grain === "week" ? "INTERVAL 364 DAY" : "INTERVAL 1 YEAR";
   if (grain) return PERIOD_INTERVAL[grain];
+  // A calendar period (this month so far): the same days of the one before (the previous month's first days).
+  if (range.unit) return PERIOD_INTERVAL[range.unit];
   const days = Math.round((range.end!.getTime() - range.start!.getTime()) / MS_PER_DAY);
   return days > 0 ? `INTERVAL ${days} DAY` : undefined;
 }

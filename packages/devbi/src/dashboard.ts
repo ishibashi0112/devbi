@@ -26,6 +26,10 @@ export function dashboardSchemas(names?: SchemaNames) {
       z.strictObject({
         field,
         between: z.tuple([scalar, scalar]).describe("[始まり, 終わり]。始まり ≦ 値 ＜ 終わり。null の側は無制限"),
+        unit: z
+          .enum(GRAINS as [Grain, ...Grain[]])
+          .optional()
+          .describe("期間の単位（month など）。previous_period の比較は、同じ日数ではなく、この単位で 1 つ前（前の月の同じ日）"),
       }),
     ],
     { error: '絞り込みは { "field": 名前, "in": [値, …] } か { "field": 名前, "between": [始まり, 終わり] } で書いてください' },
@@ -49,6 +53,7 @@ export function dashboardSchemas(names?: SchemaNames) {
       filters: z.array(filter).optional().describe("このタイルだけに常にかける絞り込み"),
       sort: z.array(sort).optional().describe("並べ替え。既定は時間の順、軸と指標があれば最初の指標の大きい順"),
       limit: z.number().int().positive().optional().describe("最大の行数"),
+      period: z.boolean().optional().describe("false で、期間（date-range や時間のクリックでの選択）で絞らない"),
     })
     .describe("何を出すか。SQL は書かず、指標と軸の名前で指定する");
   const gridInt = z.number().int().nonnegative();

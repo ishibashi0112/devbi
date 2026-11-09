@@ -8,11 +8,13 @@ export const GRAINS: readonly Grain[] = ["day", "week", "month", "quarter", "yea
 
 /**
  * A filter on one field (a dimension name or the time column name).
- * `between` is half-open: start <= value < end. Either end may be null (open).
+ * `between` is half-open: start <= value < end. Either end may be null (open). `unit` is the period's calendar unit
+ * (a month of the date-range tile, a clicked month bar): `previous_period` then compares with the unit before (the
+ * same days of the previous month), not the same number of days before.
  */
 export type Filter =
   | { field: string; in: Scalar[] }
-  | { field: string; between: [Scalar, Scalar] };
+  | { field: string; between: [Scalar, Scalar]; unit?: Grain };
 
 /** Sort by an output field. A string starting with "-" sorts descending. */
 export type SortSpec = string | { field: string; desc?: boolean };
@@ -32,6 +34,8 @@ export interface Query {
   filters?: readonly Filter[];
   sort?: readonly SortSpec[];
   limit?: number;
+  /** `false`: the period (selections on the time column: the date-range tile, a clicked time bucket) does not filter this tile. */
+  period?: boolean;
 }
 
 /**
@@ -113,6 +117,8 @@ export interface FieldInfo {
   grain?: Grain;
   /** For comparison measures: how the value relates to the previous period. */
   compare?: "value" | "delta" | "ratio" | "change";
+  /** A measure where less is better (`better: lower` in the metrics file): an increase is bad. */
+  better?: "lower";
 }
 
 /** One row of a query result, keyed by field name. */

@@ -155,6 +155,9 @@ export const css = `
 .devbi-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .devbi-chips button { border: 1px solid var(--devbi-border); background: none; border-radius: 999px; padding: 3px 12px; cursor: pointer; font-size: 13px; }
 .devbi-chips button[aria-pressed="true"] { background: var(--devbi-accent); border-color: var(--devbi-accent); color: #fff; }
+.devbi-chips select { border: 1px solid var(--devbi-border); background: none; color: inherit; border-radius: 999px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 13px; }
+.devbi-chips select[data-active="true"] { background: var(--devbi-accent); border-color: var(--devbi-accent); color: #fff; }
+.devbi-chips option { background: var(--devbi-card); color: var(--devbi-text); }
 .devbi-daterange-inputs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .devbi-root input[type="date"], .devbi-root input[type="search"] { font: inherit; color: inherit; background: var(--devbi-card); border: 1px solid var(--devbi-border); border-radius: 6px; padding: 3px 8px; }
 .devbi-select { display: flex; flex-direction: column; gap: 6px; height: 100%; }

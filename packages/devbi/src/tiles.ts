@@ -3,11 +3,19 @@
  * Used to validate dash.json and to build its JSON Schema (editor completion).
  */
 import { formatTime } from "./format.js";
+import type { Grain } from "./types.js";
 
 /** Initial periods for the `date-range` tile (`options.default`). */
 export const DATE_RANGE_PRESETS = [
   "all",
+  "latest_day",
+  "last_7_days",
+  "last_30_days",
+  "latest_week",
   "latest_month",
+  "previous_month",
+  "latest_quarter",
+  "previous_quarter",
   "last_12_months",
   "latest_year",
   "previous_year",
@@ -18,11 +26,34 @@ export const DATE_RANGE_PRESETS = [
 
 export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
 
+/** The periods' names in the GUI editor, in the order of {@link DATE_RANGE_PRESETS}. */
+const DATE_RANGE_LABELS = [
+  "全期間",
+  "最新の日",
+  "直近7日",
+  "直近30日",
+  "最新の週",
+  "最新の月",
+  "前の月",
+  "最新の四半期",
+  "前の四半期",
+  "直近12ヶ月",
+  "最新の年",
+  "前の年",
+  "今年の累計",
+  "最新の年度",
+  "前の年度",
+] as const;
+
 /** A period of the `date-range` tile: its button's label and `[start, end)` (null for all). */
 export interface DateRangeOption {
   key: DateRangePreset;
   label: string;
   range: [Date, Date] | null;
+  /** Its calendar unit: `previous_period` compares with the one before (the same days of the previous month). */
+  unit?: Grain;
+  /** A button of its own (the rest are in a list of more periods, unless one is the tile's first period). */
+  button: boolean;
 }
 
 const DAY = 86_400_000;
@@ -36,26 +67,39 @@ const utc = (y: number, m: number, d = 1) => new Date(Date.UTC(y, m, d));
 export function dateRangePresets(max: Date, fiscalYearStart = 1): DateRangeOption[] {
   const y = max.getUTCFullYear();
   const m = max.getUTCMonth();
+  const d = max.getUTCDate();
+  const day = utc(y, m, d);
   const monthStart = utc(y, m);
+  const q = m - (m % 3);
+  // Weeks start on Monday, as the week grain.
+  const weekStart = utc(y, m, d - ((max.getUTCDay() + 6) % 7));
+  const days = (n: number): [Date, Date] => [utc(y, m, d - n + 1), utc(y, m, d + 1)];
   const out: DateRangeOption[] = [
-    { key: "all", label: "全期間", range: null },
-    { key: "latest_month", label: formatTime(monthStart, "month"), range: [monthStart, utc(y, m + 1)] },
-    { key: "last_12_months", label: "直近12ヶ月", range: [utc(y, m - 11), utc(y, m + 1)] },
-    { key: "latest_year", label: `${y}年`, range: [utc(y, 0), utc(y + 1, 0)] },
-    { key: "previous_year", label: `${y - 1}年`, range: [utc(y - 1, 0), utc(y, 0)] },
-    { key: "year_to_date", label: `${y}年累計`, range: [utc(y, 0), new Date(Date.UTC(y, m, max.getUTCDate()) + DAY)] },
+    { key: "all", label: "全期間", range: null, button: true },
+    { key: "latest_day", label: formatTime(day, "day"), range: days(1), unit: "day", button: false },
+    { key: "last_7_days", label: "直近7日", range: days(7), button: false },
+    { key: "last_30_days", label: "直近30日", range: days(30), button: false },
+    { key: "latest_week", label: formatTime(weekStart, "week"), range: [weekStart, new Date(weekStart.getTime() + 7 * DAY)], unit: "week", button: false },
+    { key: "latest_month", label: formatTime(monthStart, "month"), range: [monthStart, utc(y, m + 1)], unit: "month", button: true },
+    { key: "previous_month", label: formatTime(utc(y, m - 1), "month"), range: [utc(y, m - 1), monthStart], unit: "month", button: false },
+    { key: "latest_quarter", label: formatTime(utc(y, q), "quarter"), range: [utc(y, q), utc(y, q + 3)], unit: "quarter", button: false },
+    { key: "previous_quarter", label: formatTime(utc(y, q - 3), "quarter"), range: [utc(y, q - 3), utc(y, q)], unit: "quarter", button: false },
+    { key: "last_12_months", label: "直近12ヶ月", range: [utc(y, m - 11), utc(y, m + 1)], unit: "year", button: true },
+    { key: "latest_year", label: `${y}年`, range: [utc(y, 0), utc(y + 1, 0)], unit: "year", button: true },
+    { key: "previous_year", label: `${y - 1}年`, range: [utc(y - 1, 0), utc(y, 0)], unit: "year", button: true },
+    { key: "year_to_date", label: `${y}年累計`, range: [utc(y, 0), utc(y, m, d + 1)], unit: "year", button: true },
   ];
   if (fiscalYearStart !== 1) {
     const fs = fiscalYearStart - 1;
     const fy = m >= fs ? y : y - 1;
     out.push(
-      { key: "latest_fiscal_year", label: `${fy}年度`, range: [utc(fy, fs), utc(fy + 1, fs)] },
-      { key: "previous_fiscal_year", label: `${fy - 1}年度`, range: [utc(fy - 1, fs), utc(fy, fs)] },
+      { key: "latest_fiscal_year", label: `${fy}年度`, range: [utc(fy, fs), utc(fy + 1, fs)], unit: "fiscal_year", button: true },
+      { key: "previous_fiscal_year", label: `${fy - 1}年度`, range: [utc(fy - 1, fs), utc(fy, fs)], unit: "fiscal_year", button: true },
     );
   }
   // Periods that contain the latest date end the day after it, so a comparison with
-  // the previous year covers the same stretch of days (year to date vs. same period last year).
-  const cap = Date.UTC(y, m, max.getUTCDate()) + DAY;
+  // the previous period covers the same stretch of days (this month so far vs. the same days last month).
+  const cap = utc(y, m, d + 1).getTime();
   for (const p of out) {
     if (p.range && p.range[1].getTime() > cap) p.range = [p.range[0], new Date(cap)];
   }
@@ -93,7 +137,7 @@ export const TILE_TYPES = {
   kpi: {
     label: "数字（KPI）",
     size: { w: 3, h: 2 },
-    description: "大きな数字。最初の指標を大きく、残りの指標をその下に出す。比較の指標は良し悪しで色が付く",
+    description: "大きな数字。最初の指標を大きく、残りの指標をその下に出す。比較の指標は良し悪しで色が付く（better: lower の指標は減ると良い）",
     query: true,
     options: {},
   },
@@ -154,14 +198,14 @@ export const TILE_TYPES = {
   "date-range": {
     label: "期間",
     size: { w: 12, h: 1 },
-    description: "期間の選択。time の列で全タイルを絞る。query は書かない",
+    description: "期間の選択。time の列を持つ指標ファイルのタイルを絞る（query.period が false のタイルは除く）。主な期間はボタン、ほかは「ほかの期間」から。query は書かない",
     query: false,
     options: {
       default: {
         enum: DATE_RANGE_PRESETS,
-        enumLabels: ["全期間", "最新の月", "直近12ヶ月", "最新の年", "前の年", "今年の累計", "最新の年度", "前の年度"],
+        enumLabels: DATE_RANGE_LABELS,
         label: "最初の期間",
-        description: "最初に選ぶ期間。「最新」はデータの最終日が基準",
+        description: "最初に選ぶ期間。「最新」「直近」はデータの最終日が基準",
       },
       metrics: { type: "string", label: "指標ファイル", input: "metrics", description: "使う指標ファイル（ダッシュボードの metrics と違うとき）" },
     },

@@ -114,7 +114,8 @@ function viewFields(view: MetricsView): Set<string> {
 
 /**
  * The selections that apply to a tile's query: every other tile's, on fields of the query's metrics view (a view
- * without that field is not filtered by it). None when the query's view is missing (the query reports that).
+ * without that field is not filtered by it), but not on its time column with `period: false`. None when the query's
+ * view is missing (the query reports that).
  */
 export function crossFilters(ctx: DevbiContextValue, query: Query, tileId: string | undefined): Filter[] {
   let view: MetricsView;
@@ -124,6 +125,8 @@ export function crossFilters(ctx: DevbiContextValue, query: Query, tileId: strin
     return [];
   }
   const names = viewFields(view);
+  // `period: false`: not the period (the date-range tile, a clicked time bucket).
+  if (query.period === false && view.time) names.delete(view.time.name);
   return ctx.selection.filtersFor(tileId).filter((f) => names.has(f.field));
 }
 

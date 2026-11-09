@@ -103,6 +103,43 @@ describe("compileQuery", () => {
     expect(r.rows).toEqual([{ total_revenue: 720, revenue_pp: null }]);
   });
 
+  it("compares a calendar period with the one before, not with the same number of days", async () => {
+    const mtd = { field: "order_date", between: ["2026-02-01", "2026-02-21"] as [string, string] };
+    // February up to the 20th, as a month: January up to the 20th (150), not the 20 days before (Jan 12..31: 200).
+    const month = await run({ measures: ["total_revenue", "revenue_pp"] }, { filters: [{ ...mtd, unit: "month" }] });
+    expect(month.rows).toEqual([{ total_revenue: 400, revenue_pp: 250 }]);
+    const days = await run({ measures: ["total_revenue", "revenue_pp"] }, { filters: [mtd] });
+    expect(days.rows).toEqual([{ total_revenue: 400, revenue_pp: 200 }]);
+    // A clicked month within a fiscal year picked on the date-range tile: the month is the period.
+    const both = await run(
+      { measures: ["total_revenue", "revenue_pp"] },
+      {
+        filters: [
+          { field: "order_date", between: ["2025-04-01", "2026-03-04"], unit: "fiscal_year" },
+          { field: "order_date", between: ["2026-02-01", "2026-03-01"], unit: "month" },
+        ],
+      },
+    );
+    expect(both.rows).toEqual([{ total_revenue: 400, revenue_pp: 200 }]);
+  });
+
+  it("passes on which way is good, to comparisons too", () => {
+    const v = parseMetricsYaml(
+      `model: SELECT * FROM sales
+time: order_date
+measures:
+  complaints: { sql: COUNT(*), label: クレーム, better: lower }
+  complaints_pp: { of: complaints, compare: previous_period, as: change }
+  complaints_ly: { of: complaints, compare: previous_year, as: delta, better: higher }
+  revenue: SUM(amount)
+`,
+      "complaints",
+    );
+    expect(v.measures.complaints_pp).toMatchObject({ better: "lower" });
+    const c = compileQuery(v, { measures: ["complaints", "complaints_pp", "complaints_ly", "revenue"] });
+    expect(c.fields.map((f) => f.better)).toEqual(["lower", "lower", undefined, undefined]);
+  });
+
   it("does not count Feb 29 into last year's Feb 28 by the day", async () => {
     const leap = parseMetricsYaml(
       `model: "SELECT * FROM (VALUES (DATE '2024-02-28', 10), (DATE '2024-02-29', 5), (DATE '2025-02-28', 20), (DATE '2025-03-01', 30)) t(d, amount)"

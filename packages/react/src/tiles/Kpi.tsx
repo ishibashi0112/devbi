@@ -1,11 +1,12 @@
-import type { TileProps } from "devbi";
+import type { FieldInfo, TileProps } from "devbi";
 import { measures } from "./util.js";
 
-function trendClass(compare: string | undefined, value: unknown): string {
+/** Good (devbi-up) or bad (devbi-down): up is good, unless less is better (`better: lower`). No change, no colour. */
+export function trendClass(m: Pick<FieldInfo, "compare" | "better">, value: unknown): string {
   if (typeof value !== "number") return "";
-  if (compare === "ratio") return value >= 1 ? "devbi-up" : "devbi-down";
-  if (compare === "change" || compare === "delta") return value >= 0 ? "devbi-up" : "devbi-down";
-  return "";
+  const change = m.compare === "ratio" ? value - 1 : m.compare === "change" || m.compare === "delta" ? value : 0;
+  if (change === 0) return "";
+  return change > 0 === (m.better !== "lower") ? "devbi-up" : "devbi-down";
 }
 
 /** A big number for the first measure, with the other measures underneath. */
@@ -24,7 +25,7 @@ export function Kpi({ rows, fields, format, loading }: TileProps) {
           {rest.map((m) => (
             <div key={m.name}>
               <dt>{m.label}</dt>
-              <dd className={trendClass(m.compare, row?.[m.name])}>{row ? format(row[m.name], m.name) : "—"}</dd>
+              <dd className={trendClass(m, row?.[m.name])}>{row ? format(row[m.name], m.name) : "—"}</dd>
             </div>
           ))}
         </dl>

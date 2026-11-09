@@ -291,7 +291,7 @@ describe("devbi-check", () => {
         }),
       ]),
       "dashboards/bad.dash.json": dash([
-        tile("q", 0, { type: "date-range", options: { default: "latest_quarter" } }),
+        tile("q", 0, { type: "date-range", options: { default: "this_quarter" } }),
         tile("fy", 2, { type: "date-range", options: { default: "latest_fiscal_year", metrics: "days" } }),
       ]),
     });
@@ -313,11 +313,46 @@ describe("devbi-check", () => {
     expect(Number(k("k1").values![0]!.split(" ")[1])).toBeLessThan(1000);
     // A 0-row tile names the period that filtered it.
     expect(r.findings.map((f) => `${f.level} ${f.file}: ${f.message}`)).toEqual([
-      "warning dashboards/bad.dash.json: タイル q: options.default「latest_quarter」はありません（all・latest_month・last_12_months・latest_year・previous_year・year_to_date・latest_fiscal_year・previous_fiscal_year）。画面は全期間で開きます",
+      "warning dashboards/bad.dash.json: タイル q: options.default「this_quarter」はありません（all・latest_day・last_7_days・last_30_days・latest_week・latest_month・previous_month・latest_quarter・previous_quarter・last_12_months・latest_year・previous_year・year_to_date・latest_fiscal_year・previous_fiscal_year）。画面は全期間で開きます",
       "warning dashboards/bad.dash.json: タイル fy: options.default「latest_fiscal_year」には、models/days.metrics.yaml の time に fiscal_year_start（年度の始まりの月）が要ります。画面は全期間で開きます",
       "warning dashboards/d.dash.json: タイル none: 結果が 0 行です（date-range の最初の期間 日付 2025年（2025-01-01〜2025-12-31） で。query.filters や指標の式を確かめてください）",
     ]);
     expect(r.periods).not.toHaveProperty("bad");
+  }, 60_000);
+
+  it("compares a calendar period with the one before, and leaves a period: false tile on all of the data", async () => {
+    const dir = project({
+      "models/pp.metrics.yaml":
+        "model: SELECT * FROM read_xlsx('data/sales.xlsx', sheet = '明細')\n" +
+        "time: { column: 受注日, label: 受注日 }\nmeasures:\n" +
+        "  orders: COUNT(DISTINCT 受注番号)\n  orders_pp: { of: orders, compare: previous_period, as: value }\n",
+      "dashboards/d.dash.json": JSON.stringify({
+        metrics: "pp",
+        tiles: [
+          tile("period", 0, { type: "date-range", options: { default: "latest_quarter" } }),
+          tile("k", 2, { type: "kpi", query: { measures: ["orders", "orders_pp"] } }),
+          tile("all", 4, { type: "kpi", query: { measures: ["orders"], period: false } }),
+        ],
+      }),
+    });
+    const r = await checkProject(dir, { values: 1 });
+    expect(r.findings).toEqual([]);
+    expect(r.periods).toEqual({ d: ["受注日 2026年Q4（2026-10-01〜2026-10-30）"] });
+    const count = async (where: string) =>
+      Number(
+        (
+          await inspectData(dir, {
+            sql: `SELECT COUNT(DISTINCT 受注番号) AS n FROM read_xlsx('data/sales.xlsx', sheet = '明細') WHERE ${where}`,
+          })
+        ).head[0]!.n,
+      );
+    const n = (v: number) => v.toLocaleString("en-US");
+    // The quarter so far (Oct 1..30) against the same days of the quarter before (Jul 1..30), not the 30 days before.
+    const now = await count("CAST(受注日 AS DATE) BETWEEN '2026-10-01' AND '2026-10-30'");
+    const before = await count("CAST(受注日 AS DATE) BETWEEN '2026-07-01' AND '2026-07-30'");
+    const k = (id: string) => r.tiles.find((t) => t.id === id)!;
+    expect(k("k").values).toEqual([`orders ${n(now)}、orders 前期間 ${n(before)}`]);
+    expect(k("all").values).toEqual([`orders ${n(await count("TRUE"))}`]);
   }, 60_000);
 
   it("reports a project without metrics files", async () => {

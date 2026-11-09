@@ -4,7 +4,7 @@ import { newTile, type RawDashboard, type RawTile } from "./layout.js";
 /** Where each key goes in a hand-written file, so a key the panel adds lands where a person would put it. */
 export const DASHBOARD_KEYS = ["$schema", "title", "description", "metrics", "columns", "rowHeight", "tiles"] as const;
 export const TILE_KEYS = ["id", "x", "y", "w", "h", "type", "component", "title", "query", "options"] as const;
-export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit"] as const;
+export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit", "period"] as const;
 
 type Obj = Record<string, unknown>;
 

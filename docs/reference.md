@@ -144,12 +144,14 @@ dimensions:
 revenue: { sql: SUM(金額), label: 売上, format: "¥#,##0" }
 orders: COUNT(DISTINCT 受注番号)          # 文字列だけなら sql
 avg_order: { sql: revenue / orders }      # ほかの集計の指標を名前で使える
+complaints: { sql: COUNT(*), label: クレーム, better: lower }   # 少ないほうが良い指標
 ```
 
 - 集計関数（`SUM`、`COUNT`、`AVG`、`MIN`、`MAX`、`MEDIAN` など）を使った DuckDB の式です。
 - 式の中にほかの `sql` 指標の名前を書くと、その式に置き換えて 1 本の SQL にします（`avg_order` は `(SUM(金額)) / (COUNT(DISTINCT 受注番号))`）。循環するとエラーになります。
 - 集計関数の括弧の中と、`FILTER (...)`、`OVER (...)`、`WITHIN GROUP (...)` の中の名前は、指標ではなく列として扱います。指標と同じ名前の列も、そこでは列として使えます（`amount: SUM(amount)`）。
 - `"金額"` のように二重引用符で囲んだ名前、`t.金額` のような修飾された名前、文字列の中は置き換えません。
+- `better: lower` は、少ないほうが良い指標（クレームの件数、不良の数、対応にかかった時間など）です。`kpi` の比較の色が逆になります（増えると赤）。既定は `higher` です。
 
 **比較（`compare`）**
 
@@ -161,14 +163,18 @@ revenue_pp:  { of: revenue, compare: previous_period, as: delta }
 | キー | 中身 |
 | --- | --- |
 | `of` | 比べる `sql` 指標 |
-| `compare` | `previous_year`（1 年前）か `previous_period`（直前の同じ長さの期間） |
+| `compare` | `previous_year`（1 年前）か `previous_period`（1 つ前の期間） |
 | `as` | `value`（比較先の値）、`delta`（差）、`ratio`（比、既定）、`change`（増減率 = 比 − 1） |
+| `better` | 良い向き（`higher` か `lower`）。既定は `of` の指標の `better` |
 
 - 既定の表示名は「売上 前年比」「売上 前期間差」などです。`ratio` と `change` の既定の書式は `0.0%` で、それ以外は `of` の書式を引き継ぎます。
 - 値が出るのは、期間が決まっているときだけです。つまり、クエリに `time`（時間の粒度）があるか、期間の絞り込みがあるときです。全期間のままだと空（NULL、画面では「—」）になります。
 - `previous_year` を時間の粒度で使うと、同じ月（同じ四半期・同じ年）の 1 年前と比べます。週は 52 週前（364 日前）です。日で比べるとき、前年の 2/29 には対応する日がないので比べません。
-- `previous_period` は、時間の粒度があればその 1 つ前（前月・前四半期など）、期間の絞り込みだけなら同じ日数だけ前と比べます。たとえばデータが 10/30 までで、期間が `latest_month`（10/1〜10/30 の 30 日）なら、その前の 30 日（9/1〜9/30）です。
-- `kpi` では、2 つ目からの指標のうち `as` が `ratio`・`change`・`delta` のものに色が付きます（増えたか同じなら緑、減ると赤）。大きく出す最初の指標と `value` には付きません。少ないほうが良い指標（クレームの件数など）も、増えると緑です。
+- `previous_period` は、時間の粒度があればその 1 つ前（前月・前四半期など）と比べます。期間の絞り込みだけのときは、期間の単位で 1 つ前と比べます。
+  - 単位があるのは、`date-range` の日・週・月・四半期・年・年度の期間と、時間のグラフでクリックした期間です（`filters` では `unit`）。前の単位の同じ日と比べます。たとえばデータが 10/30 までなら、`latest_month`（10/1〜10/30）は前の月の 9/1〜9/30、`latest_quarter`（10/1〜10/30）は前の四半期の 7/1〜7/30、`year_to_date` は前の年の同じ日までです。
+  - 単位のない期間（`last_7_days`・`last_30_days`、日付の欄で選んだ期間、`unit` のない `between`）は、同じ日数だけ前と比べます（直近 7 日なら、その前の 7 日）。
+  - 期間が重なるとき（年度を選び、さらに月の棒をクリック）は、いちばん遅く始まる期間（その月）の単位です。
+- `kpi` では、2 つ目からの指標のうち `as` が `ratio`・`change`・`delta` のものに色が付きます（増えると緑、減ると赤。変わらなければ色なし）。`better: lower` の指標は逆で、増えると赤、減ると緑です。大きく出す最初の指標と `value` には付きません。
 
 **累計（`running`）**
 
@@ -234,6 +240,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `filters` | このタイルだけに常にかける絞り込み（下記） |
 | `sort` | 並べ替えの配列（`["-revenue", "region"]`）。`"revenue"` は昇順、`"-revenue"` は降順。`{ "field": "revenue", "desc": true }` とも書ける |
 | `limit` | 最大の行数 |
+| `period` | `false` で、期間（`date-range` で選んだ期間と、時間のグラフでクリックした期間）で絞らない。「いま対応中のすべて」「全期間の累計」のように、期間に関係なく出すタイルに。ほかの選択（地域のクリックなど）はかかる |
 | `metrics` | ダッシュボードとは別の指標ファイルを使うとき |
 
 `measures` か `dimensions` か `time` のどれかが要ります。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
@@ -243,12 +250,14 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 ```json
 { "field": "region", "in": ["関東", "近畿", null] }
 { "field": "受注日", "between": ["2026-04-01", "2026-10-31"] }
+{ "field": "受注日", "between": ["2026-10-01", "2026-11-01"], "unit": "month" }
 ```
 
 - `field` は軸の名前か、`time` の列名です。
 - `in` は値のどれかに一致する行です。`null` は空欄に一致します。
 - `between` は「始まり ≦ 値 ＜ 終わり」で、終わりの日は含みません。どちらかを `null` にすると、その側は無制限です。
-- タイルの `filters`、期間（`date-range`）、ほかのタイルのクリックでの選択は、すべて重ねてかかります（AND。期間どうしは重なる部分）。選択と期間は、その項目（期間なら `time` の列）を持つ指標ファイルのタイルにだけかかります。組み込みのタイルは期間を外せません。期間に関係なく出したいもの（「いま対応中のすべて」など）は、自作タイルで `useDevbiQuery(query, { crossfilter: false })` にします。
+- `between` の `unit`（`day`・`week`・`month`・`quarter`・`year`・`fiscal_year`）は、その期間の単位です。`previous_period` の比較が、同じ日数ではなく、前の単位の同じ日になります（上の `measures` の比較）。
+- タイルの `filters`、期間（`date-range`）、ほかのタイルのクリックでの選択は、すべて重ねてかかります（AND。期間どうしは重なる部分）。選択と期間は、その項目（期間なら `time` の列）を持つ指標ファイルのタイルにだけかかります。期間に関係なく出したいタイル（「いま対応中のすべて」など）は `"period": false` にします（期間だけが外れ、ほかの選択はかかります）。
 
 ## 組み込みタイル
 
@@ -265,7 +274,22 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `date-range` | 期間の選択 | `query` は書かない。`time` の列が対象 | `default`: 最初の期間（下記）。`metrics`: 指標ファイル | 期間で全タイルを絞る |
 | `markdown` | 文章 | `query` は書かない | `text`: 本文（`**太字**`、`*斜体*`、`` `コード` ``、`[リンク](URL)`、`#` 見出し、`-` 箇条書き） | なし |
 
-`date-range` の期間の名前（`options.default` に書く）: `all`（全期間）、`latest_month`（最新の月）、`last_12_months`、`latest_year`、`previous_year`、`year_to_date`（今年の累計）、`latest_fiscal_year`、`previous_fiscal_year`。「最新」はデータの最終日が基準で、期間の終わりはデータの最終日で切ります。
+`date-range` の期間の名前（`options.default` に書く）:
+
+| 名前 | 期間 | 出し方 |
+| --- | --- | --- |
+| `all` | 全期間 | ボタン |
+| `latest_day` | 最新の日 | 一覧 |
+| `last_7_days` / `last_30_days` | 直近 7 日 / 直近 30 日 | 一覧 |
+| `latest_week` | 最新の週（月曜始まり） | 一覧 |
+| `latest_month` / `previous_month` | 最新の月 / 前の月 | ボタン / 一覧 |
+| `latest_quarter` / `previous_quarter` | 最新の四半期 / 前の四半期 | 一覧 |
+| `last_12_months` | 直近 12 ヶ月 | ボタン |
+| `latest_year` / `previous_year` / `year_to_date` | 最新の年 / 前の年 / 今年の累計 | ボタン |
+| `latest_fiscal_year` / `previous_fiscal_year` | 最新の年度 / 前の年度（`time` に `fiscal_year_start` があるときだけ） | ボタン |
+
+- 「一覧」の期間は、ボタンの横の「ほかの期間」から選びます。`default` に書いた期間は、一覧の期間でもボタンに出ます。
+- 「最新」「直近」は、今日ではなく、データの最終日が基準です。最終日を含む期間は、その日で終わります（10/30 までなら `latest_month` は 10/1〜10/30）。
 
 選択は、選んだタイル以外のすべてのタイルにかかります。選んだタイル自身は絞られず、選んだもの以外が薄くなります。選択は画面上のチップで外せます。
 
@@ -340,7 +364,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 | プロパティ | 型 | 中身 |
 | --- | --- | --- |
 | `rows` | `Row[]` | 集計済みの行。ほかのタイルの選択がかかった結果。キーは指標・軸・時間の名前 |
-| `fields` | `FieldInfo[]` | 列の情報（`name`、`label`、`kind`: `dimension` / `time` / `measure`、`format`、`grain`、比較の指標なら `compare`） |
+| `fields` | `FieldInfo[]` | 列の情報（`name`、`label`、`kind`: `dimension` / `time` / `measure`、`format`、`grain`、比較の指標なら `compare`、`better: lower` の指標なら `better`） |
 | `query` | `Query` | 実際に使ったクエリ |
 | `selection` | `Filter[]` | このタイルが選んでいるもの（強調表示に使う） |
 | `filters` | `Filter[]` | ほかのタイルから `rows` にかかっている絞り込み |
@@ -355,7 +379,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 自作タイルで使える関数（`@devbi/react` から import）:
 
-- `useDevbiQuery(query, { tileId?, crossfilter? })` … 追加の集計。`tileId` を渡すと、そのタイル自身の選択を除いた絞り込みがかかります。`crossfilter: false` で絞り込みなし。戻り値は `{ rows, fields, filters, loading, error }`。
+- `useDevbiQuery(query, { tileId?, crossfilter? })` … 追加の集計。`tileId` を渡すと、そのタイル自身の選択を除いた絞り込みがかかります。`crossfilter: false` で絞り込みなし（`query` の `period: false` なら、期間だけを外す）。戻り値は `{ rows, fields, filters, loading, error }`。
 - `useTileSize()` … タイルの中身の幅と高さ（px）。
 - `useTimeExtent(metrics?)` … データの最初と最後の日付。
 
@@ -401,7 +425,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか
 2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
-3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。`date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じく、その `time` の列を持つ指標ファイルのタイルをその期間で流す（比較の指標にも値が出る）。画面が使わない `default`（ない期間の名前や、`fiscal_year_start` のない指標ファイルでの年度）は注意タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
+3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。`date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じく、その `time` の列を持つ指標ファイルのタイルをその期間で流す（比較の指標にも値が出る）。`"period": false` のタイルは期間なしで流す。画面が使わない `default`（ない期間の名前や、`fiscal_year_start` のない指標ファイルでの年度）は注意。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
 
 SQL を流すのは、ブラウザと同じ DuckDB-wasm（Node で動かす）です。xlsx は画面と同じく DevBI が読み、`read_api` は `api/` の SQL を接続先で流します（`devbi-serve` と同じく、環境変数とプロジェクトの `.env`・`.env.local` の `DEVBI_DB…`。Vite の `.env.[mode]` は読みません）。ブラウザと同じく、データのファイルは `read_csv('data/…')` のように `read_` の関数に書いたものだけを読みます（`FROM 'data/x.csv'` はエラー）。
 
@@ -599,6 +623,7 @@ pnpm add -D @devbi/editor
 | 指標ファイル | `query.metrics`（指標ファイルが 2 つ以上あるときに出る）。「ダッシュボードと同じ」でキーを消す |
 | 指標 / 軸 | `query.measures` / `query.dimensions`。チェックした順に並び（横の数字が順番）、↑ で 1 つ前へ。最初のものがタイルの主役（KPI の大きな数字、ランキングの軸など）。指標ファイルにない名前は「（ありません）」と出るので外す |
 | 期間の単位 | `query.time`。日・週（月曜始まり）・月・四半期・年・年度。「分けない」でキーを消す |
+| 期間で絞るか | `query.period`。「絞らない（いつも全期間）」で `false`、「絞る」でキーを消す。指標ファイルに `time` があるときに出る |
 | 絞り込み | `query.filters`。軸は、データにある値から選ぶ（`in`。9 件以上で検索欄）。時間の列は、始まりの日と終わりの日（終わりの日を含む。ファイルには次の日を書く: `between` は 始まり ≦ 値 ＜ 終わり）。値を 1 つも選んでいない・日付がない絞り込みは書かない（欄は「やめる」まで残る）。ほかの形の絞り込みは書いたまま見せ、消すことだけできる |
 | 並び順 | `query.sort`。結果の列（選んだ指標・軸・時間）から。大きい順は `"-revenue"` のように先頭に `-` |
 | 件数 | `query.limit`。空でキーを消す |
@@ -607,7 +632,7 @@ pnpm add -D @devbi/editor
 
 - 変えると、そのタイルにすぐ出ます。集計し直すのは変えたタイルだけで、期間などの選択はそのままです（期間のタイルの「最初の期間」を変えたときは、その期間から始め直します）。
 - 見出しなどの文字・数・日付の欄は、打ち始めてから欄を出るまでが 1 回の「元に戻す」です。
-- キーを足すときは、手で書くときと同じ場所に入れます（タイルは `id`、`x`〜`h`、`type`、`title`、`query`、`options` の順、`query` は `metrics`、`measures`、`dimensions`、`time`、`filters`、`sort`、`limit` の順）。ファイルにあるキーは動かしません。
+- キーを足すときは、手で書くときと同じ場所に入れます（タイルは `id`、`x`〜`h`、`type`、`title`、`query`、`options` の順、`query` は `metrics`、`measures`、`dimensions`、`time`、`filters`、`sort`、`limit`、`period` の順）。ファイルにあるキーは動かしません。
 - タイルにデータが出ないとき（指標も軸もない、名前が指標ファイルにない、など）は、そのわけを設定欄の「データ」の下にも出します。指標も軸も外したときは `"query": {}` を残します（タイルがわけを出すように）。
 - 自作タイル（`component`）は、見出しと名前だけ変えられます（中身とデータの指定は、そのファイルで変えます）。
 

@@ -297,6 +297,10 @@ test("the property panel: filters from the data's values, sort and limit; with n
   await p.getByLabel("地域の向き").selectOption({ label: "大きい順" });
   await p.getByLabel("件数", { exact: true }).fill("3");
   await expect(item(page, "region").locator(".devbi-tile-body")).not.toContainText("九州");
+  // Not filtered by the period (the date-range tile's latest fiscal year): larger numbers, of all of the data.
+  const inPeriod = await item(page, "region").locator(".devbi-tile-body").innerText();
+  await p.getByLabel("期間で絞るか").selectOption({ label: "絞らない（いつも全期間）" });
+  await expect(item(page, "region").locator(".devbi-tile-body")).not.toHaveText(inPeriod);
 
   // Back to the dashboard's own settings.
   await p.getByRole("button", { name: "ダッシュボード全体" }).click();
@@ -315,6 +319,7 @@ test("the property panel: filters from the data's values, sort and limit; with n
     filters: [{ field: "category", in: ["保守"] }],
     sort: ["-region"],
     limit: 3,
+    period: false,
   });
   // Only the title and that tile's query changed (its `"query": {` line is in the file already, for another tile).
   const changed = saved.split("\n").filter((line) => !original.split("\n").includes(line));
@@ -324,7 +329,8 @@ test("the property panel: filters from the data's values, sort and limit; with n
     `        "dimensions": ["region"],`,
     `        "filters": [{ "field": "category", "in": ["保守"] }],`,
     `        "sort": ["-region"],`,
-    `        "limit": 3`,
+    `        "limit": 3,`,
+    `        "period": false`,
   ]);
 });
 
