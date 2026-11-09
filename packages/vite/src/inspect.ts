@@ -1,12 +1,13 @@
-// devbi-inspect: what is in a data file, or what a metrics file's model returns. The columns with their type, how
-// many are empty, the range, and the most common values of text columns: what you need to write the metrics file
-// (and what an AI needs, since it cannot open the Excel file).
+// devbi-inspect: what is in a data file, what a metrics file's model returns, or what a SELECT returns. The columns
+// with their type, how many are empty, the range, the most common values of text columns, and the first rows: what
+// you need to write the metrics file (and what an AI needs, since it cannot open the Excel file), and a way to try a
+// model's SQL or count a number before writing any file.
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { ident, listSheets, parseMetricsYaml } from "devbi";
+import { defineMetricsView, ident, listSheets, parseMetricsYaml, type MetricsView } from "devbi";
 import { modelSources } from "./index.js";
-import { createNodeEngine, type NodeEngineOptions } from "./node-engine.js";
+import { createNodeEngine, duckdbMessage, fileHint, missingExtension, NotChecked, type NodeEngineOptions } from "./node-engine.js";
 
 export interface InspectColumn {
   name: string;
@@ -23,64 +24,111 @@ export interface InspectColumn {
 }
 
 export interface InspectReport {
-  /** What was read: the file (relative to the project when inside it) or `models/<name>.metrics.yaml`. */
+  /** What was read: the file or metrics file (relative to the project when inside it), or `SQL`. */
   source: string;
   /** An Excel file's sheets (the first is read unless `sheet` is given). */
   sheets?: string[];
   sheet?: string;
+  /** An Excel file: the cells read, the header row included (`A1:K3068`). */
+  range?: string;
   rows: number;
   columns: InspectColumn[];
+  /** The first rows (as text; empty cells null), in the order read. */
+  head: Record<string, string | null>[];
+  /** What to look at: a header row that looks like a title, and how to read the sheet instead. */
+  notes: string[];
 }
 
 export interface InspectOptions extends NodeEngineOptions {
   /** The sheet of an Excel file. Default: the first. */
   sheet?: string;
+  /** The cells of an Excel file to read, as read_xlsx's `range` (`A3:K`). Default: all. */
+  range?: string;
   /** How many common values to list for text columns. Default 8; 0 for none. */
   values?: number;
+  /** How many of the first rows to show. Default 10; 0 for none. */
+  rows?: number;
+}
+
+/** A SELECT to run instead of reading a file: written as a metrics file's `model` (read_xlsx('data/…') and so on). */
+export interface InspectSql {
+  sql: string;
 }
 
 const DATA = /\.(xlsx|csv|tsv|txt|parquet|arrow|arrows|feather|json|ndjson|jsonl)$/i;
 
+/** A value as text; dates as 2026-10-30, times as 2026-10-30 09:15:00 (UTC, as DevBI reads them). */
 const text = (v: unknown) =>
   v instanceof Date
     ? v
         .toISOString()
         .replace(/T00:00:00\.000Z$/, "")
-        .replace(/\.000Z$/, "Z")
+        .replace(/(\.000)?Z$/, "")
+        .replace("T", " ")
     : String(v);
 
 /**
- * Inspect `target`: a data file (a path from the current folder or the project) or the name of a metrics file in
- * `models/` (its model's result).
+ * Inspect `target`: a data file (a path from the current folder or the project), a metrics file (its name in
+ * `models/`, or its path) as its model's result, or `{ sql }`, a SELECT over the project's data.
  */
-export async function inspectData(dir: string, target: string, options: InspectOptions = {}): Promise<InspectReport> {
-  // A metrics file is named, or given as its path (models/sales.metrics.yaml).
-  if (target.endsWith(".metrics.yaml")) target = path.basename(target).slice(0, -".metrics.yaml".length);
-  const metricsFile = path.join(dir, "models", `${target}.metrics.yaml`);
-  const isMetrics = !DATA.test(target) && existsSync(metricsFile);
-  const file = isMetrics ? undefined : [path.resolve(target), path.resolve(dir, target)].find((p) => existsSync(p));
-  if (!isMetrics && !(file && DATA.test(target))) {
-    throw new Error(
-      file
-        ? `${target} は読めるデータのファイルではありません（xlsx・csv・tsv・txt・parquet・arrow・json・ndjson・jsonl）`
-        : DATA.test(target)
-          ? `ファイル ${target} がありません`
-          : `${target} はデータファイルでも指標ファイル（models/${target}.metrics.yaml）でもありません`,
+export async function inspectData(dir: string, target: string | InspectSql, options: InspectOptions = {}): Promise<InspectReport> {
+  const report: InspectReport = { source: "", rows: 0, columns: [], head: [], notes: [] };
+  const relative = (p: string) => {
+    const rel = path.relative(dir, p);
+    return rel.startsWith("..") || path.isAbsolute(rel) ? p : rel.split(path.sep).join("/");
+  };
+  let view: MetricsView | undefined;
+  let file: string | undefined;
+  if (typeof target !== "string") {
+    report.source = "SQL";
+    view = defineMetricsView({ model: target.sql, measures: {} }, "sql", "--sql");
+  } else if (target.endsWith(".metrics.yaml") || (!DATA.test(target) && existsSync(path.join(dir, "models", `${target}.metrics.yaml`)))) {
+    // A metrics file: named (sales), or its path (models/sales.metrics.yaml, or one elsewhere to try a model).
+    const metricsFile = target.endsWith(".metrics.yaml")
+      ? // A bare file name is the one in models/.
+        ([
+          path.resolve(target),
+          path.resolve(dir, target),
+          ...(path.basename(target) === target ? [path.join(dir, "models", target)] : []),
+        ].find((p) => existsSync(p)) ?? path.resolve(dir, target))
+      : path.join(dir, "models", `${target}.metrics.yaml`);
+    if (!existsSync(metricsFile)) throw new Error(`指標ファイル ${target} がありません`);
+    report.source = relative(metricsFile);
+    view = parseMetricsYaml(
+      await readFile(metricsFile, "utf8"),
+      path.basename(metricsFile).slice(0, -".metrics.yaml".length),
+      report.source,
     );
+  } else {
+    file = [path.resolve(target), path.resolve(dir, target)].find((p) => existsSync(p));
+    if (!(file && DATA.test(target))) {
+      throw new Error(
+        file
+          ? `${target} は読めるデータのファイルではありません（xlsx・csv・tsv・txt・parquet・arrow・json・ndjson・jsonl）`
+          : DATA.test(target)
+            ? `ファイル ${target} がありません`
+            : `${target} はデータファイルでも指標ファイル（models/${target}.metrics.yaml）でもありません`,
+      );
+    }
+    report.source = relative(file);
+  }
+  if ((options.sheet || options.range) && !(file && /\.xlsx$/i.test(file))) {
+    throw new Error(`${options.sheet ? "--sheet" : "--range"} は Excel のファイル（.xlsx）を読むときだけです`);
   }
   const engine = await createNodeEngine(dir, options.env ? { env: options.env } : {});
   try {
-    const report: InspectReport = { source: "", rows: 0, columns: [] };
     let from: string;
-    if (isMetrics) {
-      report.source = `models/${target}.metrics.yaml`;
-      const view = parseMetricsYaml(await readFile(metricsFile, "utf8"), target, report.source);
+    if (view) {
       const { problems } = modelSources(dir, report.source, view);
       if (problems.length) throw new Error(problems.join("\n"));
-      from = `(${await engine.loadView(view)})`;
+      try {
+        from = `(${await engine.loadView(view)})`;
+      } catch (e) {
+        if (e instanceof NotChecked || missingExtension(e)) throw e;
+        const text = duckdbMessage(e);
+        throw new Error(`${text}${fileHint(text)}`);
+      }
     } else {
-      const rel = path.relative(dir, file!);
-      report.source = rel.startsWith("..") || path.isAbsolute(rel) ? file! : rel.split(path.sep).join("/");
       if (/\.xlsx$/i.test(file!)) {
         report.sheets = await listSheets(await readFile(file!));
         if (options.sheet && !report.sheets.includes(options.sheet)) {
@@ -88,7 +136,12 @@ export async function inspectData(dir: string, target: string, options: InspectO
         }
         report.sheet = options.sheet ?? report.sheets[0];
       }
-      from = await engine.loadFile(file!, report.sheet ? { sheet: report.sheet } : {});
+      const loaded = await engine.loadFile(file!, {
+        ...(report.sheet ? { sheet: report.sheet } : {}),
+        ...(options.range ? { range: options.range } : {}),
+      });
+      from = loaded.table;
+      if (loaded.range) report.range = loaded.range;
     }
     report.rows = Number(engine.query(`SELECT count(*) AS n FROM ${from}`)[0]?.n ?? 0);
     const limit = options.values ?? 8;
@@ -115,17 +168,49 @@ export async function inspectData(dir: string, target: string, options: InspectO
       }
       report.columns.push(col);
     }
+    const head = options.rows ?? 10;
+    if (head > 0 && report.rows) {
+      report.head = engine
+        .query(`SELECT * FROM ${from} LIMIT ${head}`)
+        .map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v === null || v === undefined ? null : text(v)])));
+    }
+    const title = report.range ? titleRow(report) : undefined;
+    if (title) report.notes.push(title);
     return report;
   } finally {
     engine.close();
   }
 }
 
+/**
+ * An Excel sheet whose header row has a value in at most half of the columns (the rest named column2…) is most
+ * likely a title above the table: how to read from the row below it instead. Columns with neither a header nor a
+ * value (a wide --range) do not count.
+ */
+function titleRow(r: InspectReport): string | undefined {
+  const named = (c: InspectColumn, i: number) => c.name !== `column${i + 1}`;
+  const used = r.columns.filter((c, i) => named(c, i) || c.nulls < r.rows);
+  const unnamed = r.columns.filter((c, i) => !named(c, i) && c.nulls < r.rows);
+  const m = /^([A-Z]+)(\d+):([A-Z]+)\d+$/.exec(r.range!);
+  if (!m || !r.rows || used.length < 2 || unnamed.length < used.length / 2) return undefined;
+  const row = Number(m[2]);
+  const next = `${m[1]}${row + 1}:${m[3]}`;
+  const sheet = r.sheet ? `, sheet = '${r.sheet.replaceAll("'", "''")}'` : "";
+  // In a metrics file: the path from the project (not a file outside it).
+  const model = path.isAbsolute(r.source) ? "" : `（指標ファイルでは read_xlsx('${r.source}'${sheet}, range = '${next}')）`;
+  return (
+    `見出しとして読んだ ${row} 行目は、${used.length} 列のうち ${used.length - unnamed.length} 列にしか値がありません（ほかの列は ${unnamed[0]!.name}… という名前になります）。` +
+    `表の上の表題などの行なら、その下の見出しの行から読んでください: --range ${next}${model}`
+  );
+}
+
 /** The report as text. */
 export function formatInspect(r: InspectReport): string {
   const n = (x: number) => x.toLocaleString("en-US");
-  const lines = [`${r.source}${r.sheet ? `（シート「${r.sheet}」）` : ""}: ${n(r.rows)} 行、${r.columns.length} 列`];
+  const where = `${r.sheet ? `シート「${r.sheet}」` : ""}${r.sheet && r.range ? "の " : ""}${r.range ?? ""}`;
+  const lines = [`${r.source}${where ? `（${where}）` : ""}: ${n(r.rows)} 行、${r.columns.length} 列`];
   if (r.sheets && r.sheets.length > 1) lines.push(`  シート: ${r.sheets.join("・")}（ほかのシートは --sheet <名前>）`);
+  for (const note of r.notes) lines.push(`⚠ ${note}`);
   lines.push("");
   for (const c of r.columns) {
     const parts = [c.type];
@@ -137,6 +222,11 @@ export function formatInspect(r: InspectReport): string {
       const more = c.distinct > c.values.length ? " …" : "";
       lines.push(`  多い値: ${c.values.map((v) => `${v.value} (${n(v.count)})`).join("、")}${more}`);
     }
+  }
+  if (r.head.length) {
+    const rest = r.rows > r.head.length ? `（${n(r.rows)} 行のうち。--rows <数> で変えられます）` : "";
+    lines.push("", `最初の ${r.head.length} 行${rest}:`, r.columns.map((c) => c.name).join(" | "));
+    for (const row of r.head) lines.push(r.columns.map((c) => row[c.name] ?? "").join(" | "));
   }
   return lines.join("\n");
 }

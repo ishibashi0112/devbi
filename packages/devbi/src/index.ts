@@ -1,5 +1,15 @@
 export * from "./types.js";
-export { TILE_TYPES, TILE_TYPE_NAMES, DATE_RANGE_PRESETS, type BuiltinTileType, type DateRangePreset, type TileTypeInfo, type TileOptionSchema } from "./tiles.js";
+export {
+  TILE_TYPES,
+  TILE_TYPE_NAMES,
+  DATE_RANGE_PRESETS,
+  dateRangePresets,
+  type BuiltinTileType,
+  type DateRangeOption,
+  type DateRangePreset,
+  type TileTypeInfo,
+  type TileOptionSchema,
+} from "./tiles.js";
 export { dashboardJsonSchema, metricsJsonSchema, type SchemaNames } from "./schema.js";
 export {
   defineMetricsView,

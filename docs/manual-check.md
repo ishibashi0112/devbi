@@ -268,17 +268,21 @@ npm にはまだ出していないので、パッケージを npm に出す形�
 | 101 | 埋め込みの見本（上の 35）で「印刷・PDF」を押す | 紺色のヘッダーや左のメニューは入らず、ダッシュボードだけが印刷のプレビューに出る |
 | 102 | ブラウザの幅を狭くして（タイルが 1 列になるまで）「印刷・PDF」 | 1 列のままで、どのタイルもページの境目で切れない（高いタイルは 1 ページに 1 つ） |
 
-### ファイルを確かめる（devbi-check・devbi-inspect）
+### ファイルを確かめる（devbi-check・devbi-inspect）と AI 向けの手順
 
 ブラウザを開かずに、ターミナルで確かめます。`pnpm build` のあと、`examples/sales` のフォルダで動かします（`cd examples/sales`）。
 
 | # | すること | 期待する結果 |
 | --- | --- | --- |
-| 103 | `pnpm check` | 指標ファイル 3 つの行数（`models/sales.metrics.yaml: 6,044 行、指標 7・軸 4` など）と、ダッシュボードごとのタイルの行数が出て、最後に「問題はありません」。2 秒ほど |
+| 103 | `pnpm check` | 指標ファイル 3 つの行数（`models/sales.metrics.yaml: 6,044 行、指標 7・軸 4` など）と、ダッシュボードごとのタイルの行数が出て、最後に「問題はありません」。ダッシュボードの行には「date-range の最初の期間: 受注日 2026年度（2026-04-01〜2026-10-30）」（画面を開いたときと同じ期間で流す）。2 秒ほど |
 | 104 | `models/sales.metrics.yaml` の `SUM(数量)` を `SUM(数)` にして、もう一度 `pnpm check` | `✗ models/sales.metrics.yaml: 指標 quantity: Binder Error: Referenced column "数" not found …` と、次の行に `Candidate bindings: "数量", …`。売上ダッシュボードの `kpi-qty`（数量）と `products`（商品別）のタイルは「quantity のエラーのため確かめていません」。最後に「エラー 1 件、注意 0 件」で、`echo $?` は 1 |
 | 105 | 104 を戻し、`dashboards/sales.dash.json` の `"measures": ["orders"]` を `["orderz"]` にして `pnpm check` | `✗ dashboards/sales.dash.json: タイル kpi-orders（受注件数）: 指標 orderz は sales にありません（sales の指標: revenue・orders・…）` |
-| 106 | `pnpm inspect data/sales.xlsx` | `data/sales.xlsx（シート「明細」）: 6,044 行、9 列` と、列ごとの型・範囲・種類の数。`地域` には「多い値: 関東 (2,322)、近畿 (1,325)、…」。2 行目に「シート: 明細・メモ」 |
-| 107 | `pnpm inspect sales_daily` | 指標ファイル `sales_daily` の `model` の結果（受注日・地域・商品分類・金額・数量・明細数の 6 列、4,014 行）。サンプルの SQLite から読む |
+| 106 | `pnpm inspect -- data/sales.xlsx` | `data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列` と、列ごとの型・範囲・種類の数。`地域` には「多い値: 関東 (2,322)、近畿 (1,325)、…」。2 行目に「シート: 明細・メモ」。最後に「最初の 10 行」の表（`受注日 \| 受注番号 \| …` の見出しと 10 行） |
+| 107 | `pnpm inspect -- sales_daily` | 指標ファイル `sales_daily` の `model` の結果（受注日・地域・商品分類・金額・数量・明細数の 6 列、4,014 行）。サンプルの SQLite から読む |
+| 108 | `pnpm inspect -- data/sales.xlsx --range C1:D --rows 2` | `（シート「明細」の C1:D6045）: 6,044 行、2 列` で、列は `顧客` と `地域` だけ。最初の行は 2 行 |
+| 109 | `pnpm inspect -- --sql "SELECT 地域, SUM(金額) AS 売上 FROM read_xlsx('data/sales.xlsx', sheet = '明細') GROUP BY 1 ORDER BY 2 DESC"` | `SQL: 6 行、2 列` と、「最初の 6 行」に `関東 \| 72393280`、`近畿 \| 42290840`、…（地域ごとの売上の合計、大きい順）。`FROM 'data/sales.csv'` のように `read_` の関数を使わないと、「データのファイルは read_csv('data/…') のように read_ の関数で読んでください」 |
+| 110 | `pnpm check -- --values 2` | タイルごとに、画面と同じ書式の最初の 2 行。`kpi-revenue: 売上 ¥48,052,590、売上 前年 ¥48,138,860、売上 前年比 99.8%` は、`pnpm dev` で売上ダッシュボードを開いたとき（2026年度）の「売上」のタイルと同じ数字 |
+| 111 | `examples/sales` を Claude Code（か、AGENTS.md を読むほかの AI）で開き、「data/sales.xlsx から、商品分類ごとの売上と数量を見るダッシュボードを作って」と頼む | AI が `pnpm inspect` でデータを見て、作る指標とタイルを先に示す（売上の列や件数の数え方を聞いてくることもある）。ファイルを書いたあと `pnpm check` を流し、最後に作ったファイル、check の結果、開く URL（`http://localhost:5173/#/…`）と、そこに出るはずの数字を伝える。開くとダッシュボードが出て、その数字と同じ |
 
 試したあとは `git checkout .` で元に戻せます。
 

@@ -8,7 +8,7 @@
 //      "コードにする" writes a tile out without a page reload.
 // Run `pnpm build` first (pnpm check:packed does). The projects are left in the folder it prints, for a look.
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -60,6 +60,12 @@ for (const manager of ["npm", "pnpm"]) {
   // No install scripts: none of these packages needs one (pnpm runs none by default either).
   if (manager === "npm") run("npm", ["install", "--no-audit", "--no-fund", "--ignore-scripts"], app);
   else run("pnpm", ["install", "--ignore-workspace"], app);
+
+  // The reference that AGENTS.md points an AI at, from the installed devbi.
+  const reference = "node_modules/devbi/docs/reference.md";
+  if (!readFileSync(path.join(app, "AGENTS.md"), "utf8").includes(reference) || !existsSync(path.join(app, reference))) {
+    throw new Error(`${manager}: ${reference}, which AGENTS.md points to, is not there`);
+  }
 
   // 4. What a user runs first.
   run(manager, ["run", "typecheck"], app);

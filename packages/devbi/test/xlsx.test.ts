@@ -43,6 +43,20 @@ describe("readXlsx (file written by openpyxl)", () => {
     const t = await readXlsx(fixture, { sheet: "明細", range: "C1:D3" });
     expect(t.columns.map((c) => c.name)).toEqual(["顧客", "数量"]);
     expect(t.rowCount).toBe(2);
+    expect(t.range).toBe("C1:D3");
+    expect((await readXlsx(fixture, { sheet: "明細" })).range).toBe("A1:H5");
+    // Without a row number the range is open, as in Excel: to the last row, or whole columns.
+    for (const range of ["C1:D", "C:D", "$C$1:$D"]) {
+      const open = await readXlsx(fixture, { sheet: "明細", range });
+      expect([open.range, open.rowCount, open.columns.map((c) => c.name)], range).toEqual(["C1:D5", 3, ["顧客", "数量"]]);
+    }
+    // From the row below the header, its first row is the header.
+    expect((await readXlsx(fixture, { sheet: "明細", range: "C2:D" })).columns.map((c) => c.name)).toEqual(["A社", "3"]);
+    for (const range of ["C1:", "C0:D", "C1:D:E", "1:3"]) {
+      await expect(readXlsx(fixture, { sheet: "明細", range }), range).rejects.toThrow(`セル範囲として読めません: ${range}`);
+    }
+    // A title alone: read as the header, no rows.
+    expect(await readXlsx(fixture, {})).toMatchObject({ sheet: "表紙", rowCount: 0, range: "A1:A1" });
     await expect(readXlsx(fixture, { sheet: "無い" })).rejects.toThrow("シート「無い」がありません（あるのは 「表紙」、「明細」）");
   });
 });

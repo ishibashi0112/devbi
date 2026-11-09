@@ -62,6 +62,8 @@ api/
   orders.sql               # read_api('orders') でデータベースから読む SELECT（サーバーだけが使う）
   sales_daily.sql          # 先頭に -- snapshot: 06:00 と書くと、毎朝作ったファイルから読む
 .devbi/                    # pnpm gen が作る JSON Schema と型（git に入れない）
+AGENTS.md                  # AI 向けの作業手順（調べる → 方針 → 書く → pnpm check で確かめる）
+CLAUDE.md                  # Claude Code が AGENTS.md を読むための 1 行
 ```
 
 dash.json に `"$schema": "../.devbi/dash.schema.json"`、metrics.yaml の 1 行目に `# yaml-language-server: $schema=../.devbi/metrics.schema.json` と書くと、VS Code でタイルの種類や指標の名前が補完されます（YAML は拡張機能「YAML」が要ります）。詳しくは [docs/reference.md](docs/reference.md#エディタでの補完と型pnpm-gen)。

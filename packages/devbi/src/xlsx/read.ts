@@ -1,3 +1,4 @@
+import { colName } from "./workbook.js";
 import { readZip, type ZipEntry } from "./zip.js";
 import { isoDate, isoTimestamp } from "../sql.js";
 
@@ -14,6 +15,8 @@ export interface XlsxTable {
   sheet: string;
   rowCount: number;
   columns: XlsxColumn[];
+  /** The cells read, the header row included, such as `A1:K3068` (none when the sheet or range is empty). */
+  range?: string;
 }
 
 export interface ReadXlsxOptions {
@@ -21,7 +24,10 @@ export interface ReadXlsxOptions {
   sheet?: string;
   /** Whether the first non-empty row holds column names. Default true. */
   header?: boolean;
-  /** Cell range such as `A1:F500`. Defaults to the used range. */
+  /**
+   * Cell range such as `A1:F500`. Defaults to the used range. Without a row number the range is open, as in Excel:
+   * `A3:K` reads columns A to K from row 3 to the last row, `A:K` the whole columns.
+   */
   range?: string;
   /** Read every column as text. */
   allVarchar?: boolean;
@@ -174,9 +180,15 @@ async function sharedStrings(entries: Map<string, ZipEntry>): Promise<string[]> 
 }
 
 function parseRange(range: string): { r0: number; c0: number; r1: number; c1: number } {
-  const [a, b = a] = range.split(":");
-  const p = parseRef(a!);
-  const q = parseRef(b!);
+  const [a, b = a, ...rest] = range.split(":");
+  // A corner without a row number is the first row (start) or the last (end): `A3:K`, `A:K`.
+  const corner = (ref: string, end: boolean) => {
+    const m = /^\$?([A-Za-z]+)\$?(\d*)$/.exec(ref.trim());
+    if (!m || rest.length || m[2] === "0") throw new Error(`セル範囲として読めません: ${range}（A1:K500 や A3:K のように）`);
+    return { col: colIndex(m[1]!), row: m[2] ? Number(m[2]) - 1 : end ? Infinity : 0 };
+  };
+  const p = corner(a!, false);
+  const q = corner(b!, true);
   return { r0: Math.min(p.row, q.row), c0: Math.min(p.col, q.col), r1: Math.max(p.row, q.row), c1: Math.max(p.col, q.col) };
 }
 
@@ -277,7 +289,14 @@ export async function readXlsx(data: Uint8Array | ArrayBuffer, options: ReadXlsx
     rows[rowIndex] = row;
   }
 
-  const present = rows.filter((r): r is (Cell | undefined)[] => !!r && r.some((c) => !isEmpty(c)));
+  const present: (Cell | undefined)[][] = [];
+  const presentRows: number[] = [];
+  rows.forEach((r, i) => {
+    if (r?.some((c) => !isEmpty(c))) {
+      present.push(r);
+      presentRows.push(i);
+    }
+  });
   let c0 = bounds?.c0 ?? Infinity;
   let c1 = bounds?.c1 ?? -1;
   if (!bounds) {
@@ -310,7 +329,9 @@ export async function readXlsx(data: Uint8Array | ArrayBuffer, options: ReadXlsx
     const cells = present.map((r) => (isEmpty(r[c]) ? undefined : r[c]));
     return toColumn(name, cells, wb.date1904, !!options.allVarchar);
   });
-  return { sheet: sheet.name, rowCount: present.length, columns };
+  // The rows read, the header included (a range with no values in it reads none).
+  const range = presentRows.length ? `${colName(c0)}${presentRows[0]! + 1}:${colName(c1)}${presentRows.at(-1)! + 1}` : undefined;
+  return { sheet: sheet.name, rowCount: present.length, columns, ...(range ? { range } : {}) };
 }
 
 function toColumn(name: string, cells: (Cell | undefined)[], date1904: boolean, allVarchar: boolean): XlsxColumn {

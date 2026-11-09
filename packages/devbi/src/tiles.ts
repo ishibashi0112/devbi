@@ -2,6 +2,7 @@
  * The built-in tile types and their options: the contract between dash.json and `@devbi/react`.
  * Used to validate dash.json and to build its JSON Schema (editor completion).
  */
+import { formatTime } from "./format.js";
 
 /** Initial periods for the `date-range` tile (`options.default`). */
 export const DATE_RANGE_PRESETS = [
@@ -16,6 +17,50 @@ export const DATE_RANGE_PRESETS = [
 ] as const;
 
 export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
+
+/** A period of the `date-range` tile: its button's label and `[start, end)` (null for all). */
+export interface DateRangeOption {
+  key: DateRangePreset;
+  label: string;
+  range: [Date, Date] | null;
+}
+
+const DAY = 86_400_000;
+const utc = (y: number, m: number, d = 1) => new Date(Date.UTC(y, m, d));
+
+/**
+ * The `date-range` tile's periods, relative to the latest date in the data (not today), so daily or monthly updates
+ * line up. The fiscal years only when the year does not start in January. `devbi-check` uses them to run a
+ * dashboard's tiles in its first period, as the page opens.
+ */
+export function dateRangePresets(max: Date, fiscalYearStart = 1): DateRangeOption[] {
+  const y = max.getUTCFullYear();
+  const m = max.getUTCMonth();
+  const monthStart = utc(y, m);
+  const out: DateRangeOption[] = [
+    { key: "all", label: "全期間", range: null },
+    { key: "latest_month", label: formatTime(monthStart, "month"), range: [monthStart, utc(y, m + 1)] },
+    { key: "last_12_months", label: "直近12ヶ月", range: [utc(y, m - 11), utc(y, m + 1)] },
+    { key: "latest_year", label: `${y}年`, range: [utc(y, 0), utc(y + 1, 0)] },
+    { key: "previous_year", label: `${y - 1}年`, range: [utc(y - 1, 0), utc(y, 0)] },
+    { key: "year_to_date", label: `${y}年累計`, range: [utc(y, 0), new Date(Date.UTC(y, m, max.getUTCDate()) + DAY)] },
+  ];
+  if (fiscalYearStart !== 1) {
+    const fs = fiscalYearStart - 1;
+    const fy = m >= fs ? y : y - 1;
+    out.push(
+      { key: "latest_fiscal_year", label: `${fy}年度`, range: [utc(fy, fs), utc(fy + 1, fs)] },
+      { key: "previous_fiscal_year", label: `${fy - 1}年度`, range: [utc(fy - 1, fs), utc(fy, fs)] },
+    );
+  }
+  // Periods that contain the latest date end the day after it, so a comparison with
+  // the previous year covers the same stretch of days (year to date vs. same period last year).
+  const cap = Date.UTC(y, m, max.getUTCDate()) + DAY;
+  for (const p of out) {
+    if (p.range && p.range[1].getTime() > cap) p.range = [p.range[0], new Date(cap)];
+  }
+  return out;
+}
 
 /** One option of a tile type: a JSON Schema fragment (completion and hover text) plus what the GUI editor shows. */
 export interface TileOptionSchema {

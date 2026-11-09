@@ -9,7 +9,10 @@ import {
   compileQuery,
   compileTimeExtent,
   componentProblem,
+  dateRangePresets,
   DashboardError,
+  DATE_RANGE_PRESETS,
+  formatValue,
   MetricsError,
   parseDashboardJson,
   parseMetricsYaml,
@@ -18,13 +21,14 @@ import {
   TILE_TYPES,
   type Dashboard,
   type FieldInfo,
+  type Filter,
   type MetricsView,
   type Query,
   type TileSpec,
 } from "devbi";
 import type { ViteDevServer } from "vite";
 import { dashboardProblems, modelSources } from "./index.js";
-import { createNodeEngine, duckdbMessage, missingExtension, NotChecked, type NodeEngine } from "./node-engine.js";
+import { createNodeEngine, duckdbMessage, fileHint, missingExtension, NotChecked, type NodeEngine } from "./node-engine.js";
 
 export type Level = "error" | "warning";
 
@@ -53,6 +57,8 @@ export interface TileReport {
   rows?: number;
   /** Why it has no row count: no data to read (markdown), its own data, or a problem. */
   note?: string;
+  /** With `values`: its first rows as the screen shows them (`問い合わせ件数 150、前の期間 160`). */
+  values?: string[];
 }
 
 export interface CheckReport {
@@ -61,11 +67,18 @@ export interface CheckReport {
   tiles: TileReport[];
   /** The dashboards that could be read (names). */
   dashboards: string[];
+  /**
+   * The periods each dashboard's tiles ran in, when its date-range tiles start in one (`受注日 2026年10月（2026-10-01〜2026-10-30）`).
+   * A period filters the tiles whose metrics file has its time column.
+   */
+  periods: Record<string, string[]>;
 }
 
 export interface CheckOptions {
   /** Environment for the API's database (DEVBI_DB…). Default: the project's .env files and `process.env`. */
   env?: Record<string, string | undefined>;
+  /** How many rows of each tile's result to keep in `values`, formatted as on the screen. Default 0. */
+  values?: number;
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -139,6 +152,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   const findings: Finding[] = [];
   const views: ViewReport[] = [];
   const tiles: TileReport[] = [];
+  const periods: Record<string, string[]> = {};
   const add = (level: Level, file: string, text: string) => findings.push({ level, file, message: text });
   // Each issue of a file is its own finding; the problems of index.ts start with "<file>: ".
   // `ids`: a dashboard's tile ids, to name the tile of a "tiles.3…" path.
@@ -205,7 +219,15 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
     // failed only because another did (a measure of a broken measure) has its causes in `causes`, not an error.
     const state = new Map<
       string,
-      { model: string | NotChecked | Error; rows: number; failed: Set<string>; unchecked: Set<string>; causes: Map<string, string[]> }
+      {
+        model: string | NotChecked | Error;
+        rows: number;
+        failed: Set<string>;
+        unchecked: Set<string>;
+        causes: Map<string, string[]>;
+        /** The latest date of the time column (date-range's periods count from it). */
+        timeMax?: Date;
+      }
     >();
 
     for (const [name, { view, file }] of metrics) {
@@ -234,11 +256,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
           why = new NotChecked(report.notChecked);
         } else {
           const text = duckdbMessage(e);
-          // The browser reads only the files named in read_xlsx(…), read_csv(…) and the like.
-          const hint = /No files found|Cannot open file|No such file/i.test(text)
-            ? "\nデータのファイルは read_csv('data/…') のように read_ の関数で読んでください（ブラウザはそう書いたファイルだけを読み込みます）"
-            : "";
-          add("error", file, `model: ${text}${hint}`);
+          add("error", file, `model: ${text}${fileHint(text)}`);
         }
         state.set(name, { model: why, rows: 0, failed, unchecked, causes });
         continue;
@@ -279,6 +297,8 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
               "model の SQL で DATE か TIMESTAMP にしてください（例: CAST(列 AS DATE)、strptime(列, '%Y/%m/%d')）",
           );
           failed.add(time.name);
+        } else if (extent?.max instanceof Date) {
+          state.get(name)!.timeMax = extent.max;
         }
       }
       for (const d of Object.keys(view.dimensions)) runQuery(`軸 ${d}`, d, { dimensions: [d], limit: 1 });
@@ -320,6 +340,47 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
         n ?? dashboard.metrics ?? (modelFiles.length === 1 ? modelFiles[0]!.slice(0, -".metrics.yaml".length) : undefined);
       // dash.json's "metrics" and query.metrics are reported with the files (dashboardProblems); other names are not.
       const listed = (n: string, t: TileSpec) => n === dashboard.metrics || n === t.query?.metrics;
+
+      // As the page opens: each date-range tile with a first period (options.default) selects it, and it filters every
+      // tile whose metrics file has that time column (crossFilters); comparisons (previous_period…) then have a value.
+      const filters: Filter[] = [];
+      const shown: { field: string; text: string }[] = [];
+      for (const t of dashboard.tiles) {
+        const def = t.type === "date-range" ? t.options?.default : undefined;
+        if (def === undefined || def === "all") continue;
+        if (!(DATE_RANGE_PRESETS as readonly unknown[]).includes(def)) {
+          add(
+            "warning",
+            file,
+            `${where(t)}: options.default「${String(def)}」はありません（${DATE_RANGE_PRESETS.join("・")}）。画面は全期間で開きます`,
+          );
+          continue;
+        }
+        const n = viewName(t.query?.metrics ?? (typeof t.options?.metrics === "string" ? t.options.metrics : undefined));
+        const time = n ? metrics.get(n)?.view.time : undefined;
+        const max = n ? state.get(n)?.timeMax : undefined;
+        if (!time || !max) continue; // no time column, or its error: reported with the tile and the metrics file
+        const preset = dateRangePresets(max, time.fiscalYearStart).find((p) => p.key === def);
+        if (!preset?.range) {
+          add(
+            "warning",
+            file,
+            `${where(t)}: options.default「${String(def)}」には、models/${n}.metrics.yaml の time に fiscal_year_start（年度の始まりの月）が要ります。画面は全期間で開きます`,
+          );
+          continue;
+        }
+        const [start, end] = preset.range;
+        filters.push({ field: time.name, between: [start, end] });
+        const day = (d: Date) => d.toISOString().slice(0, 10);
+        shown.push({
+          field: time.name,
+          text: `${time.name} ${preset.label}（${day(start)}〜${day(new Date(end.getTime() - 86_400_000))}）`,
+        });
+      }
+      if (shown.length) periods[dashboard.name] = shown.map((p) => p.text);
+      // The periods that filter a view's tiles: those on its time column or a dimension of that name.
+      const periodsOf = (view: MetricsView) =>
+        shown.filter((p) => view.time?.name === p.field || Object.hasOwn(view.dimensions, p.field)).map((p) => p.text);
 
       for (const t of dashboard.tiles) {
         const tile: TileReport = { dashboard: dashboard.name, id: t.id };
@@ -432,13 +493,20 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
         }
         let compiled;
         try {
-          compiled = compileQuery(entry.view, query, { model: st.model });
+          compiled = compileQuery(entry.view, query, { model: st.model, filters });
         } catch (e) {
           fail(`${message(e)}${e instanceof QueryError ? namesHint(entry.view, message(e)) : ""}`);
           continue;
         }
         try {
-          tile.rows = engine!.query(compiled.sql).length;
+          const rows = engine!.query(compiled.sql);
+          tile.rows = rows.length;
+          if (options.values) {
+            const fy = entry.view.time?.fiscalYearStart ?? 1;
+            tile.values = rows
+              .slice(0, options.values)
+              .map((r) => compiled.fields.map((f) => `${f.label} ${formatValue(r[f.name], f, fy)}`).join("、"));
+          }
         } catch (e) {
           const ext = missingExtension(e);
           if (ext) {
@@ -453,7 +521,9 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
         if (shape) fail(shape);
         // When the model has no rows, that is the one warning (on the metrics file).
         else if (tile.rows === 0 && st.rows > 0) {
-          add("warning", file, `${where(t)}: 結果が 0 行です（query.filters や指標の式を確かめてください）`);
+          const applied = periodsOf(entry.view);
+          const period = applied.length ? `date-range の最初の期間 ${applied.join("・")} で。` : "";
+          add("warning", file, `${where(t)}: 結果が 0 行です（${period}query.filters や指標の式を確かめてください）`);
         }
       }
     }
@@ -461,7 +531,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
     engine?.close();
     await vite?.close();
   }
-  return { findings, views, tiles, dashboards: dashboards.map((d) => d.dashboard.name) };
+  return { findings, views, tiles, dashboards: dashboards.map((d) => d.dashboard.name), periods };
 }
 
 /** The report as text: a line per metrics file and dashboard, then the problems. */
@@ -477,8 +547,20 @@ export function formatReport(report: CheckReport): string {
   for (const name of report.dashboards) {
     const list = report.tiles.filter((t) => t.dashboard === name);
     const ran = list.filter((t) => t.rows !== undefined);
-    lines.push(`dashboards/${name}.dash.json: タイル ${list.length}（クエリを実行 ${ran.length}）`);
-    if (ran.length) lines.push(`  ${ran.map((t) => `${t.id} ${t.rows!.toLocaleString("en-US")} 行`).join("、")}`);
+    const period = Object.hasOwn(report.periods, name) ? `、date-range の最初の期間: ${report.periods[name]!.join("・")}` : "";
+    lines.push(`dashboards/${name}.dash.json: タイル ${list.length}（クエリを実行 ${ran.length}${period}）`);
+    if (ran.some((t) => t.values)) {
+      // --values: each tile's first rows, as the screen shows them.
+      for (const t of ran) {
+        const more = t.values && t.rows! > t.values.length ? " …" : "";
+        if (t.rows === 1 && t.values?.length) lines.push(`  ${t.id}: ${t.values[0]}`);
+        else
+          lines.push(
+            `  ${t.id} ${t.rows!.toLocaleString("en-US")} 行${t.values?.length ? ":" : ""}`,
+            ...(t.values ?? []).map((v, i, a) => `    ${v}${i === a.length - 1 ? more : ""}`),
+          );
+      }
+    } else if (ran.length) lines.push(`  ${ran.map((t) => `${t.id} ${t.rows!.toLocaleString("en-US")} 行`).join("、")}`);
     // Tiles not run, by reason (the problems are listed below; tiles without data need no line).
     const notes = new Map<string, string[]>();
     for (const t of list) {
