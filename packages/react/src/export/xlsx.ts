@@ -2,6 +2,7 @@
 import {
   addResultTable,
   checkQuery,
+  compileRows,
   componentProblem,
   formatValue,
   MAX_COLS,
@@ -10,6 +11,7 @@ import {
   resultCell,
   sheetRef,
   TABLE_STYLES,
+  TILE_TYPES,
   Workbook,
   type BuiltinTileType,
   type Cell,
@@ -21,9 +23,11 @@ import {
   type Row,
   type Sheet,
   type TileSpec,
+  type TileTypeInfo,
 } from "devbi";
 import { crossFilters, fieldInfo, runQuery, type DevbiContextValue } from "../context.js";
 import { describeFilter, snapshotText } from "../describe.js";
+import { tableToRows } from "../arrow-rows.js";
 import { viewsOf } from "../project.js";
 import { builtinTiles } from "../tiles/index.js";
 import { pivotFields, pivotModel, totalQuery } from "../tiles/pivot-model.js";
@@ -150,8 +154,37 @@ function writePivot(
   sheet.freeze = { rows: header + 1, cols: rowFields.length };
 }
 
+/**
+ * An explore tile's sheet: the model's rows it reads (the period and the other tiles' selections applied), as they
+ * are, for a pivot table in Excel. How the viewer has arranged them is not written (Perspective's own export does).
+ */
+async function addRows(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): Promise<TileResult> {
+  const query: Query = tile.query ?? {};
+  const filters = crossFilters(ctx, query, tile.id);
+  const view = ctx.view(query.metrics);
+  const engine = await ctx.engine;
+  const { sql, limit, newest } = compileRows(view, query, { filters, model: await engine.loadView(view) });
+  const table = await engine.table(sql);
+  const max = Math.min(limit, MAX_ROWS - ROOM);
+  const rows = tableToRows(table.numRows > max ? table.slice(0, max) : table);
+  // The model's columns, not measures: numbers and dates as Excel's own, labelled with their names.
+  const fields: FieldInfo[] = table.schema.fields.map((f) => ({ name: f.name, label: f.name, kind: "dimension" }));
+
+  const name = tile.title ?? tile.id;
+  const sheet = book.sheet(name);
+  sheet.add({ v: name, s: S.heading, noWidth: true });
+  sheet.add({ v: `絞り込み: ${filtersText(view, [], [...(query.filters ?? []), ...filters])}`, s: S.note, noWidth: true });
+  sheet.add({ v: "明細の行です。画面での並べ方と集計は、探索タイルの「書き出し」で書き出せます", s: S.note, noWidth: true });
+  sheet.skip();
+  addResultTable(sheet, rows, fields, { fiscalYearStart: view.time?.fiscalYearStart ?? 1 });
+  const cut = table.numRows > max;
+  const note = !cut ? undefined : max < limit ? "Excel の行数の上限までです" : `${newest ? "新しいほうから " : ""}${limit.toLocaleString("ja-JP")} 行までです`;
+  return { tile, sheet, rows: rows.length, ...(note ? { note } : {}) };
+}
+
 /** One tile's sheet: its title, the filters its data went through, and the data as the tile shows it. */
 async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): Promise<TileResult | undefined> {
+  if (tile.type && Object.hasOwn(TILE_TYPES, tile.type) && (TILE_TYPES[tile.type as BuiltinTileType] as TileTypeInfo).rows) return addRows(ctx, book, tile);
   const query = await queryOf(ctx, tile);
   if (query === "skip") return undefined;
   if (!query) return { tile, note: "自分でデータを読むタイルなので書き出せません" };

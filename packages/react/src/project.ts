@@ -38,8 +38,19 @@ export interface ProjectInput {
   snapshots?: Record<string, string[]>;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
+  /**
+   * Where the `explore` tile's Perspective loads its WebAssembly from. `@devbi/vite` sets it when a dashboard has an
+   * `explore` tile (always on its dev server).
+   */
+  perspective?: PerspectiveBundle;
   /** Set by `@devbi/vite` on its dev server (the GUI editor and file change notices); never in a build. */
   dev?: DevServer;
+}
+
+/** The URLs of Perspective's two WebAssembly files (`@finos/perspective` and `@finos/perspective-viewer`). */
+export interface PerspectiveBundle {
+  server: string;
+  client: string;
 }
 
 export interface Project {
@@ -52,6 +63,7 @@ export interface Project {
   snapshots: Record<string, string[]>;
   duckdb: DuckDBBundle;
   extensionRepository?: string;
+  perspective?: PerspectiveBundle;
   dev?: DevServer;
 }
 
@@ -73,6 +85,7 @@ export function loadProject(input: ProjectInput): Project {
     snapshots: input.snapshots ?? {},
     duckdb: input.duckdb,
     ...(input.extensionRepository ? { extensionRepository: input.extensionRepository } : {}),
+    ...(input.perspective ? { perspective: input.perspective } : {}),
     ...(input.dev ? { dev: input.dev } : {}),
   };
 }

@@ -151,6 +151,28 @@ export const css = `
 .devbi-pivot tbody td { cursor: pointer; }
 .devbi-pivot .devbi-total, .devbi-pivot tfoot th { font-weight: 650; }
 .devbi-pivot tfoot td, .devbi-pivot tfoot th { position: sticky; bottom: 0; background: var(--devbi-card); }
+.devbi-explore { display: flex; flex-direction: column; gap: 4px; height: 100%; }
+.devbi-explore-note { margin: 0; color: var(--devbi-muted); font-size: 12px; }
+.devbi-explore-viewer { position: relative; flex: 1; min-height: 0; }
+.devbi-explore-viewer perspective-viewer { position: absolute; inset: 0; border-radius: 6px; overflow: hidden; }
+/* Printed in its place (Perspective draws in a shadow DOM a copy cannot show): the view as a table. */
+.devbi-explore-print { height: 100%; overflow: hidden; }
+.devbi-explore-print table { border-collapse: collapse; font-size: 12px; width: 100%; }
+.devbi-explore-print :is(th, td) { padding: 3px 6px; border-bottom: 1px solid var(--devbi-border); text-align: left; white-space: nowrap; }
+.devbi-explore-print thead th { color: var(--devbi-muted); font-weight: 600; }
+.devbi-explore-print .devbi-num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Perspective's Japanese labels (intl/ja.css), where its machine translation reads wrong. More specific than its rule. */
+html perspective-viewer, html perspective-dropdown {
+  --group-by-label--content: "行"; --split-by-label--content: "列"; --sort-label--content: "並べ替え"; --filter-label--content: "絞り込み";
+  --transpose-button--content: "入れ替え"; --config-button-icon--content: "設定"; --plugin-name-datagrid--content: "表";
+  --plugin-name-x-bar--content: "横棒"; --plugin-name-y-bar--content: "縦棒"; --plugin-name-y-line--content: "折れ線";
+  --plugin-name-x-y-line--content: "X/Y 折れ線"; --plugin-name-x-y-scatter--content: "散布図"; --plugin-name-y-scatter--content: "点";
+  --plugin-name-y-area--content: "面"; --plugin-name-ohlc--content: "OHLC"; --column-selector-column-columns--content: "値";
+  --add-expression-button--content: "式の列を足す"; --aggregate-depth-label--content: "集計の深さ"; --no-results--content: "使えない列";
+  --export-button--content: "書き出し"; --reset-button--content: "元に戻す"; --format-label--content: "書式"; --series-label--content: "系列";
+  --weekday-label--content: "曜日"; --hour-label--content: "時"; --second-label--content: "秒"; --sign-display-label--content: "符号";
+  --untitled--content: "";
+}
 .devbi-daterange { display: grid; gap: 8px; }
 .devbi-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .devbi-chips button { border: 1px solid var(--devbi-border); background: none; border-radius: 999px; padding: 3px 12px; cursor: pointer; font-size: 13px; }

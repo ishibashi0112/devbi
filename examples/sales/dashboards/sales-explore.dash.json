@@ -1,0 +1,36 @@
+{
+  "$schema": "../.devbi/dash.schema.json",
+  "title": "明細を自由に集計",
+  "description": "受注の明細を、行・列・集計を選んで見る（Perspective）",
+  "metrics": "sales",
+  "tiles": [
+    {
+      "id": "period",
+      "x": 0, "y": 0, "w": 12, "h": 1,
+      "type": "date-range",
+      "options": { "default": "latest_fiscal_year" }
+    },
+    {
+      "id": "region",
+      "x": 0, "y": 1, "w": 4, "h": 6,
+      "type": "barlist",
+      "title": "地域別売上",
+      "query": { "measures": ["revenue"], "dimensions": ["region"] }
+    },
+    {
+      "id": "explore",
+      "x": 4, "y": 1, "w": 8, "h": 6,
+      "type": "explore",
+      "title": "明細",
+      "query": {},
+      "options": {
+        "layout": {
+          "group_by": ["商品分類"],
+          "split_by": [],
+          "columns": ["金額", "数量", "受注番号"],
+          "aggregates": { "金額": "sum", "数量": "sum", "受注番号": "distinct count" }
+        }
+      }
+    }
+  ]
+}

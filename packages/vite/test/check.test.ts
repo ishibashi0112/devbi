@@ -355,6 +355,33 @@ describe("devbi-check", () => {
     expect(k("all").values).toEqual([`orders ${n(await count("TRUE"))}`]);
   }, 60_000);
 
+  it("counts an explore tile's rows in the period, and warns when they are more than its limit or it has measures", async () => {
+    const dir = project({
+      "dashboards/d.dash.json": dash([
+        tile("period", 0, { type: "date-range", options: { default: "latest_month" } }),
+        tile("rows", 2, { type: "explore", query: { filters: [{ field: "region", in: ["関東"] }] } }),
+        tile("few", 4, { type: "explore", query: { limit: 10, measures: ["revenue"] } }),
+        tile("all", 6, { type: "explore", query: { period: false } }),
+        tile("none", 8, { type: "explore" }),
+      ]),
+    });
+    const r = await checkProject(dir, { values: 1 });
+    const sql = (where: string) => `SELECT COUNT(*) AS n FROM read_xlsx('data/sales.xlsx', sheet = '明細') WHERE ${where}`;
+    const count = async (where: string) => Number((await inspectData(dir, { sql: sql(where) })).head[0]!.n);
+    const october = "CAST(受注日 AS DATE) BETWEEN '2026-10-01' AND '2026-10-30'";
+    const k = (id: string) => r.tiles.find((t) => t.id === id)!;
+    expect(k("rows").rows).toBe(await count(`${october} AND 地域 = '関東'`));
+    expect(k("rows").values![0]).toMatch(/^受注日 2026-10-30、受注番号 J\d+、.*地域 関東、/);
+    expect(k("few").rows).toBe(10);
+    expect(k("all").rows).toBe(await count("TRUE"));
+    expect(k("none").rows).toBe(await count(october));
+    expect(r.findings.map((f) => f.message)).toEqual([
+      "タイル few: explore は明細の行を読むため、query の measures は使いません",
+      "タイル few: 明細が 10 行を超えるため、新しいほうから 10 行だけを集計します（期間で絞るか、query.limit を大きくしてください）",
+    ]);
+    expect(formatReport(r)).toContain("rows ");
+  }, 60_000);
+
   it("reports a project without metrics files", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "devbi-check-"));
     mkdirSync(path.join(dir, "models"));

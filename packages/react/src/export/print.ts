@@ -185,7 +185,21 @@ export async function printDashboard(root: HTMLElement, title: string, now = new
   }
 }
 
+/** On an element marked `data-devbi-snapshot`: what to print in its place (it draws where a copy cannot, as Perspective). */
+const SNAPSHOT = Symbol.for("devbi.print");
+
+/** What each marked part of `root` prints instead of itself (undefined: as it is, when it fails). */
+function snapshots(root: HTMLElement): Promise<(Node | undefined)[]> {
+  return Promise.all(
+    [...root.querySelectorAll<HTMLElement>("[data-devbi-snapshot]")].map(async (el) => {
+      const make = (el as unknown as Record<symbol, (() => Promise<Node>) | undefined>)[SNAPSHOT];
+      return make?.().catch(() => undefined);
+    }),
+  );
+}
+
 async function printIn(frame: HTMLIFrameElement, root: HTMLElement, title: string, now: Date): Promise<void> {
+  const parts = await snapshots(root);
   const dashboard = root.querySelector<HTMLElement>(".devbi-dashboard") ?? root;
   const width = Math.max(1, Math.ceil(dashboard.getBoundingClientRect().width));
   const zoom = Math.min(1, PAGE_WIDTH / width);
@@ -216,6 +230,10 @@ async function printIn(frame: HTMLIFrameElement, root: HTMLElement, title: strin
   // Paired with the screen's elements while the copy is still the same tree.
   copyState(root, copy);
   const scroll = scrollOf(root, copy);
+  copy.querySelectorAll("[data-devbi-snapshot]").forEach((el, i) => {
+    const part = parts[i];
+    if (part) el.replaceChildren(doc.importNode(part, true));
+  });
   copy.setAttribute("data-theme", "light");
   copy.setAttribute("data-devbi-print", "");
   for (const el of copy.querySelectorAll(".ssg-theme-dark")) el.classList.remove("ssg-theme-dark");

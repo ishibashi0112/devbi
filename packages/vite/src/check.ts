@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   checkQuery,
   compileQuery,
+  compileRows,
   compileTimeExtent,
   componentProblem,
   dateRangePresets,
@@ -25,6 +26,7 @@ import {
   type MetricsView,
   type Query,
   type TileSpec,
+  type TileTypeInfo,
 } from "devbi";
 import type { ViteDevServer } from "vite";
 import { dashboardProblems, modelSources } from "./index.js";
@@ -116,6 +118,25 @@ function shapeProblem(type: string, fields: FieldInfo[], options: Record<string,
     default:
       return undefined;
   }
+}
+
+/** A row of the model as it is (`--values` for an explore tile): `受注日 2026-10-30、地域 関東、金額 12,340`. */
+function rowText(row: Record<string, unknown>): string {
+  const text = (v: unknown): string => {
+    if (v === null || v === undefined) return "（空）";
+    if (v instanceof Date)
+      return v
+        .toISOString()
+        .replace(/T00:00:00\.000Z$/, "")
+        .replace(/\.000Z$/, "")
+        .replace("T", " ");
+    if (typeof v === "number") return v.toLocaleString("en-US", { maximumFractionDigits: 6 });
+    if (typeof v === "bigint") return v.toLocaleString("en-US");
+    return String(v);
+  };
+  return Object.entries(row)
+    .map(([k, v]) => `${k} ${text(v)}`)
+    .join("、");
 }
 
 /** The names a view has, for a query that used one it does not have. */
@@ -414,6 +435,8 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
             }
             continue;
           }
+          // explore reads all of the model's rows without one.
+          if (!query && (info as TileTypeInfo).rows) query = {};
           if (!query) {
             fail(`${t.type} には query（measures・dimensions など）が要ります`);
             continue;
@@ -491,10 +514,51 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
           tile.note = `${unchecked.join("・")} を確かめていないため確かめていません`;
           continue;
         }
+        // `period: false`: not filtered on the time column (crossFilters).
+        const own = query.period === false ? filters.filter((f) => f.field !== entry.view.time?.name) : filters;
+        if (t.type && (TILE_TYPES[t.type as keyof typeof TILE_TYPES] as TileTypeInfo).rows) {
+          // The model's rows as they are (explore): how many, and whether they fit in the tile's limit.
+          const unused = (["measures", "dimensions", "time", "sort"] as const).filter((k) => query[k] !== undefined);
+          if (unused.length)
+            add("warning", file, `${where(t)}: ${t.type} は明細の行を読むため、query の ${unused.join("・")} は使いません`);
+          let compiled;
+          try {
+            compiled = compileRows(entry.view, query, { model: st.model, filters: own });
+          } catch (e) {
+            fail(`${message(e)}${e instanceof QueryError ? namesHint(entry.view, message(e)) : ""}`);
+            continue;
+          }
+          try {
+            const rows = engine!.query(compiled.sql);
+            tile.rows = Math.min(rows.length, compiled.limit);
+            if (options.values) tile.values = rows.slice(0, Math.min(options.values, compiled.limit)).map(rowText);
+            if (rows.length > compiled.limit) {
+              const n = compiled.limit.toLocaleString("en-US");
+              add(
+                "warning",
+                file,
+                compiled.newest
+                  ? `${where(t)}: 明細が ${n} 行を超えるため、新しいほうから ${n} 行だけを集計します（期間で絞るか、query.limit を大きくしてください）`
+                  : `${where(t)}: 明細が ${n} 行を超えるため、${n} 行だけを集計します（query.filters で絞るか、query.limit を大きくしてください）`,
+              );
+            } else if (rows.length === 0 && st.rows > 0) {
+              const applied = query.period === false ? [] : periodsOf(entry.view);
+              const period = applied.length ? `date-range の最初の期間 ${applied.join("・")} で。` : "";
+              add("warning", file, `${where(t)}: 明細が 0 行です（${period}query.filters を確かめてください）`);
+            }
+          } catch (e) {
+            const ext = missingExtension(e);
+            if (ext) {
+              add("warning", file, `${where(t)}: ${noExtension(ext)}`);
+              tile.note = `DuckDB の拡張 ${ext} を取ってこられないため確かめていません`;
+            } else {
+              fail(duckdbMessage(e));
+            }
+          }
+          continue;
+        }
         let compiled;
         try {
-          // `period: false`: not filtered on the time column (crossFilters).
-          const own = query.period === false ? filters.filter((f) => f.field !== entry.view.time?.name) : filters;
           compiled = compileQuery(entry.view, query, { model: st.model, filters: own });
         } catch (e) {
           fail(`${message(e)}${e instanceof QueryError ? namesHint(entry.view, message(e)) : ""}`);

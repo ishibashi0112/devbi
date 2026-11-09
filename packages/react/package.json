@@ -36,6 +36,10 @@
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "1.33.1-dev114.0",
+    "@finos/perspective": "^3.8.0",
+    "@finos/perspective-viewer": "^3.8.0",
+    "@finos/perspective-viewer-d3fc": "^3.8.0",
+    "@finos/perspective-viewer-datagrid": "^3.8.0",
     "@ishibashi0112/spreadsheet-grid": "^0.61.0",
     "@observablehq/plot": "^0.6.19",
     "@uwdata/mosaic-core": "^0.35.0",

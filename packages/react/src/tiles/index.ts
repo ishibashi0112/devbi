@@ -20,6 +20,8 @@ export interface BuiltinTile {
 const chart = (kind: "bar" | "line" | "area") =>
   lazy(() => loadChunk(() => import("./PlotChart.js")).then((m) => ({ default: m.makeChart(kind) })));
 const table = lazy(() => loadChunk(() => import("./GridTable.js")).then((m) => ({ default: m.GridTable })));
+// Perspective (several MB with its WebAssembly) comes with the first explore tile.
+const explore = lazy(() => loadChunk(() => import("./Explore.js")).then((m) => ({ default: m.Explore })));
 
 /**
  * Built-in tile types for `"type"` in dash.json. The chart tiles (`bar`, `line`, `area`) and `table` are `React.lazy`
@@ -33,6 +35,8 @@ export const builtinTiles: Readonly<Record<BuiltinTileType, BuiltinTile>> = {
   barlist: { component: BarList },
   table: { component: table },
   pivot: { component: Pivot },
+  // Reads the model's rows itself (useDevbiRows), not the query's measures.
+  explore: { component: explore, noQuery: true },
   "date-range": { component: DateRange, noQuery: true },
   select: { component: SelectFilter },
   markdown: { component: Markdown, noQuery: true },

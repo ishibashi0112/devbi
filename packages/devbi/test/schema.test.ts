@@ -38,6 +38,8 @@ describe("JSON Schema", () => {
     expect(dash(tile({ type: "kpi", query: { filters: [{ field: "d", between: ["2026-10-01", null], unit: "month" }] } }))).toBe(true);
     expect(dash(tile({ type: "kpi", query: { filters: [{ field: "d", in: ["x"], unit: "month" }] } }))).toBe(false);
     expect(dash(tile({ component: "./x.tsx", options: { anything: 1 } }))).toBe(true);
+    expect(dash(tile({ type: "explore", query: {}, options: { layout: { group_by: ["地域"], aggregates: { 金額: "sum" } } } }))).toBe(true);
+    expect(dash(tile({ type: "explore", options: { layout: "地域" } }))).toBe(false);
 
     const metrics = ajv().compile(metricsJsonSchema());
     expect(metrics({ model: "SELECT 1", measures: { n: "COUNT(*)" } })).toBe(true);

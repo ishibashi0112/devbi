@@ -384,6 +384,69 @@ test("the property panel: a tile's name is checked, options show at once, a type
   expect(spec.tiles.find((t: { id: string }) => t.id === "period").options).toEqual({ default: "previous_fiscal_year" });
 });
 
+test("the property panel: an explore tile reads the rows, its first layout written as JSON", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await openEditor(page);
+  await pick(page, "products");
+  const p = panel(page);
+  await p.getByLabel("種類").selectOption({ label: "探索（自由に集計）" });
+  const tile = item(page, "products");
+  await expect(tile.locator('.devbi-explore[aria-busy="false"]')).toHaveCount(1);
+  // The model's rows: no measures, dimensions or sort to pick; the filters, the limit and the period stay.
+  await expect(p.getByRole("group", { name: "指標" })).toHaveCount(0);
+  await expect(p.getByRole("group", { name: "軸" })).toHaveCount(0);
+  await expect(p.getByLabel("件数")).toBeVisible();
+  await expect(p.getByLabel("期間で絞るか")).toBeVisible();
+
+  const layout = p.getByLabel("最初の並べ方");
+  await layout.fill("{ group_by: 地域 }");
+  await layout.blur();
+  await expect(p.getByText(/JSON として読めません/)).toBeVisible();
+  await layout.fill('{ "group_by": ["地域"], "columns": ["金額"] }');
+  await layout.blur();
+  await expect(p.getByText(/JSON として読めません/)).toHaveCount(0);
+  const viewer = tile.locator("perspective-viewer");
+  type Config = { group_by: string[]; columns: (string | null)[] };
+  const arranged = () => viewer.evaluate(async (el) => (await (el as unknown as { save(): Promise<Config> }).save()) as Config);
+  await expect.poll(async () => (await arranged()).group_by).toEqual(["地域"]);
+  expect((await arranged()).columns).toEqual(["金額"]);
+
+  // Another layout starts over from it (the columns left out are all the columns again). ⌘S takes what is typed.
+  await layout.fill('{ "group_by": ["商品分類"], "columns": ["金額", "数量"] }');
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  await expect.poll(async () => (await arranged()).group_by).toEqual(["商品分類"]);
+  // A layout Perspective cannot use says so on the tile, and the next one is used.
+  const problem = tile.locator(".devbi-error");
+  await layout.fill('{ "plugin": "Bar" }');
+  await layout.blur();
+  await expect(problem).toContainText('options.layout の plugin "Bar" はありません');
+  await layout.fill('{ "group_by": ["地"] }');
+  await layout.blur();
+  await expect(problem).toContainText("options.layout の並べ方を使えません");
+  await layout.fill('{ "group_by": ["地域"], "columns": ["金額"] }');
+  await layout.blur();
+  await expect(problem).toHaveCount(0);
+  await expect.poll(async () => (await arranged()).group_by).toEqual(["地域"]);
+  expect((await arranged()).columns).toEqual(["金額"]);
+
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const saved = JSON.parse(readFileSync(salesFile, "utf8")).tiles.find((t: { id: string }) => t.id === "products");
+  expect(saved).toEqual({
+    id: "products",
+    x: 3,
+    y: 16,
+    w: 9,
+    h: 5,
+    type: "explore",
+    title: "商品別",
+    options: { layout: { group_by: ["地域"], columns: ["金額"] } },
+  });
+  expect(errors).toEqual([]);
+});
+
 test("the property panel keeps what is being typed: a new name when another tile is pressed, a date typed digit by digit", async ({ page }) => {
   await openEditor(page);
   const p = panel(page);

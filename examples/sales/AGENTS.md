@@ -90,7 +90,7 @@
 - 最初のキーは `"$schema": "../.devbi/dash.schema.json"`。`"metrics"` に指標ファイルの名前
 - グリッドは 12 列。`x + w` は 12 まで、タイルは重ねない
 - 並べ方の目安（上から）: 期間 `date-range`（`w` 12・`h` 1）、数字 `kpi`（`w` 3・`h` 2 を 4 つずつ）、推移とランキング（`bar`・`line` は `w` 8・`h` 4、`barlist` は `w` 4・`h` 4）、表 `table`・`pivot`（`h` 5）、説明の `markdown`（`w` 12・`h` 2）
-- 種類の選び方: 1 つの数字は `kpi`、時間の推移は `bar`（比べる系列があれば `line`）、内訳の推移は `area`、順位は `barlist`（`limit` 10 ほど）、2 つの項目の掛け合わせは `pivot`、一覧は `table`（`limit` を付ける）、値で絞る入口は `select`
+- 種類の選び方: 1 つの数字は `kpi`、時間の推移は `bar`（比べる系列があれば `line`）、内訳の推移は `area`、順位は `barlist`（`limit` 10 ほど）、2 つの項目の掛け合わせは `pivot`、一覧は `table`（`limit` を付ける）、値で絞る入口は `select`、見る人が明細を自由に並べて集計する場は `explore`（`w` 12・`h` 6。`model` の列をそのまま読み、`query` は `filters`・`limit`・`period` だけ。`options.layout` の列名も `model` の列名。Perspective を読むので重く、1 つのダッシュボードに 1 つまで）
 - `date-range` の最初の期間（`options.default`）は、見る人の使い方に合わせる。毎日見るなら `latest_day`・`last_7_days`・`latest_week`、月の会議なら `latest_month`・`previous_month`、四半期なら `latest_quarter`、年度なら `latest_fiscal_year`（`time` に `fiscal_year_start` が要る）。「最新」「直近」は、今日ではなくデータの最終日が基準
 - `date-range` の期間は、その `time` の列を持つ指標ファイルのタイルすべてにかかる。「いま対応中のすべて」「全期間の累計」のように期間に関係なく出すタイルは、`query` に `"period": false` を書く（期間だけが外れ、地域のクリックなどほかの選択はかかる）
 - 比較の指標（`compare`）は、`time` のあるクエリか、`date-range` のあるダッシュボードで使う（全期間のままだと空になる）。`previous_period` は、月・週・四半期・年の期間なら前の月（週…）の同じ日と、`last_7_days` などなら同じ日数だけ前と比べる。kpi の 2 つ目からの指標は、`as` が `ratio`・`change`・`delta` だと、増えると緑・減ると赤になる（`better: lower` の指標は逆）

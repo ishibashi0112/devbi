@@ -1,4 +1,4 @@
-import { TILE_TYPES, type BuiltinTileType, type Grain, type MetricsView } from "devbi";
+import { TILE_TYPES, type BuiltinTileType, type Grain, type MetricsView, type TileTypeInfo } from "devbi";
 
 /** A built-in tile as dash.json has it, to be written out as a promoted tile (`dashboards/<name>/<Name>.tsx`). */
 export interface PromotedTile {
@@ -12,7 +12,7 @@ export interface PromotedTile {
 const GRAIN_LABELS: Record<Grain, string> = { day: "日", week: "週", month: "月", quarter: "四半期", year: "年", fiscal_year: "年度" };
 
 /** Names the file itself uses: a component with one of them would hide it. */
-const USED = new Set(["Builtin", "TileProps", "RowOf"]);
+const USED = new Set(["Builtin", "TileProps", "RowOf", "Query"]);
 
 const pascal = (s: string) =>
   s
@@ -83,6 +83,7 @@ const field = (name: string) => (IDENT.test(name) ? `r.${name}` : `r[${JSON.stri
  */
 export function promotedTileSource(tile: PromotedTile, options: { name: string; view?: MetricsView; metrics?: string }): string {
   const info = TILE_TYPES[tile.type];
+  if ((info as TileTypeInfo).rows) return rowsTileSource(tile, options);
   const what = `組み込みの${info.label}`;
   const title = oneLine(tile.title || tile.id);
   const hasQuery = info.query;
@@ -137,5 +138,43 @@ export function promotedTileSource(tile: PromotedTile, options: { name: string; 
     lines.push("  // 自分で描くときは、下の return を書き換える。データが要るときは @devbi/react の useDevbiQuery で集計する。");
   }
   lines.push(opts ? "  return <Builtin {...props} tile={{ ...props.tile, options }} />;" : "  return <Builtin {...props} />;", "}", "");
+  return lines.join("\n");
+}
+
+/**
+ * A promoted explore tile: it reads the model's rows itself (no `export const query`, which would be aggregated), so
+ * its query goes to the built-in tile with its options.
+ */
+function rowsTileSource(tile: PromotedTile, options: { name: string; metrics?: string }): string {
+  const info = TILE_TYPES[tile.type];
+  const what = `組み込みの${info.label}`;
+  const title = oneLine(tile.title || tile.id);
+  const query = tile.query ?? {};
+  const opts = tile.options && Object.keys(tile.options).length ? tile.options : undefined;
+  const metrics = typeof query.metrics === "string" ? query.metrics : options.metrics;
+  const lines = [
+    `// 「${title}」のタイル。GUI エディタの「コードにする」で、${what}から書き出したもの。`,
+    "// このタイルのデータと描き方は、このファイルで変える（GUI で変えられるのは、位置・大きさ・見出し・名前）。",
+    "// 自作タイルの書き方: https://github.com/ishibashi0112/devbi/blob/main/docs/reference.md#自作タイルjsx",
+    `import { builtinTiles } from "@devbi/react";`,
+    `import type { Query, TileProps } from "devbi";`,
+    "",
+    `// どの明細を読むか（metrics・filters・limit・period だけ）。${metrics ? `models/${oneLine(metrics)}.metrics.yaml の model の行` : "指標ファイルの model の行"}`,
+    "// 集計はしないため export しない（export すると、集計の query として読まれる）",
+    `const query: Query = ${literal(query, "")};`,
+    "",
+  ];
+  if (opts) lines.push(`// ${info.label}の設定（dash.json の "options" に書いていたもの）`, `const options = ${literal(opts, "")};`, "");
+  lines.push(
+    `// いまは${what}で描いている`,
+    `const Builtin = builtinTiles${IDENT.test(tile.type) ? `.${tile.type}` : `[${JSON.stringify(tile.type)}]`}.component;`,
+    "",
+    `export default function ${options.name}(props: TileProps) {`,
+    "  // 自分で描くときは、下の return を書き換える。明細の行は @devbi/react の useDevbiRows(query, { tileId: props.tile.id }) で",
+    "  // 読める（Arrow の表。期間とほかのタイルの選択で絞ったもの）。",
+    `  return <Builtin {...props} tile={{ ...props.tile, query${opts ? ", options" : ""} }} />;`,
+    "}",
+    "",
+  );
   return lines.join("\n");
 }

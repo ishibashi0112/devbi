@@ -49,6 +49,7 @@ export const editorCss = `
 .devbi-ed-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .devbi-ed-panel input:not([type="checkbox"]), .devbi-ed-panel select, .devbi-ed-panel textarea { font: inherit; color: inherit; background: var(--devbi-bg); border: 1px solid var(--devbi-border); border-radius: 6px; padding: 5px 8px; min-width: 0; }
 .devbi-ed-panel textarea { min-height: 96px; resize: vertical; }
+.devbi-ed-panel textarea.devbi-ed-json { min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .devbi-ed-panel :is(input, select, textarea):focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 1px; }
 .devbi-ed-panel input[aria-invalid="true"] { border-color: var(--devbi-down); }
 .devbi-ed-field:has(input[aria-invalid="true"]) small { color: var(--devbi-down); }

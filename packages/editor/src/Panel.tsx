@@ -4,6 +4,8 @@ import {
   TILE_TYPES,
   TILE_TYPE_NAMES,
   compileQuery,
+  compileRows,
+  EXPLORE_ROWS,
   isoDate,
   resolveComponent,
   type BuiltinTileType,
@@ -22,6 +24,7 @@ import {
   isObj,
   metricsNameOf,
   moveUp,
+  readsRows,
   rowFilter,
   setDashboardKey,
   setOption,
@@ -62,7 +65,7 @@ export interface PanelProps {
   /** Clear a tile's selection (its period, for instance), so the tile starts over. */
   clearSelection(id: string): void;
   /** What to finish before the selection changes (a new name typed but not yet taken), or null. */
-  registerFlush(flush: Flush | null): void;
+  registerFlush(flush: Flush): () => void;
   /** "コードにする": write the tile out as a .tsx file, point the tile at it and save. Whether it was done. */
   onPromote(id: string): Promise<boolean>;
   /** Whether there are unsaved changes (saved along with "コードにする"). */
@@ -113,6 +116,83 @@ function TextInput({
   const merge = useMergeKey();
   const common = { ...rest, value, onFocus: merge.onFocus, onChange: (e: { target: { value: string } }) => onChange(e.target.value, merge.key()) };
   return multiline ? <textarea {...common} /> : <input type="text" {...common} />;
+}
+
+/**
+ * An object written as JSON (an explore tile's layout). It is written to dash.json when the box loses focus, when
+ * another tile is pressed and on ⌘S (through `registerFlush`), and only when the text is a JSON object; empty removes
+ * the key. Until then the text stays as typed, with what is wrong under it.
+ */
+function JsonInput({
+  value,
+  onChange,
+  registerFlush,
+  ...rest
+}: Ids & { value: unknown; onChange(value: Record<string, unknown> | undefined): void; registerFlush(flush: Flush): () => void }) {
+  const shown = value === undefined ? "" : JSON.stringify(value, null, 2);
+  const [text, setText] = useState(shown);
+  const [error, setError] = useState<string>();
+  const editing = useRef(false);
+  // A change from elsewhere (undo, the file): show it, unless the box is being typed in.
+  useEffect(() => {
+    if (!editing.current) {
+      setText(shown);
+      setError(undefined);
+    }
+  }, [shown]);
+  const commit = () => {
+    editing.current = false;
+    if (!text.trim()) {
+      setError(undefined);
+      if (value !== undefined) onChange(undefined);
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      setError(`JSON として読めません（${(e as Error).message}）`);
+      return;
+    }
+    if (!isObj(parsed)) {
+      setError("{ } で囲んだ JSON のオブジェクトにしてください");
+      return;
+    }
+    setError(undefined);
+    if (JSON.stringify(parsed, null, 2) !== shown) onChange(parsed);
+    else setText(shown);
+  };
+  const latest = useRef(commit);
+  latest.current = commit;
+  useEffect(
+    () =>
+      registerFlush(() => {
+        if (editing.current) latest.current();
+        return undefined;
+      }),
+    [registerFlush],
+  );
+  return (
+    <>
+      <textarea
+        {...rest}
+        className="devbi-ed-json"
+        spellCheck={false}
+        value={text}
+        placeholder='{ "group_by": ["地域"], "columns": ["金額"] }'
+        onFocus={() => (editing.current = true)}
+        onChange={(e) => {
+          // Also after ⌘S took the text while the box kept the focus.
+          editing.current = true;
+          setText(e.target.value);
+        }}
+        onBlur={() => {
+          if (editing.current) commit();
+        }}
+      />
+      {error && <p className="devbi-ed-warn">{error}</p>}
+    </>
+  );
 }
 
 /** A number box: empty removes the key; something that is not a number yet ("-", "1e") is left alone. */
@@ -229,7 +309,7 @@ function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemo
       />
       {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} />}
       {builtin && Object.keys(TILE_TYPES[builtin].options).length > 0 && (
-        <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} />
+        <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} registerFlush={registerFlush} />
       )}
       {builtin && <Promote folder={`dashboards/${name}/`} dirty={dirty} onPromote={() => onPromote(tile.id)} />}
       <button type="button" className="devbi-button devbi-ed-danger" onClick={() => onRemove(tile.id)}>
@@ -301,7 +381,7 @@ function IdField({
 }: {
   spec: RawDashboard;
   tile: RawTile;
-  registerFlush(flush: Flush | null): void;
+  registerFlush(flush: Flush): () => void;
   /** `follow`: the panel stays on this tile (under its new name). */
   onRename(id: string, follow: boolean): void;
 }) {
@@ -318,10 +398,7 @@ function IdField({
   };
   const latest = useRef(take);
   latest.current = take;
-  useEffect(() => {
-    registerFlush(() => latest.current(false));
-    return () => registerFlush(null);
-  }, [registerFlush]);
+  useEffect(() => registerFlush(() => latest.current(false)), [registerFlush]);
   return (
     <Field label="名前（id）" hint={problem ?? "dash.json でタイルを見分ける名前"}>
       {(ids) => (
@@ -351,19 +428,31 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
   const set = (key: keyof Query, value: unknown, merge?: string) => onTile((t) => setQueryKey(t, key, value), merge);
   const own = str(query.metrics);
   const dashboardDefault = str(spec.metrics) || (names.length === 1 ? names[0] : undefined);
+  // explore: the model's rows as they are, filtered; no measures, dimensions or sort.
+  const rows = readsRows(tile.type);
   // What the tile would say instead of its data (an unknown name, nothing to show), next to the boxes that fix it.
   let problem: string | undefined;
   if (view) {
     try {
-      compileQuery(view, query);
+      if (rows) compileRows(view, query);
+      else compileQuery(view, query);
     } catch (e) {
       problem = (e as Error).message;
     }
   }
+  const unused = rows ? (["measures", "dimensions", "time", "sort"] as const).filter((k) => query[k] !== undefined) : [];
   return (
     <>
       <h3>データ</h3>
       {problem && <p className="devbi-ed-warn">{problem}</p>}
+      {unused.length > 0 && (
+        <p className="devbi-ed-warn">
+          明細の行を読むタイルのため、query の {unused.join("・")} は使いません{" "}
+          <button type="button" className="devbi-ed-mini" onClick={() => onTile((t) => unused.reduce((next, k) => setQueryKey(next, k, undefined), t))}>
+            消す
+          </button>
+        </p>
+      )}
       {(names.length > 1 || own) && (
         <Field label="指標ファイル">
           {(ids) => (
@@ -375,9 +464,9 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
         <p className="devbi-ed-warn">{name ? `指標ファイル models/${name}.metrics.yaml がありません` : "使う指標ファイルを選んでください"}</p>
       ) : (
         <>
-          <NameList legend="指標" defs={view.measures} chosen={query.measures ?? []} onChange={(v) => set("measures", v)} />
-          <NameList legend="軸" defs={view.dimensions} chosen={query.dimensions ?? []} onChange={(v) => set("dimensions", v)} />
-          {(view.time || query.time) && (
+          {!rows && <NameList legend="指標" defs={view.measures} chosen={query.measures ?? []} onChange={(v) => set("measures", v)} />}
+          {!rows && <NameList legend="軸" defs={view.dimensions} chosen={query.dimensions ?? []} onChange={(v) => set("dimensions", v)} />}
+          {!rows && (view.time || query.time) && (
             <Field label={`期間の単位${view.time ? `（${view.time.label}）` : ""}`}>
               {(ids) => (
                 <select {...ids} value={query.time ?? ""} onChange={(e) => set("time", e.target.value)}>
@@ -402,8 +491,11 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
             </Field>
           )}
           <FiltersEditor view={view} query={query} live={live} set={set} />
-          <SortEditor view={view} query={query} set={set} />
-          <Field label="件数" hint="空のときはすべての行">
+          {!rows && <SortEditor view={view} query={query} set={set} />}
+          <Field
+            label="件数"
+            hint={rows ? `空のときは ${EXPLORE_ROWS.toLocaleString("ja-JP")} 行まで（多いときは新しいほうから。大きいほどブラウザが重くなります）` : "空のときはすべての行"}
+          >
             {(ids) => <NumberInput {...ids} integer value={typeof query.limit === "number" ? query.limit : undefined} onChange={(n, merge) => set("limit", n, merge)} />}
           </Field>
         </>
@@ -719,6 +811,7 @@ function OptionsEditor({
   type,
   onTile,
   clearSelection,
+  registerFlush,
 }: {
   metrics: Record<string, MetricsView>;
   spec: RawDashboard;
@@ -726,6 +819,7 @@ function OptionsEditor({
   type: BuiltinTileType;
   onTile: OnTile;
   clearSelection(id: string): void;
+  registerFlush(flush: Flush): () => void;
 }) {
   const options = isObj(tile.options) ? tile.options : {};
   const entries = Object.entries(TILE_TYPES[type].options) as [string, TileOptionSchema][];
@@ -777,6 +871,7 @@ function OptionsEditor({
       );
     }
     if (o.input === "metrics") return <MetricsSelect {...ids} metrics={metrics} value={str(value)} empty="ダッシュボードと同じ" onChange={(v) => set(key, v)} />;
+    if (o.input === "json") return <JsonInput {...ids} value={value} onChange={(v) => set(key, v)} registerFlush={registerFlush} />;
     return <TextInput {...ids} multiline={o.input === "text"} value={str(value)} onChange={(v, merge) => set(key, v, merge)} />;
   };
   return (
