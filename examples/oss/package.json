@@ -9,7 +9,7 @@
     "typecheck": "devbi-gen && tsc -p tsconfig.json",
     "gen": "devbi-gen",
     "check": "devbi-check",
-    "fetch": "node scripts/fetch-stats.mjs --npm-user ishibashi0112 --repo ishibashi0112/devbi",
+    "fetch-stats": "node scripts/fetch-stats.mjs --npm-user ishibashi0112 --repo ishibashi0112/devbi",
     "fixture": "node scripts/fixture.mjs"
   },
   "dependencies": {

@@ -18,11 +18,22 @@ const token = process.env.GITHUB_TOKEN;
 
 async function get(url, headers = {}) {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { headers: { "user-agent": "devbi-demo", ...headers } });
+    // A network error, a limit (429) or a server error: again after 2, 4, 8, 16 seconds.
+    const wait = () => new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+    let res;
+    try {
+      res = await fetch(url, { headers: { "user-agent": "devbi-demo", ...headers } });
+    } catch (e) {
+      if (attempt < 4) {
+        await wait();
+        continue;
+      }
+      throw new Error(`${url}: ${e.cause?.message ?? e.message}`);
+    }
     if (res.ok) return res.json();
     if (res.status === 404) return undefined;
     if (attempt < 4 && (res.status === 429 || res.status >= 500)) {
-      await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+      await wait();
       continue;
     }
     throw new Error(`${url}: ${res.status} ${await res.text()}`);

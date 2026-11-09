@@ -36,7 +36,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter devbi-example-oss fetch
+      - run: pnpm --filter devbi-example-oss fetch-stats
         env:
           GITHUB_TOKEN: ${{ github.token }}
       # Every metrics file and tile run on the fetched numbers: a problem stops the demo before it is published.
