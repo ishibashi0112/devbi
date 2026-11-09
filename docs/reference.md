@@ -243,7 +243,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `period` | `false` で、期間（`date-range` で選んだ期間と、時間のグラフでクリックした期間）で絞らない。「いま対応中のすべて」「全期間の累計」のように、期間に関係なく出すタイルに。ほかの選択（地域のクリックなど）はかかる |
 | `metrics` | ダッシュボードとは別の指標ファイルを使うとき |
 
-`measures` か `dimensions` か `time` のどれかが要ります。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
+`measures` か `dimensions` か `time` のどれかが要ります（[`explore`](#探索explore) は別で、`metrics`・`filters`・`limit`・`period` だけを使い、`query` は書かなくてもよい）。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
 
 絞り込み（`filters` の要素。クリックでの選択も同じ形）:
 
@@ -270,6 +270,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `barlist` | 横棒のランキング | 最初の軸を最初の指標で | | 行でその値を選ぶ |
 | `table` | 表（[spreadsheet-grid](https://github.com/ishibashi0112/datasheet-grid)、読み取り専用） | すべての列。列の見出しの ⋮ で並べ替えと列幅の調整。セルを選んで Ctrl+C（Mac は ⌘+C）で、表示どおりの文字でコピーし、Excel に貼れる | | 行のクリック（またはセルで Enter かスペース）で、その行の軸と時間の値を選ぶ。もう一度で解除。Shift・⌘・Ctrl を押したままのクリックは、コピーする範囲を広げるだけ |
 | `pivot` | クロス集計 | 1 つの項目を列に、残りの軸を行に、最初の指標をセルに。合計の行と列つき | `columns`: 列にする項目（既定は最後の軸か時間）。`totals: false` で合計を消す | 列見出し・行で選ぶ |
+| `explore` | 明細を自由に集計する表とグラフ（[Perspective](https://perspective.finos.org/)） | 指標ファイルの `model` の行をそのまま（集計しない）。`query` は `metrics`・`filters`・`limit`・`period` だけ（[下記](#探索explore)） | `layout`: 開いたときの並べ方 | なし（ほかのタイルの選択と期間で絞られる） |
 | `select` | 値の一覧から選ぶ | 最初の軸の値（指標があれば値も表示）。9 件以上で検索欄が出る | `multiple: false` で 1 つだけ選ぶ | チェックで選ぶ |
 | `date-range` | 期間の選択 | `query` は書かない。`time` の列が対象 | `default`: 最初の期間（下記）。`metrics`: 指標ファイル | 期間で全タイルを絞る（`query.period` が `false` のタイルを除く） |
 | `markdown` | 文章 | `query` は書かない | `text`: 本文（`**太字**`、`*斜体*`、`` `コード` ``、`[リンク](URL)`、`#` 見出し、`-` 箇条書き） | なし |
@@ -293,6 +294,54 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 
 選択は、選んだタイル以外のすべてのタイルにかかります。選んだタイル自身は絞られず、選んだもの以外が薄くなります。選択は画面上のチップで外せます。
 
+### 探索（`explore`）
+
+指標ファイルの `model` の行（明細）を、見る人が自由に並べて集計するタイルです。中身は [Perspective](https://perspective.finos.org/)（Apache-2.0）で、行にする列・列に分ける列・出す列とその集計（合計、件数、異なり数、平均など）・並べ替え・絞り込みを、タイルの中の設定（左の欄）で変えられます。表のほか、棒・折れ線・散布図・ヒートマップなどのグラフにもできます。
+
+```json
+{
+  "id": "explore",
+  "x": 0, "y": 1, "w": 12, "h": 6,
+  "type": "explore",
+  "title": "明細",
+  "query": { "filters": [{ "field": "region", "in": ["関東"] }] },
+  "options": {
+    "layout": {
+      "group_by": ["商品分類"],
+      "columns": ["金額", "数量", "受注番号"],
+      "aggregates": { "金額": "sum", "数量": "sum", "受注番号": "distinct count" }
+    }
+  }
+}
+```
+
+- 読むのは `model` の列そのままです（指標や軸の名前ではなく、`model` の SQL が出す列。`layout` にもその列名を書きます）。指標の式（`SUM(金額)` など）は使いません。
+- 期間（`date-range`）とほかのタイルでの選択で絞ります。絞るのは、その項目（軸か `time` の列）の式で、ほかのタイルと同じです。`"period": false` なら期間では絞りません。タイルの中での絞り込みや並べ替えは、このタイルの中だけで、ほかのタイルは絞りません。タイルの中をクリックしても選択にはなりません。
+- 行は新しいほう（`time` の列の大きいほう）から、`query.limit` 行（既定は 100,000 行）までです。多いときは、タイルの上に「新しいほうから 100,000 行だけを集計しています」と出ます。期間で絞るか、`limit` を大きくしてください（すべてブラウザで集計するので、多いほど重くなります）。
+- 期間や選択が変わると、行を読み直します。タイルの中で変えた並べ方は、そのまま残ります（ページを開き直すと `layout` に戻ります）。
+- 暗い色の画面（`data-theme="dark"`、OS の設定）では、Perspective も暗い色になります。
+- Perspective は最初の `explore` のタイルを出すときに読みます（JS 約 420KB・CSS 約 110KB と、WebAssembly 約 3.2MB）。`explore` のないダッシュボードでは読みません。WebAssembly の場所は `@devbi/vite` が `virtual:devbi` に入れます（`ProjectInput.perspective`）。
+
+`options.layout`（Perspective の設定。どれも省略できる）:
+
+| キー | 中身 |
+| --- | --- |
+| `group_by` | 行にする列の配列（`["地域", "商品分類"]` で地域ごと、その中を商品分類ごと）。合計の行が付く |
+| `split_by` | 列に分ける列の配列 |
+| `columns` | 出す列の配列。既定はすべての列 |
+| `aggregates` | 列ごとの集計（`{ "金額": "sum" }`）。`sum`・`count`・`distinct count`・`avg`・`mean`・`min`・`max`・`median`・`first`・`last` など。既定は、数は `sum`、文字は `count` |
+| `sort` | 並べ替え（`[["金額", "desc"]]`） |
+| `filter` | タイルの中だけの絞り込み（`[["地域", "==", "関東"]]`） |
+| `plugin` | 見せ方。`Datagrid`（表、既定）・`Y Bar`（縦棒）・`X Bar`（横棒）・`Y Line`（折れ線）・`Y Area`（面）・`X/Y Scatter`（散布図）・`Heatmap`・`Treemap`・`Sunburst` など |
+| `settings` | `false` で、開いたときにタイルの中の設定の欄を閉じておく（既定は開いておく） |
+| `columns_config` | 列ごとの表示（`{ "金額": { "number_format": { "maximumFractionDigits": 0 } } }`）。数の列は、既定で小数を 2 桁まで、整数は `.00` なしで出す |
+
+いまの制限:
+
+- タイルの中で変えた並べ方は保存しません（ページを開き直すと `layout` に戻ります）。残したい並べ方は、Perspective の設定の欄で作り、GUI エディタの「最初の並べ方」に JSON で貼ります（ブラウザの開発者ツールで `document.querySelector("perspective-viewer").save()` の結果）。
+- 指標の `format`（`¥#,##0` など）は使いません（`model` の列を読むため）。
+- 100,000 行を超えるデータを全部集計するには、`limit` を大きくします。ブラウザのメモリに乗る分だけです。
+
 ## Excel と PDF に書き出す
 
 ダッシュボードの見出しの右に「Excel」と「印刷・PDF」のボタンがあります（ビルドしたサイト、開発サーバー、埋め込み、`<Dashboard>` のどれでも）。どちらも、いま画面に出ている状態（期間や選択での絞り込み）のままを書き出します。サーバーは使わず、ブラウザの中で作ります。
@@ -307,6 +356,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 - 数字は数値のままで、指標の `format` を Excel の表示形式にして付けます（`¥#,##0` → `"¥"#,##0`、`0.0%`・`#,##0"円"`・`正;負;ゼロ` はそのまま。色や条件の `[Red]`・`[>100]` は落とします）。`compact`（万・億）は Excel にないので `#,##0` です。`format` のない指標は `#,##0`（小数は `#,##0.0#`）
 - 日付は日付のままで、時間の粒度の表示形式です（月は `2026年4月`、年は `2026年`、年度は `2026年度`、週は `2026/4/6週`、日は `2026/4/1`）。四半期は Excel に表示形式がないので、`2026年Q2` の文字です。真偽（はい・いいえ）も文字です。指標でない 16 桁以上の整数（コードや ID）は、Excel が 15 桁までしか持たないので文字で書きます
 - `pivot` は画面と同じクロス集計で、合計の行と列が付きます（行の項目がないときは、1 行だけなので合計の行は付けません）。「概要」の行数は、クロス集計の行の数です
+- `explore` は、読んでいる明細の行（期間とほかのタイルの選択で絞ったもの。`limit` まで）を書きます。Excel のピボットテーブルで集計し直すためのものです。タイルの中で並べた表は入りません（その表は、タイルの中の上にある「書き出し」のボタンで、CSV などで保存できます）。日付は日付、数は数値のままで、表示形式は `#,##0` です
 - 自作タイル（JSX）は、`query` を export しているものだけ、その結果の表を書きます。自分でデータを読むタイルは、「概要」のメモに「書き出せません」と書いて飛ばします。`markdown` と `date-range` はシートを作りません
 - エラーになったタイルは、「概要」のメモにエラーを書き、ほかのタイルは書き出します。1 シートは Excel の上限（1,048,576 行）までです。列の上限（16,384 列）を超える `pivot`（列の項目の値が多すぎるもの）は、メモに書いて飛ばします
 - 大きな表は時間がかかります（12 列 10 万行で数秒）。書き出しているあいだ、ボタンは「書き出し中…」です
@@ -322,6 +372,7 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 - タイルがページの境目で切れないように、どのタイルもまたがない行の区切りで改ページします（1 ページより高いタイルの並びは途中で切れます）。幅が 720px より狭くタイルが 1 列のときは、どのタイルの間でも改ページします
 - 読み込み中のタイルがあれば、読み終わるのを待ちます（20 秒まで）
 - 表（`table`）とスクロールする一覧は、画面に見えている行だけです（スクロールした位置のまま）。全部の行は Excel で
+- `explore` は、タイルの中でいま並べている表を、タイルに入るだけの行で印刷します（グラフにしているときも表で。Perspective の描いたものは写せないため）
 - ブラウザのメニューの「印刷」（Ctrl+P・⌘+P）でも、白地の明るい色で、ボタンなしで印刷します。ただしページ全体を印刷し、グラフは画面の大きさのままです
 
 ### ボタンを出さない
@@ -425,7 +476,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか
 2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
-3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。`date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じく、その `time` の列を持つ指標ファイルのタイルをその期間で流す（比較の指標にも値が出る）。`"period": false` のタイルは期間なしで流す。画面が使わない `default`（ない期間の名前や、`fiscal_year_start` のない指標ファイルでの年度）は注意。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す
+3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。`date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じく、その `time` の列を持つ指標ファイルのタイルをその期間で流す（比較の指標にも値が出る）。`"period": false` のタイルは期間なしで流す。画面が使わない `default`（ない期間の名前や、`fiscal_year_start` のない指標ファイルでの年度）は注意。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す。`explore` は明細の行を読む SQL を流し、行数を出す（`limit` を超えるときと、`query` に使わないキー（`measures` など）があるときは注意。`--values` では最初の行を `model` の列のまま出す）
 
 SQL を流すのは、ブラウザと同じ DuckDB-wasm（Node で動かす）です。xlsx は画面と同じく DevBI が読み、`read_api` は `api/` の SQL を接続先で流します（`devbi-serve` と同じく、環境変数とプロジェクトの `.env`・`.env.local` の `DEVBI_DB…`。Vite の `.env.[mode]` は読みません）。ブラウザと同じく、データのファイルは `read_csv('data/…')` のように `read_` の関数に書いたものだけを読みます（`FROM 'data/x.csv'` はエラー）。
 
@@ -568,7 +619,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | `extensionRepository` | DuckDB の拡張（Parquet）を取りに行く URL。社内のサーバーに置いた拡張を使うとき |
 | `embed` | `true` で、ビルドのときに `devbi-embed.js` も作る（[ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)）。`base` は `"./"` にしておく（`/` で始まると警告）。既定は `false` |
 
-- `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
+- `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。[`explore`](#探索explore) のタイルがあるとき（と開発サーバー）は、Perspective の WebAssembly の URL も入れます（ビルドでは、そのときだけ `dist/` に入ります）。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
 - 開発サーバーでは、dash.json・metrics.yaml・data/・api/ のファイルを保存したときと、`dashboards/` に自作タイルのファイル（`.tsx`・`.jsx`）を足したり消したりしたときに、ページを読み込み直します（GUI エディタで編集中は[別の動き](#ほかで書き換えたとき)）。自作タイルのファイルを直したときは、Vite（React）の決まりどおりです（`export const query` のあるファイルは、ページを読み込み直します）。
 - プロジェクトに `@devbi/editor` が入っていると、開発サーバーでだけ [GUI エディタ](#gui-エディタdevbieditor)を付けます（`vite.config.ts` や `main.tsx` は変えなくてよい）。ビルド、`vite preview` には入りません。
 - 開発サーバーでは、npm から入れた `@devbi/editor`・`devbi`・`@devbi/react` を、Vite の `optimizeDeps.include` に足して先にまとめます（エディタを開いたときや、「コードにする」で書き出したファイルを読んだときに、Vite が新しい依存を見つけてページを読み込み直さないように）。DuckDB-wasm も、ほかと同じく先にまとめます（`optimizeDeps.exclude` に入れると、npm で入れたときは集計が動かず、pnpm で入れたときは開けません）。
@@ -611,13 +662,13 @@ pnpm add -D @devbi/editor
 
 編集中もタイルはデータを出したままです。クリックはタイルを選ぶのに使うので、クロスフィルタはしません（期間のタイルの最初の期間は効きます）。タイルを並べる部分の幅が 640px より狭いと編集できません。窓の幅が 940px 以下では、設定欄は画面の下に重なって出ます。
 
-新しいタイルの種類ごとの大きさ（列 × 行、12 列のとき）: `kpi` 3×2、`bar`・`line`・`area` 6×4、`barlist` 4×4、`table` 12×5、`pivot` 8×5、`select` 3×5、`date-range` 12×1、`markdown` 12×2。
+新しいタイルの種類ごとの大きさ（列 × 行、12 列のとき）: `kpi` 3×2、`bar`・`line`・`area` 6×4、`barlist` 4×4、`table` 12×5、`pivot` 8×5、`explore` 12×6、`select` 3×5、`date-range` 12×1、`markdown` 12×2。
 
 ### 設定欄（プロパティパネル）
 
 | 欄 | dash.json に書くもの |
 | --- | --- |
-| 種類 | `type`。データを使う種類どうしなら `query` はそのまま。`date-range`・`markdown` にすると `query` を消し、データを使う種類に戻すと、新しいタイルと同じ `query` から始める。`options` は新しい種類にもあるものだけ残し、ほかは新しいタイルと同じ。タイルが自分の指標ファイルを使っていれば、`query.metrics` と `date-range` の `options.metrics` の間で引き継ぐ |
+| 種類 | `type`。データを使う種類どうしなら `query` はそのまま（`explore` と、ほかのデータを使う種類の間では、`query` の `metrics`・`filters`・`period` だけを残し、ほかは新しいタイルと同じに）。`date-range`・`markdown` にすると `query` を消し、データを使う種類に戻すと、新しいタイルと同じ `query` から始める。`options` は新しい種類にもあるものだけ残し、ほかは新しいタイルと同じ。タイルが自分の指標ファイルを使っていれば、`query.metrics` と `date-range` の `options.metrics` の間で引き継ぐ |
 | 見出し | `title`。空にするとキーを消す |
 | 名前（id） | `id`。Enter を押すか、欄を出たとき（ほかのタイルを押したときも）に変わる。空や、ほかのタイルと同じ名前にはできない |
 | 指標ファイル | `query.metrics`（指標ファイルが 2 つ以上あるときに出る）。「ダッシュボードと同じ」でキーを消す |
@@ -626,14 +677,15 @@ pnpm add -D @devbi/editor
 | 期間で絞るか | `query.period`。「絞らない（いつも全期間）」で `false`、「絞る」でキーを消す。指標ファイルに `time` があるときに出る |
 | 絞り込み | `query.filters`。軸は、データにある値から選ぶ（`in`。9 件以上で検索欄）。時間の列は、始まりの日と終わりの日（終わりの日を含む。ファイルには次の日を書く: `between` は 始まり ≦ 値 ＜ 終わり）。値を 1 つも選んでいない・日付がない絞り込みは書かない（欄は「やめる」まで残る）。ほかの形の絞り込みは書いたまま見せ、消すことだけできる |
 | 並び順 | `query.sort`。結果の列（選んだ指標・軸・時間）から。大きい順は `"-revenue"` のように先頭に `-` |
-| 件数 | `query.limit`。空でキーを消す |
-| 表示 | `options`。種類ごとの設定（`pivot` の列にする項目・合計の行と列、`select` の複数選べる、`date-range` の最初の期間・指標ファイル、`markdown` の本文）。「既定」でキーを消す |
+| 件数 | `query.limit`。空でキーを消す（`explore` では、空のとき 100,000 行まで） |
+| 表示 | `options`。種類ごとの設定（`pivot` の列にする項目・合計の行と列、`select` の複数選べる、`date-range` の最初の期間・指標ファイル、`markdown` の本文、`explore` の最初の並べ方）。「既定」でキーを消す。`explore` の最初の並べ方は JSON で書き、欄を出たときに、`{ }` の形の JSON なら書きます（読めないときは、そのわけを欄の下に出し、ファイルは変えません。空にするとキーを消す） |
 | ダッシュボード | 見出し `title`、説明 `description`、指標ファイル `metrics` |
 
 - 変えると、そのタイルにすぐ出ます。集計し直すのは変えたタイルだけで、期間などの選択はそのままです（期間のタイルの「最初の期間」を変えたときは、その期間から始め直します）。
 - 見出しなどの文字・数・日付の欄は、打ち始めてから欄を出るまでが 1 回の「元に戻す」です。
 - キーを足すときは、手で書くときと同じ場所に入れます（タイルは `id`、`x`〜`h`、`type`、`title`、`query`、`options` の順、`query` は `metrics`、`measures`、`dimensions`、`time`、`filters`、`sort`、`limit`、`period` の順）。ファイルにあるキーは動かしません。
 - タイルにデータが出ないとき（指標も軸もない、名前が指標ファイルにない、など）は、そのわけを設定欄の「データ」の下にも出します。指標も軸も外したときは `"query": {}` を残します（タイルがわけを出すように）。
+- `explore` のタイルでは、データの欄は指標ファイル・期間で絞るか・絞り込み・件数だけです（指標・軸・期間の単位・並び順は使わないので出しません。ファイルに書いてあれば、そう出して「消す」で消せます）。
 - 自作タイル（`component`）は、見出しと名前だけ変えられます（中身とデータの指定は、そのファイルで変えます）。
 
 ### コードにする
@@ -678,7 +730,8 @@ export default function RegionQuarter(props: TileProps<RowOf<typeof query>>) {
 - 書き出しているあいだにそのタイルを変えたときは、ファイルは書きますが、タイルはそのままにします（もう一度押すと、変えたあとのタイルで書き出します）。
 - ダッシュボードのファイル名に `#` か `?` があるときは書き出せません（開発サーバーが、そのフォルダのファイルを読めないため）。
 - データを使わない種類（`date-range`、`markdown`）は、`query` のないファイルになります。データが要るときは `useDevbiQuery` で集計します。
-- 書き出したファイルは、10 種類すべてで型チェック（`tsc`）が通る形です。
+- `explore` は、`query` を export しないファイルになります（export すると集計のクエリとして読まれるため）。`query` はファイルの中の定数で、組み込みのタイルに渡します。自分で描くときは、`useDevbiRows(query, { tileId })` で明細の行（Arrow の表）を読みます。
+- 書き出したファイルは、11 種類すべてで型チェック（`tsc`）が通る形です。
 
 ### 保存のしかた（git の差分）
 
@@ -1247,13 +1300,14 @@ function DevbiDashboard({ name }: { name: string }) {
 | `<Dashboard project={…} name="sales" back?="#/" theme? isolate? exports? actions? />` | ダッシュボード 1 つ。見出しの右に「Excel」「印刷・PDF」のボタン（[書き出し](#excel-と-pdf-に書き出す)。`exports={false}` で出さない）。`actions` はその右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
 | `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
 | `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
-| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`。型は `DevServer`） |
+| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.perspective` は Perspective の WebAssembly の URL（`{ server, client }`。`explore` が使う。`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`。型は `DevServer`） |
 | `themeAttribute(theme)` / `injectStyles()` | `.devbi-root` に付ける `data-theme` / DevBI の CSS をページに入れる（`<Dashboard>` は自分で入れる）。GUI エディタが使う |
 | `snapshotTimesOf(project, dashboard)` | そのダッシュボードが読むスナップショットの時刻（`["06:00"]` など。なければ空）。一覧の「毎日 6:00 の時点のデータ」に使っている |
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
+| `useDevbiRows(query, { tileId? })` | `model` の行をそのまま読む（`explore` のタイルが使う）。期間とほかのタイルの選択（`tileId` のタイルのもの以外）で絞る。戻り値は `{ table, limit, truncated, filters, loading, error }`（`table` は Apache Arrow の表で、新しいほうから `limit` 行まで。`truncated` は、それより多かったか） |
 | `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
-| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, snapshots?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)` と `loadView(view, { apiUrl?, fetch? })` を持つ（`loadView` に渡すと、そのビューだけほかの API から読む。同じエンジンで、API ごとに別の表になる。`useDevbi().engine` の `loadView(view)` は、そのダッシュボードの API と `fetch` で読む）。`snapshots` は[スナップショット](#毎朝のスナップショット)から読む SQL の名前と時刻で、`snapshotsOf(view)` はそのビューが読んだスナップショットと、作られた時刻を返す。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
+| `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, snapshots?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)`（結果はキャッシュする）、`table(sql)`（Arrow の表だけ。キャッシュしない。多い行用）と `loadView(view, { apiUrl?, fetch? })` を持つ（`loadView` に渡すと、そのビューだけほかの API から読む。同じエンジンで、API ごとに別の表になる。`useDevbi().engine` の `loadView(view)` は、そのダッシュボードの API と `fetch` で読む）。`snapshots` は[スナップショット](#毎朝のスナップショット)から読む SQL の名前と時刻で、`snapshotsOf(view)` はそのビューが読んだスナップショットと、作られた時刻を返す。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |
 | `builtinTiles` | 組み込みタイルの一覧（`type` → `{ component }`。キーは組み込みの種類の名前だけなので `builtinTiles.bar.component` と書ける）。グラフ（`bar`、`line`、`area`）と `table` は `React.lazy` で、Observable Plot と spreadsheet-grid は、はじめて使うときに読む。自分で描くときは `<C {...props} />` の形で、`<Suspense>` の中に置く（関数として呼ばない。自作タイルは、もとから `<Suspense>` の中）。「[コードにする](#コードにする)」で書き出したファイルが使う |
 | `renderMarkdown(text)` | `markdown` タイルの描画を React の要素で返す（HTML は解釈しない） |
@@ -1271,6 +1325,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `formatDashboardJson(spec)` | dash.json を、手で書いたときと同じ形の文字にする（[保存のしかた](#保存のしかたgit-の差分)）。GUI エディタが保存に使う |
 | `checkQuery(obj, source)` | クエリだけを検証する |
 | `compileQuery(view, query, { filters?, model? })` | クエリを DuckDB の SQL にする。戻り値は `{ sql, fields }`。名前の間違いは `QueryError` |
+| `compileRows(view, query, { filters?, model? })` | `model` の行をそのまま読む SQL（`explore`）。`query` の `filters`・`limit`（既定は `EXPLORE_ROWS` = 100,000）だけを使い、新しいほうから `limit + 1` 行を読む（多かったかが分かるように）。戻り値は `{ sql, limit }` |
 | `compileTimeExtent(view)` | 日付の最初と最後を出す SQL |
 | `scanSources(sql)` / `apiParams(source)` | `model` の中の `read_*(...)` と `read_api(...)` を見つける / `read_api` の引数をパラメーターの値にする |
 | `apiCalls(sql)` / `snapshotFile(name, params)` | `model` の中の `read_api` の名前とパラメーター / そのスナップショットのファイル名（ブラウザとサーバーで同じ） |
@@ -1285,7 +1340,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `defineQuery(query)` / `RowOf<typeof query>` | 名前を検査するクエリと、その行の型（[自作タイル](#自作タイルjsx)） |
 | `dashboardJsonSchema(names?)` / `metricsJsonSchema()` | dash.json と metrics.yaml の JSON Schema。`names`（`{ metrics, measures, dimensions, fields }`）を渡すと、その名前だけを許す |
 | `dateRangePresets(max, fiscalYearStart?)` | `date-range` の期間の一覧（`{ key, label, range: [始まり, 終わり) \| null }`）。データの最終日 `max` から数える。画面と `devbi-check` が使う |
-| `TILE_TYPES` / `TILE_TYPE_NAMES` / `DATE_RANGE_PRESETS` | 組み込みタイルの種類（`label` は短い名前、`description`、`options`、`size` は GUI エディタで足したときの大きさ）、`date-range` の期間の名前。`options` のそれぞれ（`TileOptionSchema`）には、GUI エディタの設定欄の名前 `label`、`enum` の値の名前 `enumLabels`（JSON Schema の `enumDescriptions` にもなり、VS Code の補完に出る）、入れ方 `input`（`text` は複数行、`field` は軸か時間の列、`metrics` は指標ファイル）がある |
+| `TILE_TYPES` / `TILE_TYPE_NAMES` / `DATE_RANGE_PRESETS` | 組み込みタイルの種類（`label` は短い名前、`description`、`options`、`size` は GUI エディタで足したときの大きさ）、`date-range` の期間の名前。`options` のそれぞれ（`TileOptionSchema`）には、GUI エディタの設定欄の名前 `label`、`enum` の値の名前 `enumLabels`（JSON Schema の `enumDescriptions` にもなり、VS Code の補完に出る）、入れ方 `input`（`text` は複数行、`field` は軸か時間の列、`metrics` は指標ファイル、`json` は JSON で書くオブジェクト）がある。`rows: true` の種類（`explore`）は、`model` の行を読み、`query` は `metrics`・`filters`・`limit`・`period` だけを使う |
 | 型 | `Query`、`Filter`、`Row`、`Scalar`、`FieldInfo`、`TileSpec`、`TileProps`、`Grain`、`MetricsView`、`Dashboard`、`MetricsRegistry`（`.devbi/env.d.ts` が名前を足す）など |
 
 ## 見た目の変更（CSS 変数）

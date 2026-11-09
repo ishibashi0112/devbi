@@ -1,4 +1,4 @@
-import { GRAINS, TILE_TYPES, type BuiltinTileType, type Filter, type Grain, type MetricsView, type Scalar, type SortSpec } from "devbi";
+import { GRAINS, TILE_TYPES, type BuiltinTileType, type Filter, type Grain, type MetricsView, type Scalar, type SortSpec, type TileTypeInfo } from "devbi";
 import { newTile, type RawDashboard, type RawTile } from "./layout.js";
 
 /** Where each key goes in a hand-written file, so a key the panel adds lands where a person would put it. */
@@ -108,12 +108,23 @@ export function changeType(spec: RawDashboard, tile: RawTile, type: BuiltinTileT
   else if (!query || isEmpty(query)) {
     const { metrics: _, ...rest } = isObj(fresh.query) ? fresh.query : {};
     next = setTileKey(next, "query", own && !ownView ? { metrics: own, ...rest } : fresh.query);
+  } else if (readsRows(tile.type) !== readsRows(type)) {
+    // The model's rows (explore) and measures do not mix: the new type's query, keeping the metrics file, the filters and the period.
+    const { metrics: m, ...rest } = isObj(fresh.query) ? fresh.query : {};
+    const keep = (k: string) => (Object.hasOwn(query, k) ? { [k]: query[k] } : {});
+    const metricsKey = Object.hasOwn(query, "metrics") ? keep("metrics") : m !== undefined ? { metrics: m } : {};
+    next = setTileKey(next, "query", { ...metricsKey, ...rest, ...keep("filters"), ...keep("period") });
   }
   const merged: Obj = { ...(isObj(fresh.options) ? fresh.options : {}), ...Object.fromEntries(Object.entries(old).filter(([k]) => Object.hasOwn(info.options, k))) };
   const metricsName = own ?? (base.needsMetrics ? base.view?.name : undefined);
   if (!info.query && Object.hasOwn(info.options, "metrics") && metricsName) merged.metrics = metricsName;
   const options = Object.fromEntries(Object.keys(info.options).flatMap((k) => (Object.hasOwn(merged, k) ? [[k, merged[k]]] : [])));
   return setTileKey(next, "options", options);
+}
+
+/** Whether a tile type reads the model's rows as they are (explore), not measures and dimensions. */
+export function readsRows(type: unknown): boolean {
+  return typeof type === "string" && Object.hasOwn(TILE_TYPES, type) && !!(TILE_TYPES[type as BuiltinTileType] as TileTypeInfo).rows;
 }
 
 /**

@@ -1,5 +1,7 @@
+import type * as arrow from "apache-arrow";
 import {
   compileQuery,
+  compileRows,
   compileTimeExtent,
   formatValue,
   getDimension,
@@ -168,6 +170,58 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
     runQuery(ctx, query, filters).then(
       ({ rows, fields }) => {
         if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null });
+      },
+      (e: unknown) => {
+        if (seq.current === mine) setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, ctx]);
+  return state;
+}
+
+export interface RowsState {
+  /** The model's rows (at most `limit`), as DuckDB returned them. */
+  table: arrow.Table | null;
+  limit: number;
+  /** There were more rows than `limit`. */
+  truncated: boolean;
+  /** Filters from other tiles that applied to these rows. */
+  filters: Filter[];
+  loading: boolean;
+  error: Error | null;
+}
+
+/**
+ * The rows of the query's metrics view as they are (every column of its model), filtered by the query's `filters` and
+ * the selections of every tile except `tileId`: the data of the `explore` tile.
+ */
+export function useDevbiRows(query: Query, options: { tileId?: string } = {}): RowsState {
+  const ctx = useDevbi();
+  const version = useSelectionVersion();
+  const { tileId } = options;
+  const filters = useMemo(
+    () => crossFilters(ctx, query, tileId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [version, tileId, query.metrics, query.period, ctx],
+  );
+  const key = JSON.stringify([query, filters]);
+  const [state, setState] = useState<RowsState>({ table: null, limit: 0, truncated: false, filters: [], loading: true, error: null });
+  const seq = useRef(0);
+  useEffect(() => {
+    const mine = ++seq.current;
+    setState((s) => ({ ...s, loading: true }));
+    (async () => {
+      const view = ctx.view(query.metrics);
+      const engine = await ctx.engine;
+      const model = await engine.loadView(view);
+      const { sql, limit } = compileRows(view, query, { filters, model });
+      const table = await engine.table(sql);
+      const truncated = table.numRows > limit;
+      return { table: truncated ? table.slice(0, limit) : table, limit, truncated };
+    })().then(
+      (r) => {
+        if (seq.current === mine) setState({ ...r, filters, loading: false, error: null });
       },
       (e: unknown) => {
         if (seq.current === mine) setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));

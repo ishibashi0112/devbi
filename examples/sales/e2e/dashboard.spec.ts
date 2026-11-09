@@ -135,8 +135,8 @@ test("the page's own script stays small; charts, the table grid and the DuckDB e
   const size = first.reduce((sum, n) => sum + scripts.get(n)!, 0);
   expect(size).toBeGreaterThan(100_000); // the shared file is in it
   expect(size).toBeLessThan(500_000);
-  // The Excel and print code comes with the first export.
-  expect([...scripts.keys()].filter((n) => /^(xlsx|print)-/.test(n))).toEqual([]);
+  // The Excel and print code comes with the first export; Perspective with the first explore tile.
+  expect([...scripts.keys()].filter((n) => /^(xlsx|print|Explore)-/.test(n))).toEqual([]);
 });
 
 test("a chart file that cannot be fetched (the site was rebuilt) asks for a reload, in Japanese", async ({ page }) => {

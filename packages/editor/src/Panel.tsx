@@ -4,6 +4,8 @@ import {
   TILE_TYPES,
   TILE_TYPE_NAMES,
   compileQuery,
+  compileRows,
+  EXPLORE_ROWS,
   isoDate,
   resolveComponent,
   type BuiltinTileType,
@@ -22,6 +24,7 @@ import {
   isObj,
   metricsNameOf,
   moveUp,
+  readsRows,
   rowFilter,
   setDashboardKey,
   setOption,
@@ -113,6 +116,61 @@ function TextInput({
   const merge = useMergeKey();
   const common = { ...rest, value, onFocus: merge.onFocus, onChange: (e: { target: { value: string } }) => onChange(e.target.value, merge.key()) };
   return multiline ? <textarea {...common} /> : <input type="text" {...common} />;
+}
+
+/**
+ * An object written as JSON (an explore tile's layout). It is written to dash.json when the box loses focus and the
+ * text is a JSON object; empty removes the key. Until then the text stays as typed, with what is wrong under it.
+ */
+function JsonInput({ value, onChange, ...rest }: Ids & { value: unknown; onChange(value: Record<string, unknown> | undefined): void }) {
+  const shown = value === undefined ? "" : JSON.stringify(value, null, 2);
+  const [text, setText] = useState(shown);
+  const [error, setError] = useState<string>();
+  const editing = useRef(false);
+  // A change from elsewhere (undo, the file): show it, unless the box is being typed in.
+  useEffect(() => {
+    if (!editing.current) {
+      setText(shown);
+      setError(undefined);
+    }
+  }, [shown]);
+  const commit = () => {
+    editing.current = false;
+    if (!text.trim()) {
+      setError(undefined);
+      if (value !== undefined) onChange(undefined);
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      setError(`JSON として読めません（${(e as Error).message}）`);
+      return;
+    }
+    if (!isObj(parsed)) {
+      setError("{ } で囲んだ JSON のオブジェクトにしてください");
+      return;
+    }
+    setError(undefined);
+    if (JSON.stringify(parsed, null, 2) !== shown) onChange(parsed);
+    else setText(shown);
+  };
+  return (
+    <>
+      <textarea
+        {...rest}
+        className="devbi-ed-json"
+        spellCheck={false}
+        value={text}
+        placeholder='{ "group_by": ["地域"], "columns": ["金額"] }'
+        onFocus={() => (editing.current = true)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+      />
+      {error && <p className="devbi-ed-warn">{error}</p>}
+    </>
+  );
 }
 
 /** A number box: empty removes the key; something that is not a number yet ("-", "1e") is left alone. */
@@ -351,19 +409,31 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
   const set = (key: keyof Query, value: unknown, merge?: string) => onTile((t) => setQueryKey(t, key, value), merge);
   const own = str(query.metrics);
   const dashboardDefault = str(spec.metrics) || (names.length === 1 ? names[0] : undefined);
+  // explore: the model's rows as they are, filtered; no measures, dimensions or sort.
+  const rows = readsRows(tile.type);
   // What the tile would say instead of its data (an unknown name, nothing to show), next to the boxes that fix it.
   let problem: string | undefined;
   if (view) {
     try {
-      compileQuery(view, query);
+      if (rows) compileRows(view, query);
+      else compileQuery(view, query);
     } catch (e) {
       problem = (e as Error).message;
     }
   }
+  const unused = rows ? (["measures", "dimensions", "time", "sort"] as const).filter((k) => query[k] !== undefined) : [];
   return (
     <>
       <h3>データ</h3>
       {problem && <p className="devbi-ed-warn">{problem}</p>}
+      {unused.length > 0 && (
+        <p className="devbi-ed-warn">
+          明細の行を読むタイルのため、query の {unused.join("・")} は使いません{" "}
+          <button type="button" className="devbi-ed-mini" onClick={() => onTile((t) => unused.reduce((next, k) => setQueryKey(next, k, undefined), t))}>
+            消す
+          </button>
+        </p>
+      )}
       {(names.length > 1 || own) && (
         <Field label="指標ファイル">
           {(ids) => (
@@ -375,9 +445,9 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
         <p className="devbi-ed-warn">{name ? `指標ファイル models/${name}.metrics.yaml がありません` : "使う指標ファイルを選んでください"}</p>
       ) : (
         <>
-          <NameList legend="指標" defs={view.measures} chosen={query.measures ?? []} onChange={(v) => set("measures", v)} />
-          <NameList legend="軸" defs={view.dimensions} chosen={query.dimensions ?? []} onChange={(v) => set("dimensions", v)} />
-          {(view.time || query.time) && (
+          {!rows && <NameList legend="指標" defs={view.measures} chosen={query.measures ?? []} onChange={(v) => set("measures", v)} />}
+          {!rows && <NameList legend="軸" defs={view.dimensions} chosen={query.dimensions ?? []} onChange={(v) => set("dimensions", v)} />}
+          {!rows && (view.time || query.time) && (
             <Field label={`期間の単位${view.time ? `（${view.time.label}）` : ""}`}>
               {(ids) => (
                 <select {...ids} value={query.time ?? ""} onChange={(e) => set("time", e.target.value)}>
@@ -402,8 +472,11 @@ function QueryEditor({ metrics, spec, tile, live, onTile }: { metrics: Record<st
             </Field>
           )}
           <FiltersEditor view={view} query={query} live={live} set={set} />
-          <SortEditor view={view} query={query} set={set} />
-          <Field label="件数" hint="空のときはすべての行">
+          {!rows && <SortEditor view={view} query={query} set={set} />}
+          <Field
+            label="件数"
+            hint={rows ? `空のときは ${EXPLORE_ROWS.toLocaleString("ja-JP")} 行まで（多いときは新しいほうから。大きいほどブラウザが重くなります）` : "空のときはすべての行"}
+          >
             {(ids) => <NumberInput {...ids} integer value={typeof query.limit === "number" ? query.limit : undefined} onChange={(n, merge) => set("limit", n, merge)} />}
           </Field>
         </>
@@ -777,6 +850,7 @@ function OptionsEditor({
       );
     }
     if (o.input === "metrics") return <MetricsSelect {...ids} metrics={metrics} value={str(value)} empty="ダッシュボードと同じ" onChange={(v) => set(key, v)} />;
+    if (o.input === "json") return <JsonInput {...ids} value={value} onChange={(v) => set(key, v)} />;
     return <TextInput {...ids} multiline={o.input === "text"} value={str(value)} onChange={(v, merge) => set(key, v, merge)} />;
   };
   return (

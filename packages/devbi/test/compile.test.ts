@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileQuery, compileTimeExtent, parseMetricsYaml, type Query } from "../src/index.js";
+import { compileQuery, compileRows, compileTimeExtent, EXPLORE_ROWS, parseMetricsYaml, QueryError, type Query } from "../src/index.js";
 import { round, rows } from "./helpers.js";
 
 const view = parseMetricsYaml(
@@ -225,6 +225,37 @@ measures:
     expect(() => compileQuery(view, { dimensions: ["nope"] })).toThrow("軸 nope は sales にありません");
     expect(() => compileQuery(view, { measures: ["orders"], sort: ["customer"] })).toThrow("並べ替え");
     expect(() => compileQuery(view, {})).toThrow("measures か dimensions");
+  });
+});
+
+describe("compileRows (the explore tile)", () => {
+  it("reads the model's rows as they are, newest first, filtered on its time column and dimensions", async () => {
+    const c = compileRows(
+      view,
+      { filters: [{ field: "region", in: ["東"] }], limit: 2 },
+      { filters: [{ field: "order_date", between: ["2025-01-01", "2026-01-01"] }, { field: "unknown_elsewhere", in: ["x"] }] },
+    );
+    await expect(c.sql).toMatchFileSnapshot("__snapshots__/rows-filtered.sql");
+    expect(c.limit).toBe(2);
+    // One more row than the limit: the tile knows there were more.
+    expect(await rows(c.sql)).toEqual([
+      { order_date: "2025-02-05", order_id: "o3", customer_name: "A社", region: "東", amount: 300 },
+      { order_date: "2025-01-10", order_id: "o1", customer_name: "A社", region: "東", amount: 100 },
+    ]);
+    const sql = compileRows(view, { filters: [{ field: "region", in: ["東"] }], limit: 1 }).sql;
+    expect(await rows(sql)).toHaveLength(2);
+  });
+
+  it("filters on a dimension's expression, and takes 100,000 rows by default", async () => {
+    const c = compileRows(view, {}, { filters: [{ field: "big", in: [true] }] });
+    expect(c.limit).toBe(EXPLORE_ROWS);
+    expect(c.sql).toContain(`LIMIT ${EXPLORE_ROWS + 1}`);
+    expect((await rows(c.sql)).map((r) => r.amount)).toEqual([400, 300, 200]);
+  });
+
+  it("refuses a fixed filter on a name the view does not have", () => {
+    expect(() => compileRows(view, { filters: [{ field: "nope", in: ["x"] }] })).toThrow(QueryError);
+    expect(() => compileRows(view, { filters: [{ field: "nope", in: ["x"] }] })).toThrow("フィルタの nope は sales の軸にありません");
   });
 });
 

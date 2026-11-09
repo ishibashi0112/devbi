@@ -225,6 +225,42 @@ export function compileQuery(view: MetricsView, query: Query, options: CompileOp
   return { sql, fields };
 }
 
+/** How many rows the `explore` tile reads when its query has no `limit`. */
+export const EXPLORE_ROWS = 100_000;
+
+export interface CompiledRows {
+  sql: string;
+  /** The most rows the tile shows. The SQL asks for one more, to tell whether there were more. */
+  limit: number;
+}
+
+/**
+ * The rows of a metrics view's model, as they are (every column of the model), with the query's fixed filters and
+ * the selections of other tiles: what the `explore` tile aggregates in the browser. The latest rows first, so a
+ * limit keeps the most recent ones. Only `metrics`, `filters` and `limit` of the query are used.
+ */
+export function compileRows(view: MetricsView, query: Query, options: CompileOptions = {}): CompiledRows {
+  const time = view.time;
+  const fieldOf = (name: string): { expr: string; isTime: boolean } | undefined => {
+    if (time && name === time.name) return { expr: time.expr, isTime: true };
+    const d = getDimension(view, name);
+    return d ? { expr: d.expr, isTime: false } : undefined;
+  };
+  for (const f of query.filters ?? []) {
+    if (!fieldOf(f.field)) throw new QueryError(`フィルタの ${f.field} は ${view.name} の軸にありません`);
+  }
+  const filters = [...(query.filters ?? []), ...(options.filters ?? [])].filter((f) => fieldOf(f.field));
+  const preds = filters.map((f) => {
+    const { expr, isTime } = fieldOf(f.field)!;
+    return predicate(f, expr, isTime);
+  });
+  const limit = Math.floor(query.limit ?? EXPLORE_ROWS);
+  const model = options.model ?? view.model;
+  const order = time ? `\nORDER BY ${time.expr} DESC NULLS LAST` : "";
+  const sql = `WITH ${ident("__model")} AS (\n${indent(model, "  ")}\n)\nSELECT *\nFROM ${ident("__model")}${where(preds, "")}${order}\nLIMIT ${limit + 1}`;
+  return { sql, limit };
+}
+
 function indent(text: string, pad: string): string {
   return text
     .split("\n")

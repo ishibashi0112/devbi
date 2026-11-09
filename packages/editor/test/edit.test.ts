@@ -2,6 +2,7 @@ import { defineMetricsView, formatDashboardJson } from "devbi";
 import { describe, expect, it } from "vitest";
 import {
   changeType,
+  readsRows,
   fieldsOf,
   filterRow,
   idProblem,
@@ -121,6 +122,20 @@ describe("changeType", () => {
     expect(back.query).toEqual({ measures: ["revenue"] });
     expect(back).not.toHaveProperty("options");
     expect(changeType(spec, tile(), "date-range", metrics).options).toEqual({ default: "latest_fiscal_year" });
+  });
+
+  it("starts the query over between the model's rows (explore) and measures, keeping the metrics file, the filters and the period", () => {
+    const filters = [{ field: "region", in: ["東"] }];
+    const bar = tile({ query: { metrics: "sales", measures: ["revenue"], time: "month", filters, sort: ["-revenue"], limit: 5, period: false } });
+    const explore = changeType(spec, bar, "explore", metrics);
+    expect(explore.query).toEqual({ metrics: "sales", filters, period: false });
+    expect(explore.w).toBe(6);
+    expect(changeType(spec, explore, "kpi", metrics).query).toEqual({ metrics: "sales", measures: ["revenue"], filters, period: false });
+    // Nothing to keep: no query (all of the model's rows).
+    expect(changeType(spec, tile({ query: { measures: ["revenue"] } }), "explore", metrics)).not.toHaveProperty("query");
+    expect(readsRows("explore")).toBe(true);
+    expect(readsRows("table")).toBe(false);
+    expect(readsRows(undefined)).toBe(false);
   });
 });
 

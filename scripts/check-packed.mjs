@@ -67,10 +67,23 @@ for (const manager of ["npm", "pnpm"]) {
     throw new Error(`${manager}: ${reference}, which AGENTS.md points to, is not there`);
   }
 
+  // An explore tile (Perspective): its WebAssembly found from the installed packages, in the build and on the dev server.
+  writeJson(path.join(app, "dashboards/explore.dash.json"), {
+    title: "明細を自由に集計",
+    metrics: "sales",
+    tiles: [
+      { id: "period", x: 0, y: 0, w: 12, h: 1, type: "date-range", options: { default: "latest_fiscal_year" } },
+      { id: "explore", x: 0, y: 1, w: 12, h: 6, type: "explore", options: { layout: { group_by: ["地域"], columns: ["金額"] } } },
+    ],
+  });
+
   // 4. What a user runs first.
   run(manager, ["run", "typecheck"], app);
   run(manager, ["run", "check"], app);
   run(manager, ["run", "build"], app);
+  if (!readdirSync(path.join(app, "dist/assets")).some((f) => /^perspective-server-.*\.wasm$/.test(f))) {
+    throw new Error(`${manager}: the build has no Perspective WebAssembly for the explore tile`);
+  }
 
   // 5. The dev server, on the project without its self-written tile: then the tile "コードにする" writes is the first
   // .tsx, and what it imports (devbi, @devbi/react) has to be bundled ahead already, or Vite reloads the page.

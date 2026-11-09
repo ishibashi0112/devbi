@@ -28,6 +28,13 @@ const TILES: Record<BuiltinTileType, PromotedTile> = {
   },
   table: { id: "detail", type: "table", title: "明細", query: { measures: ["revenue", "orders"], dimensions: ["customer"], time: "fiscal_year" } },
   pivot: { id: "customer-year", type: "pivot", query: { measures: ["revenue"], dimensions: ["customer"], time: "year" }, options: { columns: "受注日", totals: false } },
+  explore: {
+    id: "rows",
+    type: "explore",
+    title: "明細",
+    query: { filters: [{ field: "customer", in: ["A社"] }], limit: 5000 },
+    options: { layout: { group_by: ["customer"], aggregates: { a: "sum" } } },
+  },
   select: { id: "customer", type: "select", title: "顧客", query: { dimensions: ["customer"] }, options: { multiple: false } },
   "date-range": { id: "period", type: "date-range", title: "期間", options: { default: "latest_fiscal_year", metrics: "sales" } },
   // A title over two lines stays in its comment.

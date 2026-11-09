@@ -26,7 +26,7 @@ test("a dashboard on a morning snapshot reads the saved file, not the database, 
 test("the list of dashboards says which ones are taken every morning", async ({ page }) => {
   await page.goto("/");
   const items = page.locator(".devbi-index li");
-  await expect(items).toHaveCount(3);
+  await expect(items).toHaveCount(4);
   await expect(items.filter({ hasText: "日次集計" })).toContainText("毎日 6:00 の時点のデータ");
   await expect(items.filter({ hasText: "DB から" })).not.toContainText("時点のデータ");
 });

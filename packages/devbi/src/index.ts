@@ -40,12 +40,15 @@ export {
 export { formatDashboardJson } from "./format-dash.js";
 export {
   compileQuery,
+  compileRows,
   compileTimeExtent,
+  EXPLORE_ROWS,
   grainExpr,
   timeRange,
   QueryError,
   type CompileOptions,
   type CompiledQuery,
+  type CompiledRows,
 } from "./compile.js";
 export { ident, literal, timeLiteral, isoDate, isoTimestamp, hasUrlScheme, scanSources, apiParams, apiCalls, snapshotFile, unquoteString, type SourceRef, type SourceFormat, type ApiParamValue } from "./sql.js";
 export { formatNumber, formatTime, formatValue, excelNumberFormat, excelTimeFormat } from "./format.js";

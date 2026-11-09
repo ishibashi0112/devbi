@@ -214,7 +214,7 @@ export async function readProject(dir: string): Promise<ProjectFiles> {
   return out;
 }
 
-function resolveDuckdb(root: string): { wasm: string; worker: string } {
+function fromReact(root: string): NodeRequire {
   const fromRoot = createRequire(path.join(root, "package.json"));
   let reactPkg: string;
   try {
@@ -222,11 +222,33 @@ function resolveDuckdb(root: string): { wasm: string; worker: string } {
   } catch {
     throw new Error("@devbi/react が見つかりません。pnpm add @devbi/react で入れてください");
   }
-  const fromReact = createRequire(reactPkg);
+  return createRequire(reactPkg);
+}
+
+function resolveDuckdb(root: string): { wasm: string; worker: string } {
+  const req = fromReact(root);
   return {
-    wasm: fromReact.resolve("@duckdb/duckdb-wasm/dist/duckdb-base.wasm"),
-    worker: fromReact.resolve("@duckdb/duckdb-wasm/dist/duckdb-browser-base.worker.js"),
+    wasm: req.resolve("@duckdb/duckdb-wasm/dist/duckdb-base.wasm"),
+    worker: req.resolve("@duckdb/duckdb-wasm/dist/duckdb-browser-base.worker.js"),
   };
+}
+
+/** Perspective's WebAssembly (the engine and the viewer), for the explore tile. */
+function resolvePerspective(root: string): { server: string; client: string } {
+  const req = fromReact(root);
+  const dist = (pkg: string) => path.dirname(req.resolve(`${pkg}/package.json`));
+  return {
+    server: path.join(dist("@finos/perspective"), "dist/wasm/perspective-server.wasm"),
+    client: path.join(dist("@finos/perspective-viewer"), "dist/wasm/perspective-viewer.wasm"),
+  };
+}
+
+/** Whether a dashboard has an explore tile (a build then carries Perspective's WebAssembly, about 3 MB). */
+function usesExplore(dashboards: ProjectFiles["dashboards"]): boolean {
+  return Object.values(dashboards).some((d) => {
+    const tiles = (d.spec as { tiles?: unknown }).tiles;
+    return Array.isArray(tiles) && tiles.some((t) => (t as { type?: unknown })?.type === "explore");
+  });
 }
 
 /**
@@ -394,6 +416,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       lastData = project.data;
       for (const f of project.watched) this.addWatchFile(f);
       const duck = resolveDuckdb(config.root);
+      // On the dev server always (the GUI editor can add an explore tile); in a build, only when a dashboard has one.
+      const psp = config.command === "serve" || usesExplore(project.dashboards) ? resolvePerspective(config.root) : undefined;
       const snapshots = await readSnapshots(dir);
       const prefix = relDir ? `/${relDir}` : "";
       const base = relDir ? `${relDir}/` : "";
@@ -401,6 +425,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       return [
         `import mainModule from ${JSON.stringify(`${posix(duck.wasm)}?url`)};`,
         `import mainWorker from ${JSON.stringify(`${posix(duck.worker)}?url`)};`,
+        psp ? `import perspectiveServer from ${JSON.stringify(`${posix(psp.server)}?url`)};` : "",
+        psp ? `import perspectiveClient from ${JSON.stringify(`${posix(psp.client)}?url`)};` : "",
         // The dev server tells the page when a project file changes: reload, unless the page saved it itself (the
         // GUI editor) or a listener (the editor with unsaved changes) takes it.
         ...(dev
@@ -422,6 +448,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
         `  baseUrl: import.meta.env.BASE_URL + ${JSON.stringify(base)},`,
         Object.keys(snapshots).length ? `  snapshots: ${JSON.stringify(snapshots)},` : "",
         `  duckdb: { mainModule, mainWorker },`,
+        psp ? `  perspective: { server: perspectiveServer, client: perspectiveClient },` : "",
         options.extensionRepository ? `  extensionRepository: ${JSON.stringify(options.extensionRepository)},` : "",
         dev
           ? [

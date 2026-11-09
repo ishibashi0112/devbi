@@ -1,5 +1,6 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
 import * as arrow from "apache-arrow";
+import { tableToRows } from "./arrow-rows.js";
 import { apiCalls, apiParams, hasUrlScheme, ident, readXlsx, scanSources, snapshotFile, unquoteString, type MetricsView, type Row, type SourceRef, type XlsxTable } from "devbi";
 
 export interface DuckDBBundle {
@@ -50,6 +51,8 @@ export interface QueryResult {
 export interface Engine {
   /** Run SQL and return rows as plain objects (dates as Date, numbers as number). */
   query(sql: string): Promise<QueryResult>;
+  /** Run SQL and return the Arrow table only (many rows: the `explore` tile). Not cached. */
+  table(sql: string): Promise<arrow.Table>;
   /**
    * Load a metrics view's data: register or read the files its model SQL reads,
    * materialize the model as a table, and return SQL selecting from it.
@@ -73,35 +76,6 @@ function workerUrl(url: string): string {
   if (abs.origin === location.origin) return abs.href;
   // A worker script on another origin (a CDN) must be loaded through a same-origin blob.
   return URL.createObjectURL(new Blob([`importScripts(${JSON.stringify(abs.href)});`], { type: "text/javascript" }));
-}
-
-/** Convert an Arrow value to a plain JS value. */
-function converter(type: arrow.DataType): (v: unknown) => Row[string] {
-  if (arrow.DataType.isDate(type) || arrow.DataType.isTimestamp(type)) {
-    return (v) => (v === null || v === undefined ? null : new Date(Number(v)));
-  }
-  if (arrow.DataType.isDecimal(type)) {
-    const scale = (type as arrow.Decimal).scale;
-    return (v) => (v === null || v === undefined ? null : arrow.util.bigNumToNumber(v as never, scale));
-  }
-  if (arrow.DataType.isInt(type)) {
-    return (v) => (v === null || v === undefined ? null : typeof v === "bigint" ? Number(v) : (v as number));
-  }
-  if (arrow.DataType.isBool(type) || arrow.DataType.isFloat(type) || arrow.DataType.isUtf8(type)) {
-    return (v) => (v === undefined ? null : (v as Row[string]));
-  }
-  return (v) => (v === null || v === undefined ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
-}
-
-export function tableToRows(table: arrow.Table): Row[] {
-  const cols = table.schema.fields.map((f, i) => ({ name: f.name, vec: table.getChildAt(i)!, conv: converter(f.type) }));
-  const out: Row[] = new Array(table.numRows);
-  for (let r = 0; r < table.numRows; r++) {
-    const row: Row = {};
-    for (const c of cols) row[c.name] = c.conv(c.vec.get(r));
-    out[r] = row;
-  }
-  return out;
 }
 
 function xlsxToArrow(t: XlsxTable): arrow.Table {
@@ -289,6 +263,7 @@ export async function createEngine(options: EngineOptions): Promise<Engine> {
 
   const engine: Engine = {
     query,
+    table: (sql) => conn.query(sql),
     async snapshotsOf(view, api) {
       if (Object.keys(snapshotTimes).length === 0) return [];
       const used = apiCalls(view.model).filter((c) => Object.hasOwn(snapshotTimes, c.name));

@@ -1,5 +1,6 @@
 // The project made by create-devbi, with the packages installed from their tarballs (scripts/check-packed.mjs),
-// without its self-written tile: the file "コードにする" writes is the first .tsx the dev server sees.
+// without its self-written tile: the file "コードにする" writes is the first .tsx the dev server sees. With an explore
+// dashboard added (dashboards/explore.dash.json): Perspective from the installed packages.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
@@ -13,7 +14,7 @@ const marked = (page: import("@playwright/test").Page) => page.evaluate(() => (w
 test("the sample dashboard draws, and the GUI editor writes a tile out (コードにする) without a page reload", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/");
+  await page.goto("/#/sales");
   await expect(page.locator('[data-tile="kpi-revenue"]').getByTestId("kpi-value")).toHaveText(/^¥[\d,]+$/);
   await expect(page.locator('[data-tile="region-quarter"] table')).toContainText("北海道・東北");
   // The self-written tile (dashboards/sales/TopCustomers.tsx).
@@ -40,4 +41,17 @@ test("the sample dashboard draws, and the GUI editor writes a tile out (コー�
   expect(await marked(page)).toBe(true);
   expect(errors).toEqual([]);
   expect(existsSync(path.join(app, "dist/index.html"))).toBe(true);
+});
+
+test("an explore tile draws with Perspective from the installed packages, without a page reload", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/#/explore");
+  await mark(page);
+  await expect(page.locator('.devbi-explore[aria-busy="false"]')).toHaveCount(1, { timeout: 60_000 });
+  await expect(page.locator(".devbi-error")).toHaveCount(0);
+  await expect(page.locator("perspective-viewer-datagrid")).toContainText("関東");
+  await page.waitForTimeout(3000);
+  expect(await marked(page)).toBe(true);
+  expect(errors).toEqual([]);
 });

@@ -107,6 +107,10 @@ export function newTile(type: BuiltinTileType, spec: RawDashboard, view: Metrics
       query = { measures: measure ? [measure] : [], dimensions: dimension ? [dimension] : [], ...(time ? { time: "quarter" as const } : {}) };
       title = d ? (time ? `${d} × 四半期` : d) : undefined;
       break;
+    case "explore":
+      query = {};
+      title = view ? `${view.label}の明細を集計` : "明細を集計";
+      break;
     case "select":
       query = { dimensions: dimension ? [dimension] : [], measures: measure ? [measure] : [] };
       title = d || undefined;

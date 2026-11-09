@@ -108,7 +108,7 @@ export function dateRangePresets(max: Date, fiscalYearStart = 1): DateRangeOptio
 
 /** One option of a tile type: a JSON Schema fragment (completion and hover text) plus what the GUI editor shows. */
 export interface TileOptionSchema {
-  type?: "string" | "boolean" | "number";
+  type?: "string" | "boolean" | "number" | "object";
   enum?: readonly string[];
   /** A short name for each `enum` value, in the same order (the GUI editor, and hover text in VS Code). */
   enumLabels?: readonly string[];
@@ -117,9 +117,9 @@ export interface TileOptionSchema {
   label: string;
   /**
    * How the GUI editor asks for a string: `text` (several lines), `field` (a dimension or the time column of the
-   * tile's metrics file), `metrics` (a metrics file). Default: one line.
+   * tile's metrics file), `metrics` (a metrics file). Default: one line. An object is written as JSON (`json`).
    */
-  input?: "text" | "field" | "metrics";
+  input?: "text" | "field" | "metrics" | "json";
 }
 
 export interface TileTypeInfo {
@@ -130,6 +130,11 @@ export interface TileTypeInfo {
   size: { w: number; h: number };
   /** Whether the tile reads data through `query` (date-range and markdown do not). */
   query: boolean;
+  /**
+   * The tile reads the model's rows as they are (`compileRows`), not measures and dimensions: of its query, only
+   * `metrics`, `filters`, `limit` and `period` count.
+   */
+  rows?: boolean;
   options: Record<string, TileOptionSchema>;
 }
 
@@ -184,6 +189,23 @@ export const TILE_TYPES = {
     options: {
       columns: { type: "string", label: "列にする項目", input: "field", description: "列にする項目（軸の名前か time の列名）。既定は最後の軸か時間" },
       totals: { type: "boolean", label: "合計の行と列", description: "false で合計の行と列を消す" },
+    },
+  },
+  explore: {
+    label: "探索（自由に集計）",
+    size: { w: 12, h: 6 },
+    description:
+      "指標ファイルの model の行（明細）を、見る人が自由に並べて集計する表とグラフ（Perspective）。期間やほかのタイルの選択で絞る。query は metrics・filters・limit（既定は 100,000 行）・period だけ",
+    query: true,
+    rows: true,
+    options: {
+      layout: {
+        type: "object",
+        label: "最初の並べ方",
+        input: "json",
+        description:
+          "開いたときの並べ方（Perspective の設定）。group_by（行にする列）、split_by（列に分ける列）、columns（出す列）、aggregates（列ごとの集計: sum・count・distinct count・avg など）、sort、filter、plugin（Datagrid・Y Bar・Y Line・Heatmap など）",
+      },
     },
   },
   select: {

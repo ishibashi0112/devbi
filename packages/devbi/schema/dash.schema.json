@@ -74,6 +74,7 @@
               "barlist",
               "table",
               "pivot",
+              "explore",
               "select",
               "date-range",
               "markdown"
@@ -86,6 +87,7 @@
               "横棒のランキング。最初の軸を最初の指標で並べる。行をクリックで選択",
               "表。すべての列を出す。見出しで並べ替え、行をクリックでその行の軸の値を選択",
               "クロス集計。1 つの項目を列に、残りの軸を行に、最初の指標をセルに。合計の行と列つき",
+              "指標ファイルの model の行（明細）を、見る人が自由に並べて集計する表とグラフ（Perspective）。期間やほかのタイルの選択で絞る。query は metrics・filters・limit（既定は 100,000 行）・period だけ",
               "最初の軸の値の一覧から選ぶ。9 件以上で検索欄が出る",
               "期間の選択。time の列を持つ指標ファイルのタイルを絞る（query.period が false のタイルは除く）。主な期間はボタン、ほかは「ほかの期間」から。query は書かない",
               "文章。**太字**、*斜体*、`コード`、[リンク](URL)、# 見出し、- 箇条書き。query は書かない"
@@ -444,6 +446,32 @@
                     "totals": {
                       "type": "boolean",
                       "description": "false で合計の行と列を消す"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "explore"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "options": {
+                  "type": "object",
+                  "properties": {
+                    "layout": {
+                      "type": "object",
+                      "description": "開いたときの並べ方（Perspective の設定）。group_by（行にする列）、split_by（列に分ける列）、columns（出す列）、aggregates（列ごとの集計: sum・count・distinct count・avg など）、sort、filter、plugin（Datagrid・Y Bar・Y Line・Heatmap など）"
                     }
                   },
                   "additionalProperties": false
