@@ -38,7 +38,7 @@ features:
     link: /reference#データベースから読むdevbiserver
     linkText: データベースから読む
   - title: 自社アプリに埋め込む
-    details: script タグ 1 本でほかの画面に、React の部品として、ASP.NET（Core と .NET Framework）や Next.js のアプリに置けます。
+    details: 2 行（div と script）を足してほかのアプリの画面に、React の部品として、ASP.NET（Core と .NET Framework）や Next.js のアプリに置けます。
     link: /reference#ほかのアプリの画面に埋め込む
     linkText: 埋め込む
   - title: GUI でも AI でも作れる
@@ -47,9 +47,9 @@ features:
     linkText: GUI エディタ
 ---
 
-![create-devbi で作られる、サンプルの売上ダッシュボード](images/sales-dashboard.jpg)
+![サンプルの売上ダッシュボード](images/sales-dashboard.jpg)
 
-<p class="caption">create-devbi で作られるサンプルの売上ダッシュボード（架空のデータ）。期間のボタンや、棒・行を押すと、ほかのタイルがその値で絞られます。</p>
+<p class="caption">このリポジトリのサンプル（examples/sales）の売上ダッシュボード。データは架空です。期間のボタンや、棒・行を押すと、ほかのタイルがその値で絞られます。</p>
 
 ## はじめる
 

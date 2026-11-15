@@ -2,7 +2,7 @@
 // The pages are README.md and docs/*.md themselves (see repo.ts); this file only adds the navigation and the look.
 // .github/workflows/pages.yml publishes it with the live demo (examples/oss) under /demo/.
 import { defineConfig } from "vitepress";
-import { githubSlug, notPages, pages, repoLinks, repoUrl, sections } from "./repo";
+import { checkLinks, githubSlug, notPages, pages, repoLinks, repoUrl, sections } from "./repo";
 
 // Where GitHub Pages serves the site. DOCS_BASE=/ for a site at the root of a domain.
 const base = process.env.DOCS_BASE ?? "/devbi/";
@@ -11,11 +11,12 @@ const icon =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='8' width='3' height='7' rx='1' fill='%233b6fe0'/%3E%3Crect x='6.5' y='4' width='3' height='11' rx='1' fill='%233b6fe0'/%3E%3Crect x='12' y='1' width='3' height='14' rx='1' fill='%233b6fe0'/%3E%3C/svg%3E";
 
 /** A page in the sidebar, with its level-2 headings under it (folded). */
+const headings = await sections();
 const page = (text: string, source: string) => ({
   text,
   link: `/${pages[source]?.replace(/\.md$/, "")}`,
   collapsed: true,
-  items: sections(source),
+  items: headings[source],
 });
 
 export default defineConfig({
@@ -45,6 +46,8 @@ export default defineConfig({
     anchor: { slugify: githubSlug },
     config: (md) => repoLinks(md),
   },
+  // A link to a file, page or heading that is not there stops the build.
+  buildEnd: checkLinks,
   transformPageData(data) {
     if (data.relativePath === "repository.md") data.title = "リポジトリと開発";
   },

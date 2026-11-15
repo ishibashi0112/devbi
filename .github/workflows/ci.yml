@@ -85,6 +85,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The documentation site (docs/.vitepress/): stops on a link to a file, page or heading that is not there, so that
+      # renaming a file or a heading cannot break the site that .github/workflows/pages.yml publishes every morning.
+      - run: pnpm docs:build
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test

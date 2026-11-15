@@ -48,7 +48,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The documentation. A link to a page or file that is not there stops it.
+      # The documentation. A link to a page, file or heading that is not there stops it (ci.yml checks it too).
       - run: pnpm docs:build
       # The demo.
       - run: pnpm build

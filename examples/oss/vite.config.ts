@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { defaultClientConditions, defineConfig } from "vite";
 
 export default defineConfig({
-  // Relative asset paths: GitHub Pages serves the demo under /devbi/.
+  // Relative asset paths: GitHub Pages serves the demo under /devbi/demo/ (.github/workflows/pages.yml).
   base: "./",
   plugins: [react(), devbi()],
   // Inside this monorepo, use the packages' TypeScript sources directly.
