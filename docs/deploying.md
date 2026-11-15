@@ -87,7 +87,7 @@ DuckDB-wasm は、次のものを使うときに、DuckDB の拡張を `https://
 | --- | --- |
 | `read_parquet`（Parquet のファイル） | `parquet` |
 | `read_json`・`read_json_auto`・`read_ndjson`（JSON のファイル） | `json` |
-| `current_date`、`now()`、タイムゾーンを使う SQL | `icu` |
+| `current_date`、`today()`、`date_trunc('day', now())`、`AT TIME ZONE` など（日付とタイムゾーンの計算） | `icu` |
 
 どちらかにします。
 
@@ -223,7 +223,7 @@ location /reports/sales/assets/ {
    タスクスケジューラでは、「プログラム」に `C:\reports\sales\node_modules\.bin\devbi-snapshot.cmd`、「引数」に `--dir C:\reports\sales --out C:\inetpub\wwwroot\sales`、「開始」にプロジェクトのフォルダを書き、「ユーザーがログオンしているかどうかにかかわらず実行する」にします。時刻は `-- snapshot:` に書いた時刻に合わせます（画面に「毎日 6:00 に更新」と出るのは、`-- snapshot:` の時刻です）。
 
    - タスクを動かすアカウントには、`C:\inetpub\wwwroot\sales\snapshots` に書く権限が要ります（`C:\inetpub\wwwroot` は、ふつうは管理者しか書けません）。
-   - タスクスケジューラは出力を残さないので、作れなかったときのくわしい理由を残すなら、「プログラム」を `cmd.exe`、「引数」を `/c C:\reports\sales\node_modules\.bin\devbi-snapshot.cmd --dir … --out … >> C:\reports\logs\snapshot.log 2>&1` にします。
+   - タスクスケジューラは出力を残さないので、作れなかったときのくわしい理由を残すなら、「プログラム」を `cmd.exe`、「引数」を `/c C:\reports\sales\node_modules\.bin\devbi-snapshot.cmd --dir … --out … >> C:\reports\logs\snapshot.log 2>&1` にします。`C:\reports\logs` は先に作り、タスクのアカウントが書けるようにしておきます（フォルダがないと、何も動かず、何も残らずに終わります）。
    - `npx devbi-snapshot` でも動きますが、`node_modules` にないときに、npm から同じ名前のものを聞かずに入れようとするので、タスクでは `node_modules\.bin` の中のものを直接指します。
 
 - 作れなかったものがあると終了コードが 1 になり、前のファイルが残ります。タスクスケジューラの「前回の実行結果」で分かります。
@@ -340,7 +340,7 @@ location /reports/ {
 
 `devbi-serve` はふつうのコマンドなので、サーバーが起動したときに動き出し、止まったら動かし直すようにします。
 
-- **Windows**: タスクスケジューラで、トリガーを「スタートアップ時」、「プログラム」を `cmd.exe`、「引数」を `/c C:\reports\sales\node_modules\.bin\devbi-serve.cmd --dir C:\reports\sales --port 8080 --allowed-hosts reports.corp.local >> C:\reports\logs\devbi.log 2>&1`、「開始」を `C:\reports\sales` にします（ログをファイルに残すため `cmd.exe` を通す）。「ユーザーがログオンしているかどうかにかかわらず実行する」にし、「設定」タブの「タスクを停止するまでの時間」のチェックを外します（既定では、動き始めて 3 日たつと止められるため）。Windows のサービスにしたいときは、NSSM や WinSW などのツールで包みます（どちらも出力をファイルに残せます）。
+- **Windows**: タスクスケジューラで、トリガーを「スタートアップ時」、「プログラム」を `cmd.exe`、「引数」を `/c C:\reports\sales\node_modules\.bin\devbi-serve.cmd --dir C:\reports\sales --port 8080 --allowed-hosts reports.corp.local >> C:\reports\logs\devbi.log 2>&1`、「開始」を `C:\reports\sales` にします（ログをファイルに残すため `cmd.exe` を通す。`C:\reports\logs` は先に作り、タスクのアカウントが書けるようにしておく）。「ユーザーがログオンしているかどうかにかかわらず実行する」にし、「設定」タブの「タスクを停止するまでの時間」のチェックを外します（既定では、動き始めて 3 日たつと止められるため）。Windows のサービスにしたいときは、NSSM や WinSW などのツールで包みます（どちらも出力をファイルに残せます）。
 - **Linux**: systemd のユニットの例です。
 
   ```ini
@@ -410,7 +410,17 @@ npm run build
 
 `DevBI.Server` と `DevBI.Server.SystemWeb` を足し、`Global.asax` で API を作って、`web.config` で `Scripts/devbi/api` の下を `DevBIHttpHandler` に渡します。`dist/` は `~/Scripts/devbi/`、`api/*.sql` は IIS が配らない `~/App_Data/devbi/api/` に置きます（[WebForms・MVC 5](reference.md#webformsmvc-5net-framework-472-以降)）。
 
-- IIS の「Windows 認証」をサイトにかけていれば、`dist/` の静的なファイルも同じログインで守られます。フォーム認証のアプリでは、静的なファイルにはフォーム認証がかからないことがあるので、`Scripts/devbi/data/` のファイルをログインせずに開けないかを確かめます。開けるときは、`web.config` の `<system.webServer><modules runAllManagedModulesForAllRequests="true" />` で、静的なファイルにも ASP.NET の認証を通します。
+- IIS の「Windows 認証」をサイトにかけていれば、`dist/` の静的なファイルも同じログインで守られます。フォーム認証のアプリでは、静的なファイルにはフォーム認証がかからないことがあるので、`Scripts/devbi/data/` のファイルをログインせずに開けないかを確かめます。開けるときは、`web.config` で、静的なファイルにも ASP.NET の認証を通し（`<system.webServer><modules runAllManagedModulesForAllRequests="true" />`）、`Scripts/devbi` の下はログインしていない人を断る決まりを足して、もう一度確かめます。
+
+  ```xml
+  <location path="Scripts/devbi">
+    <system.web>
+      <authorization>
+        <deny users="?" />
+      </authorization>
+    </system.web>
+  </location>
+  ```
 - `.wasm` と `.arrows` の型を `web.config` に足します（[1 の web.config](#手順の例windows-の-iis) の `staticContent` と同じ）。
 
 ### Next.js
