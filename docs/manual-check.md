@@ -95,7 +95,7 @@ pnpm example:dev
 
 | # | やること | こうなれば OK |
 | --- | --- | --- |
-| 21 | `pnpm example:preview` を実行して <http://localhost:4173> を開く | 開発サーバーと同じものが動く。`examples/sales/dist/` をそのまま社内のファイルサーバーや IIS に置けば、この形で見られる（ただし「DB から」のダッシュボードは API が要るので、下の 28 の形で動かす） |
+| 21 | `pnpm example:preview` を実行して <http://localhost:4173> を開く | 開発サーバーと同じものが動く。`examples/sales/dist/` をそのまま社内の Web サーバー（IIS など）に置けば、この形で見られる（`index.html` を直接開くのは不可。置き方は [deploying.md](deploying.md)）（ただし「DB から」のダッシュボードは API が要るので、下の 28 の形で動かす） |
 
 ### エディタでの補完（VS Code）
 

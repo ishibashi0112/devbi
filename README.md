@@ -27,7 +27,7 @@ pnpm e2e              # パッケージと examples/sales をビルドして dev
 pnpm check:packed     # パッケージを npm に出す形に固め、create-devbi で作ったプロジェクトに npm と pnpm で入れて確認
 ```
 
-画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。
+画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。社内の人がブラウザで見られるように置く方法（静的なサイト、`devbi-serve`、社内のアプリへの埋め込み）は [docs/deploying.md](docs/deploying.md)。
 
 e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on the web に入っている Chromium と同じ版）。別のブラウザで動かすときは `E2E_BROWSER_EXECUTABLE` に実行ファイルのパスを渡します。
 
@@ -62,7 +62,7 @@ dashboards/
 models/
   sales.metrics.yaml       # 指標と軸
 data/
-  sales.xlsx               # または .csv / .arrow / .parquet
+  sales.xlsx               # または .csv / .arrows / .parquet
 api/
   orders.sql               # read_api('orders') でデータベースから読む SELECT（サーバーだけが使う）
   sales_daily.sql          # 先頭に -- snapshot: 06:00 と書くと、毎朝作ったファイルから読む
@@ -123,7 +123,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 ## 調べてわかったこと（2026-11-07）
 
 - DuckDB-wasm は `1.33.1-dev114.0`（中身は DuckDB 2.0.0）。`@uwdata/mosaic-core` 0.35 がこの版を固定しているので合わせています。テストの DuckDB Node（`@duckdb/node-api` 2.0.0-r.1）も 2.0.0 で、同じ SQL が両方で動きます。
-- DuckDB-wasm 2.0 は CSV と Arrow IPC（`read_arrow`）は単体で読めますが、Parquet は拡張を extensions.duckdb.org から取りに行きます。社内ネットワークで外に出られない場合は、拡張ファイルを社内に置いて `devbi({ extensionRepository })` で指します。xlsx は DuckDB の excel 拡張を使わず、DevBI が自前で読むので拡張は要りません。
+- DuckDB-wasm 2.0 は CSV と Arrow IPC のストリーム形式（`read_arrow`）は単体で読めますが、Parquet と JSON（と、`current_date` などの ICU を使う SQL）は拡張を extensions.duckdb.org から取りに行きます。社内ネットワークで外に出られない場合は、拡張ファイルを社内に置いて `devbi({ extensionRepository })` で指します（[docs/deploying.md](docs/deploying.md#社外に出られないネットワーク)）。xlsx は DuckDB の excel 拡張を使わず、DevBI が自前で読むので拡張は要りません。
 - DuckDB Node 2.0 は逆に Parquet が組み込みで、Arrow の書き出し（`COPY ... (FORMAT arrow)`）は拡張が要ります。スナップショットは DuckDB を使わず、API の答えと同じ Arrow IPC を `@devbi/server` が書くので、どちらの拡張も要りません。
 
 ## handoff.md からの変更点
