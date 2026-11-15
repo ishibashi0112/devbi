@@ -98,7 +98,7 @@ measures:
 | `read_csv('data/x.csv')` / `read_csv_auto(...)` | CSV | DuckDB が読む |
 | `read_arrow('data/x.arrows')` | Arrow IPC のストリーム形式 | DuckDB が読む。Arrow の file 形式（Feather v2。`.arrow` によく使う形）は読めない（「ArrowIpcDecoderDecodeHeader … failed」のエラー） |
 | `read_parquet('data/x.parquet')` | Parquet | DuckDB の拡張が要る（[@devbi/vite](#devbivite) の `extensionRepository`） |
-| `read_json(...)` / `read_ndjson(...)` | JSON | DuckDB が読む |
+| `read_json(...)` / `read_ndjson(...)` | JSON | DuckDB の拡張（json）が要る（`extensionRepository`） |
 | `read_api('orders', from = '2025-04-01')` | データベース | サーバーの `api/orders.sql` の結果を API から受け取る。[データベースから読む](#データベースから読むdevbiserver) |
 
 パスはプロジェクトからの相対パスで、ブラウザが `data/` から取りに行きます。`https://` の URL も書けます。ブラウザではワイルドカード（`*`）は使えません。`model` の中では JOIN や WHERE、列の計算など、DuckDB の SQL が自由に書けます。
@@ -642,7 +642,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 | オプション | 中身 |
 | --- | --- |
 | `dir` | `dashboards/`、`models/`、`data/` のあるフォルダ。Vite の root からの相対パス。既定は root |
-| `extensionRepository` | DuckDB の拡張（Parquet）を取りに行く URL。社内のサーバーに置いた拡張を使うとき |
+| `extensionRepository` | DuckDB の拡張（Parquet・JSON・`current_date` などの ICU）を取りに行く場所。社内のサーバーに置いた拡張を使うとき。ブラウザは `<場所>/v2.0.0/wasm_eh/<名前>.duckdb_extension.wasm` を読む。相対パスはページではなく `assets/` から数えるので、サーバーの根元からのパス（`/sales/duckdb-ext`）か URL で書く（[社外に出られないネットワーク](deploying.md#社外に出られないネットワーク)） |
 | `embed` | `true` で、ビルドのときに `devbi-embed.js` も作る（[ほかのアプリの画面に埋め込む](#ほかのアプリの画面に埋め込む)）。`base` は `"./"` にしておく（`/` で始まると警告）。既定は `false` |
 
 - `virtual:devbi` は、検証済みのダッシュボードと指標、自作タイル、DuckDB-wasm のファイルの URL を `<DevbiApp>` に渡す形で出します。[`explore`](#探索explore) のタイルか自作タイル（`component`。「コードにする」で書き出した explore もこれ）のあるダッシュボードがあるとき（と開発サーバー）は、Perspective の WebAssembly の URL も入れます（ビルドでは、そのときだけ `dist/` に入ります。ブラウザが読むのは explore のタイルを出すときだけ）。TypeScript の型は tsconfig の `"types"` に `"@devbi/vite/client"` を足すと入ります。
@@ -1047,7 +1047,7 @@ app.MapDevBIApi("/reports", api).RequireAuthorization();   // /reports/api/schem
 ```
 
 - ビルドした `dist/` を `wwwroot/reports/` に置くと、ダッシュボードは `/reports/` で開け、API は既定の場所（`/reports/api/`）で答えます。
-- `.arrows`（[スナップショット](#毎朝のスナップショット)）と、データに使うなら `.parquet`・`.arrow` は、ASP.NET Core の静的ファイルが型を知らないので、`FileExtensionContentTypeProvider` に足します（`dotnet/samples/DevBI.Sample/Program.cs`）。
+- `.arrows`（[スナップショット](#毎朝のスナップショット)と、データの Arrow）と、データに使うなら `.parquet` は、ASP.NET Core の静的ファイルが型を知らないので、`FileExtensionContentTypeProvider` に足します（`dotnet/samples/DevBI.Sample/Program.cs`）。
 - `MapDevBIApi` の戻り値には、`.RequireAuthorization()` などのふつうの設定が付けられます。
 
 ### WebForms・MVC 5（.NET Framework 4.7.2 以降）

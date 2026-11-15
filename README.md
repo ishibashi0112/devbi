@@ -123,7 +123,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 ## 調べてわかったこと（2026-11-07）
 
 - DuckDB-wasm は `1.33.1-dev114.0`（中身は DuckDB 2.0.0）。`@uwdata/mosaic-core` 0.35 がこの版を固定しているので合わせています。テストの DuckDB Node（`@duckdb/node-api` 2.0.0-r.1）も 2.0.0 で、同じ SQL が両方で動きます。
-- DuckDB-wasm 2.0 は CSV と Arrow IPC（`read_arrow`）は単体で読めますが、Parquet は拡張を extensions.duckdb.org から取りに行きます。社内ネットワークで外に出られない場合は、拡張ファイルを社内に置いて `devbi({ extensionRepository })` で指します。xlsx は DuckDB の excel 拡張を使わず、DevBI が自前で読むので拡張は要りません。
+- DuckDB-wasm 2.0 は CSV と Arrow IPC のストリーム形式（`read_arrow`）は単体で読めますが、Parquet と JSON（と、`current_date` などの ICU を使う SQL）は拡張を extensions.duckdb.org から取りに行きます。社内ネットワークで外に出られない場合は、拡張ファイルを社内に置いて `devbi({ extensionRepository })` で指します（[docs/deploying.md](docs/deploying.md#社外に出られないネットワーク)）。xlsx は DuckDB の excel 拡張を使わず、DevBI が自前で読むので拡張は要りません。
 - DuckDB Node 2.0 は逆に Parquet が組み込みで、Arrow の書き出し（`COPY ... (FORMAT arrow)`）は拡張が要ります。スナップショットは DuckDB を使わず、API の答えと同じ Arrow IPC を `@devbi/server` が書くので、どちらの拡張も要りません。
 
 ## handoff.md からの変更点
