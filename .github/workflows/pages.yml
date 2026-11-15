@@ -1,15 +1,25 @@
-name: Demo
+name: Pages
 
-# The live demo (examples/oss): the npm downloads of the author's packages and their GitHub repositories' stars,
-# fetched every morning and put on GitHub Pages (https://ishibashi0112.github.io/devbi/). On a pull request it fetches,
-# checks and builds, and publishes nothing. Until GitHub Pages is turned on (Settings → Pages → Source: GitHub
-# Actions), it publishes nothing. GitHub stops the morning runs of a public repository after 60 days without a commit;
-# "Enable workflow" on the Actions page starts them again.
+# GitHub Pages (https://ishibashi0112.github.io/devbi/): the documentation site (README.md and docs/*.md through
+# VitePress, docs/.vitepress/) at the top, and the live demo (examples/oss) under /demo/. Pages takes one site per
+# repository, so both are built here and published together.
+#
+# The demo shows the npm downloads of the author's packages and their GitHub repositories' stars, fetched every
+# morning. On a pull request it builds both and publishes nothing. Until GitHub Pages is turned on (Settings → Pages →
+# Source: GitHub Actions), it publishes nothing. GitHub stops the morning runs of a public repository after 60 days
+# without a commit; "Enable workflow" on the Actions page starts them again.
 on:
   push:
     branches: [main]
   pull_request:
-    paths: ["examples/oss/**", "packages/**", "pnpm-lock.yaml", ".github/workflows/demo.yml"]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "examples/oss/**"
+      - "packages/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/pages.yml"
   schedule:
     - cron: "0 21 * * *" # 06:00 JST
   workflow_dispatch:
@@ -18,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: demo-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -38,6 +48,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The documentation. A link to a page, file or heading that is not there stops it (ci.yml checks it too).
+      - run: pnpm docs:build
+      # The demo.
       - run: pnpm build
       - run: pnpm --filter devbi-example-oss fetch-stats
         env:
@@ -45,6 +58,11 @@ jobs:
       # Every metrics file and tile run on the fetched numbers: a problem stops the demo before it is published.
       - run: pnpm --filter devbi-example-oss check
       - run: pnpm --filter devbi-example-oss build
+      - name: Put the demo under the documentation (/demo/)
+        run: |
+          mkdir -p "$RUNNER_TEMP/site"
+          cp -R docs/.vitepress/dist/. "$RUNNER_TEMP/site/"
+          cp -R examples/oss/dist "$RUNNER_TEMP/site/demo"
       # Published from main only, and only when Pages takes its site from GitHub Actions (404: Pages is off).
       - id: pages
         if: github.ref == 'refs/heads/main'
@@ -55,10 +73,10 @@ jobs:
             if [ "$build" = workflow ]; then
               echo "enabled=true" >> "$GITHUB_OUTPUT"
             else
-              echo "::notice::GitHub Pages の Source が GitHub Actions ではないため、デモは公開しません（Settings → Pages → Source: GitHub Actions）"
+              echo "::notice::GitHub Pages の Source が GitHub Actions ではないため、公開しません（Settings → Pages → Source: GitHub Actions）"
             fi
           elif grep -q "HTTP 404" "$RUNNER_TEMP/pages.txt"; then
-            echo "::notice::GitHub Pages が有効ではないため、デモは公開しません（Settings → Pages → Source: GitHub Actions）"
+            echo "::notice::GitHub Pages が有効ではないため、公開しません（Settings → Pages → Source: GitHub Actions）"
           else
             cat "$RUNNER_TEMP/pages.txt"
             exit 1
@@ -66,7 +84,7 @@ jobs:
       - if: steps.pages.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: examples/oss/dist
+          path: ${{ runner.temp }}/site
 
   deploy:
     needs: build

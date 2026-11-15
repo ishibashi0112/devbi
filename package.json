@@ -23,13 +23,18 @@
     "e2e": "pnpm build && pnpm --filter devbi-example-sales e2e",
     "e2e:nextjs": "pnpm example:build && pnpm --filter devbi-example-nextjs e2e",
     "check:packed": "pnpm build && node scripts/check-packed.mjs",
-    "release": "node scripts/publish.mjs"
+    "release": "node scripts/publish.mjs",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "devDependencies": {
     "@duckdb/node-api": "2.0.0-r.1",
     "@types/node": "^22.19.0",
     "ajv": "^8.20.0",
+    "github-slugger": "^2.0.0",
     "typescript": "~6.0.3",
+    "vitepress": "^1.6.4",
     "vitest": "^5.1.0"
   }
 }

@@ -1433,6 +1433,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `pnpm check:packed` | （Mac・Linux）パッケージを npm に出す形（`pnpm pack`）に固め、`create-devbi` で作ったプロジェクトに npm と pnpm で入れて、型チェック・`check`・ビルド・開発サーバーと GUI エディタ（「コードにする」でページが読み込み直されないこと）を確かめる。作ったプロジェクトは一時フォルダに残る（場所が最後に出る）。`DEVBI_PACKED_DIR` で場所を決められる |
 | `node scripts/version.mjs <版>` | 公開する 6 つのパッケージの版をそろえて変える。公開のしかたは [releasing.md](releasing.md) |
 | `pnpm release [--dry-run] [--yes]` | 6 つのパッケージを、手元から npm に出す（[releasing.md](releasing.md)）。main と同じで変更がないこと・その CI が通っていること・版がそろっていること・npm のログイン・Organization `devbi` のメンバーであることを確かめ、ビルドしてパックし（git にないファイルが入っていたら止まる）、一覧を見せて `y` を待ってから `npm publish`（passkey で確認）。npm にもうある版は飛ばす。`--dry-run` はアップロードだけしない（ログイン不要）、`--yes` は `y` を待たない |
+| `pnpm docs:dev` / `pnpm docs:build` | ドキュメントのサイト（README.md と docs/*.md、VitePress）を開発サーバーで開く（<http://localhost:5173/devbi/>） / `docs/.vitepress/dist/` にビルドする。ページ・ファイル・見出し（`#…`）へのリンクが切れていると、ビルドが止まる。公開は `.github/workflows/pages.yml` が、ライブデモ（`/demo/`）といっしょにする |
 | `dotnet test dotnet/DevBI.sln` | C# の見本のテスト（.NET 10 SDK）。SQL ファイルの読み方が TypeScript と同じか（`packages/server/test/fixtures/sqlserver-cases.json` と比べる）と、HTTP の答え方。`DEVBI_TEST_MSSQL` があれば SQL Server でも流す |
 | `dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179` | サンプルのビルド（`dist/`）と API を ASP.NET Core で出す。接続は環境変数 `ConnectionStrings__DEVBI_DB` に ADO.NET の接続文字列で（先に `copy-db` で SQL Server に表を写す） |
 | `E2E_BASE_URL=http://127.0.0.1:4179 pnpm --filter devbi-example-sales exec playwright test` | e2e を、`devbi-serve` ではなく、そこで動いているサーバーに向けて流す |

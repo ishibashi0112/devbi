@@ -99,7 +99,7 @@
       "x": 0, "y": 20, "w": 12, "h": 2,
       "type": "markdown",
       "options": {
-        "text": "**DevBI のライブデモ**です。作者（ishibashi0112）の OSS の、npm のダウンロード数と GitHub のリポジトリの数字です。GitHub Actions が毎朝 npm と GitHub の API から数字を取り、静的サイトとして GitHub Pages に置いています。集計は、このブラウザの中の DuckDB-wasm がしています。\n\n棒・点・行を押すと、ほかのタイルがその値で絞られます。いちばん下の「明細」は、行・列・集計を自由に変えられます。この画面のファイルは [examples/oss](https://github.com/ishibashi0112/devbi/tree/main/examples/oss) です。"
+        "text": "**DevBI のライブデモ**です。作者（ishibashi0112）の OSS の、npm のダウンロード数と GitHub のリポジトリの数字です。GitHub Actions が毎朝 npm と GitHub の API から数字を取り、静的サイトとして GitHub Pages に置いています。集計は、このブラウザの中の DuckDB-wasm がしています。\n\n棒・点・行を押すと、ほかのタイルがその値で絞られます。いちばん下の「明細」は、行・列・集計を自由に変えられます。この画面のファイルは [examples/oss](https://github.com/ishibashi0112/devbi/tree/main/examples/oss)、DevBI の使い方は[ドキュメント](https://ishibashi0112.github.io/devbi/)にあります。"
       }
     }
   ]

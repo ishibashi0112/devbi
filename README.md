@@ -2,7 +2,9 @@
 
 開発者がいる会社が自社アプリの中に置く BI。ダッシュボードは git のファイル、タイルは JSX に「昇格」でき、集計はブラウザ内の DuckDB-wasm。MIT。
 
-**ライブデモ: <https://ishibashi0112.github.io/devbi/>**（作者の OSS の npm のダウンロード数と GitHub のリポジトリの数字。毎朝 GitHub Actions が取り直して GitHub Pages に置く静的サイト。中身は [`examples/oss`](examples/oss)）
+**ドキュメント: <https://ishibashi0112.github.io/devbi/>**（この README と [docs/](docs) のページを 1 つにしたサイト）
+
+**ライブデモ: <https://ishibashi0112.github.io/devbi/demo/>**（作者の OSS の npm のダウンロード数と GitHub のリポジトリの数字。毎朝 GitHub Actions が取り直して GitHub Pages に置く静的サイト。中身は [`examples/oss`](examples/oss)）
 
 構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）、§5 の 2（埋め込みと読み取り API）、§5 の 3（GUI エディタと npm に出す準備）ができました。§5 の 4（広げる）は、ダッシュボードの Excel・PDF への書き出しから始めています（見出しの右の「Excel」「印刷・PDF」）。
 
@@ -21,13 +23,14 @@ pnpm try-xlsx <file>  # 自分の Excel から下書きのダッシュボード�
 pnpm gen              # .devbi/ を作る（dash.json・metrics.yaml の補完と、自作タイルの型。dev server を動かしていれば自動）
 pnpm demo:fetch       # ライブデモ（examples/oss）の数字を npm と GitHub の API から取る（ネットワークがなければ pnpm --filter devbi-example-oss fixture で作りものの数字）
 pnpm demo:dev         # ライブデモを Vite の dev server で開く
+pnpm docs:dev         # ドキュメントのサイト（README と docs/*.md）を VitePress の dev server で開く（http://localhost:5173/devbi/）
 pnpm example:check    # サンプルの指標とすべてのタイルのクエリを、ブラウザを開かずにデータに流して確かめる（devbi-check）
 pnpm test             # 指標 → SQL のゴールデン、xlsx、書式（DuckDB Node 2.0）、読み取り API（SQLite。DEVBI_TEST_PG・_MSSQL・_MYSQL・_MARIADB・_ORACLE があればそのデータベースも）
 pnpm e2e              # パッケージと examples/sales をビルドして devbi-serve で開き、Playwright で確認
 pnpm check:packed     # パッケージを npm に出す形に固め、create-devbi で作ったプロジェクトに npm と pnpm で入れて確認
 ```
 
-画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。社内の人がブラウザで見られるように置く方法（静的なサイト、`devbi-serve`、社内のアプリへの埋め込み）は [docs/deploying.md](docs/deploying.md)。
+画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。社内の人がブラウザで見られるように置く方法（静的なサイト、`devbi-serve`、社内のアプリへの埋め込み）は [docs/deploying.md](docs/deploying.md)。これらは [ドキュメントのサイト](https://ishibashi0112.github.io/devbi/) でも読めます。サイトはこの README と docs/*.md そのものから作るので（`docs/.vitepress/`）、直すのはこれらのファイルだけです。
 
 e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on the web に入っている Chromium と同じ版）。別のブラウザで動かすときは `E2E_BROWSER_EXECUTABLE` に実行ファイルのパスを渡します。
 
@@ -43,8 +46,9 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `dotnet/` | （C#） | 読み取り API の ASP.NET の見本（SQL Server）。ASP.NET Core（.NET 10）の `MapDevBIApi` と、WebForms・MVC 5（.NET Framework 4.7.2 以降）の `DevBIHttpHandler`。SQL ファイルの読み方は `packages/server` と同じものをテストで確かめる。NuGet には未公開 |
 | `packages/create-devbi` | `create-devbi` | `npm create devbi@latest my-reports` で、サンプルの売上ダッシュボードと Vite・React・GUI エディタの入ったプロジェクトを作る |
 | `examples/nextjs` | （非公開） | `examples/sales` のダッシュボードを Next.js 16（App Router）のアプリに置いた見本。API とスナップショットは `app/devbi/[...path]/route.ts`（`@devbi/server` の `fetch`）、画面は `devbi-embed.js` |
-| `examples/oss` | （非公開） | ライブデモ。作者の npm パッケージの日ごとのダウンロード数と、GitHub のリポジトリのスター・フォーク・issue の数を `scripts/fetch-stats.mjs` が CSV にし、`.github/workflows/demo.yml` が毎朝ビルドして GitHub Pages に置く |
+| `examples/oss` | （非公開） | ライブデモ。作者の npm パッケージの日ごとのダウンロード数と、GitHub のリポジトリのスター・フォーク・issue の数を `scripts/fetch-stats.mjs` が CSV にし、`.github/workflows/pages.yml` が毎朝ビルドして GitHub Pages の `/demo/` に置く |
 | `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ。`db/sales.sqlite` は同じ受注を表に分けて入れたもの（`pnpm gen:db`） |
+| `docs` | （サイト） | ドキュメント。`docs/.vitepress/` が、README と docs/*.md から GitHub Pages のサイト（VitePress）を作る。`handoff.md`（構想と決定事項のメモ）はサイトに出さない |
 
 npm に公開しています（MIT。出し方は [docs/releasing.md](docs/releasing.md)）。こう始めます。
 

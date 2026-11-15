@@ -337,7 +337,7 @@ npm にある版ではなく、いまのコードを npm に出す形に固め�
 
 ### ライブデモ（OSS の npm と GitHub）
 
-`examples/oss` は、作者の npm パッケージの日ごとのダウンロード数と、GitHub のリポジトリのいまのスター・フォーク・issue の数のダッシュボードです（スターが付いた日は、GitHub がサインインした人にしか出さないので取りません）。公開するデモは GitHub Actions（`.github/workflows/demo.yml`）が毎朝本物の数字を取ってビルドします。手元では、作りものの数字（`pnpm --filter devbi-example-oss fixture`）で確かめます。
+`examples/oss` は、作者の npm パッケージの日ごとのダウンロード数と、GitHub のリポジトリのいまのスター・フォーク・issue の数のダッシュボードです（スターが付いた日は、GitHub がサインインした人にしか出さないので取りません）。公開するデモは GitHub Actions（`.github/workflows/pages.yml`）が毎朝本物の数字を取ってビルドし、ドキュメントのサイトの `/demo/` に置きます。手元では、作りものの数字（`pnpm --filter devbi-example-oss fixture`）で確かめます。
 
 | # | すること | 期待する結果 |
 | --- | --- | --- |
@@ -346,7 +346,20 @@ npm にある版ではなく、いまのコードを npm に出す形に固め�
 | 140 | 「すべて解除」を押し、「リポジトリ別（Malloy）」の「example/grid」の行を押す | 上に「リポジトリ: example/grid」が出て、「いまのスター」が 42、「リポジトリ（いまの数字）」が example/grid の 1 行になる |
 | 141 | 「曜日ごとの 1 日あたり（SQL）」を見る | 月〜日の 7 本の棒で、土・日が低い |
 | 142 | ネットワークのある所で `pnpm demo:fetch` のあと `pnpm --filter devbi-example-oss check` | 作者のパッケージごとのダウンロード数とリポジトリのスターが出て、最後に「data/ に書きました」。check は「問題はありません」 |
-| 143 | GitHub のリポジトリの Settings → Pages で Source を「GitHub Actions」にし、Actions の「Demo」を「Run workflow」で動かす | <https://ishibashi0112.github.io/devbi/> にデモが出る。Pages が有効でないあいだは、Demo のワークフローは公開せずに「GitHub Pages が有効ではないため…」とだけ出す。GitHub は、60 日コミットのないリポジトリの毎朝の実行を止める。止まったら Actions の「Demo」で「Enable workflow」を押す |
+| 143 | GitHub のリポジトリの Settings → Pages で Source を「GitHub Actions」にし、Actions の「Pages」を「Run workflow」で動かす | <https://ishibashi0112.github.io/devbi/demo/> にデモ、<https://ishibashi0112.github.io/devbi/> にドキュメントのサイトが出る。前のデモのアドレス（<https://ishibashi0112.github.io/devbi/#/oss>）はデモに移る。Pages が有効でないあいだは、Pages のワークフローは公開せずに「GitHub Pages が有効ではないため…」とだけ出す。GitHub は、60 日コミットのないリポジトリの毎朝の実行を止める。止まったら Actions の「Pages」で「Enable workflow」を押す |
+
+### ドキュメントのサイト
+
+README.md と docs/*.md（`handoff.md` を除く）を、VitePress（`docs/.vitepress/`）で 1 つのサイトにします。ページはこれらのファイルそのもので、サイトのためにほかに書くのはトップページ（`docs/index.md`）だけです。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 144 | `pnpm docs:dev` で <http://localhost:5173/devbi/> を開く | トップに「開発者が自社アプリ・社内システムに組み込む、コードで管理する BI」と 6 つの特長、「はじめる」のコマンド、「向いているとき」「DevBI がしないこと」。上の左にロゴと検索、右に「はじめる」「リファレンス」「社内に公開する」「開発」「ライブデモ」と、外観の切り替え・GitHub・npm |
+| 145 | 上の「リファレンス」を押し、左の「リファレンス」の下の「dash.json」を押す | その見出しまで動き、左の「dash.json」と、右の「このページの内容」の「dash.json」が強調される。本文の最初の目次の「自作タイル（JSX）」を押すと、その見出しに動き、左の「自作タイル（JSX）」が強調される |
+| 146 | 「リファレンス」の最初の段落の「README」と「manual-check.md」、「社内に公開する」の「GitHub Pages」の節の「pages.yml」を押す | README と manual-check.md は、サイトの中の「リポジトリと開発」「動作チェックの手順」が開く。pages.yml はサイトのページではないので、GitHub のそのファイルが別のタブで開く |
+| 147 | 上の検索（Ctrl+K、Mac は ⌘K）に「スナップショット」、次に「埋め込む」と入れる | どちらもリファレンス・社内に公開する・動作チェックの手順の見出しが出て、押すとその見出しに動く（日本語の単語で引ける） |
+| 148 | 「ライブデモ」を押す | `pnpm docs:dev` では 404（デモはサイトに入っていないため）。公開したサイトではデモが開く（143） |
+| 149 | `pnpm docs:build` | 「build complete」で `docs/.vitepress/dist/` にできる。ページ・ファイル・見出し（`#…`）へのリンクが切れていると、どのファイルのどのリンクかを出して止まる |
 
 ## 4. 自分の Excel で試す
 

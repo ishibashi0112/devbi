@@ -230,11 +230,11 @@ location /reports/sales/assets/ {
 - まだ一度も作っていないと、タイルに「スナップショット（snapshots/…）がありません。サーバーで devbi-snapshot を実行するか…」と出ます。ビルドして写したあとに、一度手で動かします。
 - `devbi-snapshot` は SQL Server の Windows 認証でつなげません。SELECT の権限だけの SQL Server 認証のユーザーを使います。
 
-**毎朝ビルドし直して置く。** データを取るスクリプトとビルドを、CI（社内のネットワークの中で動く GitHub Actions のセルフホストランナー、Azure Pipelines のエージェントなど）で毎朝動かし、`dist/` を写します。ライブデモの [`.github/workflows/demo.yml`](../.github/workflows/demo.yml) がこの形です（毎朝 npm と GitHub から数字を取り、`devbi-check` で確かめてからビルドして、GitHub Pages に置く）。ビルドの前に `devbi-check` を通すと、データの形が変わったときに、壊れたダッシュボードを出さずに止まります。
+**毎朝ビルドし直して置く。** データを取るスクリプトとビルドを、CI（社内のネットワークの中で動く GitHub Actions のセルフホストランナー、Azure Pipelines のエージェントなど）で毎朝動かし、`dist/` を写します。ライブデモの [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) がこの形です（毎朝 npm と GitHub から数字を取り、`devbi-check` で確かめてからビルドして、GitHub Pages に置く）。ビルドの前に `devbi-check` を通すと、データの形が変わったときに、壊れたダッシュボードを出さずに止まります。
 
 ### GitHub Pages
 
-リポジトリの Settings → Pages で Source を「GitHub Actions」にし、`dist/` を `actions/upload-pages-artifact` と `actions/deploy-pages` で出します（[demo.yml](../.github/workflows/demo.yml)）。`https://<ユーザー>.github.io/<リポジトリ>/` の下に出るので、`base: "./"` のままにします。
+リポジトリの Settings → Pages で Source を「GitHub Actions」にし、`dist/` を `actions/upload-pages-artifact` と `actions/deploy-pages` で出します（[pages.yml](../.github/workflows/pages.yml)）。`https://<ユーザー>.github.io/<リポジトリ>/` の下に出るので、`base: "./"` のままにします。
 
 - **GitHub Pages のサイトは、ふつうは誰でも見られます。** 社内だけに見せる（プライベートに公開する）には、GitHub Enterprise Cloud の Organization が要ります。社外に出してよいデータ（デモや公開の統計）のときだけ使ってください。
 - API がないので、`read_api` はスナップショットからしか読めません。ワークフローがデータベースに届くときだけ、ビルドしたあとに `devbi-snapshot --out dist` で `dist/snapshots/` に作ってから上げる形になります。
