@@ -47,7 +47,7 @@ run("npm", ["exec", "--yes", `--package=${packed["create-devbi"]}`, "--", "creat
 
 for (const manager of ["npm", "pnpm"]) {
   // 3. The tarballs in place of the versions on npm, for the packages' own dependencies too (@devbi/vite →
-  // @devbi/server, devbi): they are not on npm yet.
+  // @devbi/server, devbi): this code, not what npm has.
   const app = path.join(out, `app-${manager}`);
   cpSync(made, app, { recursive: true });
   const file = path.join(app, "package.json");

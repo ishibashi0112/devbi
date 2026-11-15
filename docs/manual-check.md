@@ -248,7 +248,7 @@ WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだ�
 
 ### 雛形（create-devbi）と npm に出す前の確かめ
 
-npm にはまだ出していないので、パッケージを npm に出す形に固めたもの（tarball）で確かめます。
+npm にある版ではなく、いまのコードを npm に出す形に固めたもの（tarball）で確かめます。
 
 | # | すること | 期待する結果 |
 | --- | --- | --- |
