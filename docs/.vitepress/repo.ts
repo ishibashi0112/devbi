@@ -40,9 +40,19 @@ export function githubSlug(text: string) {
 }
 
 /** The level-2 headings of each page, with the ids VitePress gives them: read with VitePress's own Markdown parser
- *  (set up like the site's), then put away so that the build makes its own. */
+ *  (set up like the site's), then put away so that the build makes its own. Read when the config loads: under
+ *  `pnpm docs:dev`, a new or renamed `##` shows in the left menu after a restart (r). */
 export async function sections(): Promise<Record<string, { text: string; link: string }[]>> {
-  const md = await createMarkdownRenderer(repoRoot, { anchor: { slugify: githubSlug }, highlight: () => "" });
+  // VitePress keeps one parser per process and hands out the one it has. Put away only one made here (config runs
+  // only when a parser is made): while the dev server reloads the config, the one it has is still in use.
+  let mine = false;
+  const md = await createMarkdownRenderer(repoRoot, {
+    anchor: { slugify: githubSlug },
+    highlight: () => "",
+    config: () => {
+      mine = true;
+    },
+  });
   const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   try {
     const out: Record<string, { text: string; link: string }[]> = {};
@@ -56,26 +66,33 @@ export async function sections(): Promise<Record<string, { text: string; link: s
         const text = (tokens[i + 1]?.children ?? [])
           .filter((c) => c.type === "text" || c.type === "code_inline")
           .map((c) => c.content)
-          .join("");
+          .join("")
+          .trim();
         // Encoded like the browser's location.hash, so that the sidebar marks the heading you are at.
         return [{ text: escape(text), link: `/${page.replace(/\.md$/, "")}#${encodeURIComponent(id)}` }];
       });
     }
     return out;
   } finally {
-    disposeMdItInstance();
+    if (mine) disposeMdItInstance();
   }
 }
 
-/** The files git has (not what a build or an editor left in the working tree): what GitHub will show. */
+/** The files git has (not what a build or an editor left in the working tree): what GitHub will show. Without git, or
+ *  when this folder is not a git repository of its own (a copy inside another one), the files on disk. */
 const tracked: Set<string> | null = (() => {
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   try {
-    return new Set(execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8" }).split("\0"));
+    if (path.resolve(git("rev-parse", "--show-toplevel").trim()) !== repoRoot) return null;
+    const files = new Set(git("ls-files", "-z").split("\0"));
+    return files.has("README.md") ? files : null;
   } catch {
     return null;
   }
 })();
 function onGitHub(target: string): "blob" | "tree" | null {
+  if (target === ".") return "tree";
   if (tracked) {
     if (tracked.has(target)) return "blob";
     for (const f of tracked) if (f.startsWith(`${target}/`)) return "tree";
@@ -86,11 +103,20 @@ function onGitHub(target: string): "blob" | "tree" | null {
   return fs.statSync(onDisk).isDirectory() ? "tree" : "blob";
 }
 
+const decode = (s: string, how: (s: string) => string) => {
+  try {
+    return how(s);
+  } catch {
+    return s;
+  }
+};
+
 /** Links to files that are not there, found while the pages were made: the build stops on them at the end. */
 const brokenLinks = new Set<string>();
 
-/** Rewrites relative links by what they point at: a page → its path on the site; another file in the repository →
- *  that file on GitHub; nothing → noted as broken (VitePress itself does not look at links to .yml, .json, …). */
+/** Rewrites relative Markdown links by what they point at: a page → its path on the site; another file in the
+ *  repository → that file on GitHub; nothing → noted as broken (VitePress itself does not look at links to .yml,
+ *  .json, …). Links written as HTML (<a href>) are left as they are. */
 export function repoLinks(md: MarkdownRenderer) {
   md.core.ruler.push("devbi_repo_links", (state) => {
     const file: string | undefined = state.env.realPath ?? state.env.path;
@@ -101,16 +127,17 @@ export function repoLinks(md: MarkdownRenderer) {
         if (token.type !== "link_open") continue;
         const href = token.attrGet("href");
         if (!href || /^([a-z][a-z0-9+.-]*:|#|\/)/i.test(href)) continue;
-        const [rawPath, ...rest] = href.split("#");
-        const hash = rest.length ? `#${rest.join("#")}` : "";
+        const [, rawPath = "", query = "", hash = ""] = /^([^?#]*)(\?[^#]*)?(#.*)?$/.exec(href) ?? [];
         const target = path.posix
-          .normalize(path.posix.join(path.posix.dirname(source), decodeURI(rawPath ?? "")))
+          .normalize(path.posix.join(path.posix.dirname(source), decode(rawPath, decodeURI)))
           .replace(/\/$/, "");
         const page = pages[target];
         const kind = page ? null : onGitHub(target);
-        if (page) token.attrSet("href", `/${page}${hash}`);
-        else if (kind) token.attrSet("href", `${repoUrl}/${kind}/main/${target}${hash}`);
-        else if (!brokenLinks.has(`${source}: ${href}`)) {
+        if (page) token.attrSet("href", `/${page}${query}${hash}`);
+        else if (kind) {
+          const where = target === "." ? "" : `/${encodeURI(target)}`;
+          token.attrSet("href", `${repoUrl}/${kind}/main${where}${query}${hash}`);
+        } else if (!brokenLinks.has(`${source}: ${href}`)) {
           brokenLinks.add(`${source}: ${href}`);
           console.warn(`\n(!) ${source}: ${href} はリポジトリにありません`);
         }
@@ -119,11 +146,13 @@ export function repoLinks(md: MarkdownRenderer) {
   });
 }
 
-/** After the build: links to files that are not in the repository, and links to a heading (#…) of a page of this
- *  site that the page does not have. Either stops the build. */
+/** After the build, in the pages it made: links to a page of this site that is not there, or to a heading (#…) the
+ *  page does not have, and the links to files that are not in the repository found above. Any stops the build.
+ *  (VitePress checks the links in the Markdown, but not the ones in the menus and in index.md's front matter.) */
 export function checkLinks(site: SiteConfig) {
-  const problems = [...brokenLinks].map((l) => `${l}（リポジトリにないファイル）`);
   const base = site.site.base;
+  const sourceOf = (page: string) =>
+    Object.entries(pages).find(([, p]) => p === `${page}.md`)?.[0] ?? `${page}.html`;
   const ids = new Map<string, Set<string>>();
   const links: [string, string][] = [];
   const html = (s: string) => s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
@@ -131,17 +160,37 @@ export function checkLinks(site: SiteConfig) {
     if (!name.endsWith(".html")) continue;
     const text = fs.readFileSync(path.join(site.outDir, name), "utf8");
     const page = name.replace(/\.html$/, "");
-    ids.set(page, new Set([...text.matchAll(/\sid="([^"]+)"/g)].map((m) => decodeURIComponent(html(m[1]!)))));
+    ids.set(page, new Set([...text.matchAll(/\sid="([^"]+)"/g)].map((m) => decode(html(m[1]!), decodeURIComponent))));
     for (const m of text.matchAll(/\shref="([^"]+)"/g)) links.push([page, html(m[1]!)]);
   }
+  // A broken link → the pages it is on (a link in the top menu or the left menu is on every page).
+  const found = new Map<string, Set<string>>();
+  const note = (problem: string, page: string) => found.set(problem, (found.get(problem) ?? new Set()).add(page));
   for (const [page, href] of links) {
-    const hash = href.indexOf("#");
-    if (hash < 0 || !(href.startsWith("#") || href.startsWith(base))) continue;
-    const target = href.startsWith("#") ? page : href.slice(base.length, hash).replace(/\.html$/, "") || "index";
-    const id = decodeURIComponent(href.slice(hash + 1));
-    if (id && ids.has(target) && !ids.get(target)!.has(id)) problems.push(`${page}.html: ${href}（見出しがない）`);
+    if (!(href.startsWith("#") || href.startsWith(base))) continue;
+    const [, rawPath = "", , hash = ""] = /^([^?#]*)(\?[^#]*)?(?:#(.*))?$/.exec(href) ?? [];
+    let target = page;
+    if (!href.startsWith("#")) {
+      const p = rawPath.slice(base.length);
+      // Files next to the pages (assets/, the live demo under demo/ that the Pages workflow adds, …).
+      if (/^(assets|demo)(\/|$)/.test(p) || /\.(?!html$)[a-z0-9]+$/i.test(p)) continue;
+      target = p.replace(/\.html$/, "").replace(/(^|\/)$/, "$1index");
+      if (!ids.has(target)) {
+        note(`${decode(href, decodeURI)}（ページがない）`, page);
+        continue;
+      }
+    }
+    const id = decode(hash, decodeURIComponent);
+    if (id && !ids.get(target)!.has(id)) note(`${decode(href, decodeURI)}（見出しがない）`, page);
   }
-  if (problems.length) {
-    throw new Error(`リンク切れが ${problems.length} 個あります:\n${[...new Set(problems)].join("\n")}`);
-  }
+  const all = ids.size - (ids.has("404") ? 1 : 0);
+  const problems = [
+    ...[...brokenLinks].map((l) => `${l}（リポジトリにないファイル）`),
+    ...[...found].map(([problem, on]) =>
+      on.size >= all
+        ? `docs/.vitepress/config.ts（上か左のメニュー）: ${problem}`
+        : `${[...on].map(sourceOf).join("、")}: ${problem}`,
+    ),
+  ];
+  if (problems.length) throw new Error(`リンク切れが ${problems.length} 個あります:\n${problems.join("\n")}`);
 }

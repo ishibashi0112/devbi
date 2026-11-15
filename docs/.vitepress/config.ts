@@ -5,19 +5,18 @@ import { defineConfig } from "vitepress";
 import { checkLinks, githubSlug, notPages, pages, repoLinks, repoUrl, sections } from "./repo";
 
 // Where GitHub Pages serves the site. DOCS_BASE=/ for a site at the root of a domain.
-const base = process.env.DOCS_BASE ?? "/devbi/";
+const base = (process.env.DOCS_BASE ?? "/devbi/").replace(/^\/?/, "/").replace(/\/?$/, "/");
 const description = "開発者が自社アプリ・社内システムに組み込む、コードで管理する BI";
 const icon =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='8' width='3' height='7' rx='1' fill='%233b6fe0'/%3E%3Crect x='6.5' y='4' width='3' height='11' rx='1' fill='%233b6fe0'/%3E%3Crect x='12' y='1' width='3' height='14' rx='1' fill='%233b6fe0'/%3E%3C/svg%3E";
 
 /** A page in the sidebar, with its level-2 headings under it (folded). */
 const headings = await sections();
-const page = (text: string, source: string) => ({
-  text,
-  link: `/${pages[source]?.replace(/\.md$/, "")}`,
-  collapsed: true,
-  items: headings[source],
-});
+const page = (text: string, source: string) => {
+  const path = pages[source];
+  if (!path) throw new Error(`${source} はサイトのページではありません（docs/.vitepress/repo.ts の pages）`);
+  return { text, link: `/${path.replace(/\.md$/, "")}`, collapsed: true, items: headings[source] };
+};
 
 export default defineConfig({
   lang: "ja-JP",
