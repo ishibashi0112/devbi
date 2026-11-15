@@ -1,0 +1,51 @@
+/* The blue of the DevBI icon and of the dashboards' accent. */
+:root {
+  --vp-c-brand-1: #2f5bc8;
+  --vp-c-brand-2: #3b6fe0;
+  --vp-c-brand-3: #3b6fe0;
+  --vp-c-brand-soft: rgba(59, 111, 224, 0.14);
+  --vp-font-family-base: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+}
+
+.dark {
+  --vp-c-brand-1: #8ab0ff;
+  --vp-c-brand-2: #6d97f5;
+  --vp-c-brand-3: #3b6fe0;
+  --vp-c-brand-soft: rgba(109, 151, 245, 0.16);
+}
+
+/* Japanese headings and the hero: break between phrases, not in the middle of a word (where the browser can). */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.VPHero .text,
+.VPHero .tagline,
+.VPFeature .title {
+  word-break: auto-phrase;
+}
+
+/* The hero sentence is long in Japanese: a little smaller than VitePress's default. */
+@media (min-width: 640px) {
+  .VPHero .text {
+    font-size: 40px;
+    line-height: 52px;
+  }
+}
+@media (min-width: 960px) {
+  .VPHero .text {
+    font-size: 44px;
+    line-height: 56px;
+  }
+}
+
+/* The screenshot on the top page. */
+.VPHome .vp-doc img {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+}
+.VPHome .vp-doc .caption {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--vp-c-text-2);
+}

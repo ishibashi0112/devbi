@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# The documentation site's cache (pnpm docs:build / docs:dev; the site itself goes to docs/.vitepress/dist/)
+docs/.vitepress/cache/
 # pnpm gen / the Vite plugin writes these from models/ (they include local_* names, so keep them out of git)
 .devbi/
 *.tsbuildinfo
