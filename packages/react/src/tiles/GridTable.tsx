@@ -7,6 +7,9 @@ import { dimensions, filterFor, isSelected } from "./util.js";
 // Built once, at module level: only the features the table tile uses (sorting from the column menu,
 // fitting column widths). This file loads with the first table on the page, as its own chunk.
 const Grid = createSpreadsheetGrid({ features: { columnMenu: columnMenuFeature, columnAutosize: columnAutosizeFeature } });
+// The column menu and the tooltip sit at the end of the page, outside .devbi-root: give them DevBI's font. (Their colors
+// come from the --ssg-* the grid copies over from the table.)
+const popups = { popover: "devbi-grid-popup", tooltip: "devbi-grid-popup" };
 
 function sameRow(selection: TileProps["selection"], row: Row): boolean | undefined {
   if (!selection.length) return undefined;
@@ -82,7 +85,7 @@ export function GridTable({ rows, fields, format, selection, select, tile }: Til
           const v = r[f.name];
           return v instanceof Date ? v.getTime() : v;
         },
-        // (No row is passed for group and total rows, which this table does not use: format the value then.)
+        // Group and total rows pass no row, only their aggregate (a measure's number): format that. This table has neither.
         valueFormatter: ({ row, value }) => format(row ? row[f.name] : value, f.name),
         // Copy what is shown (¥1,200 / 94.0% / 2026年5月): Excel reads these as numbers and dates.
         formatClipboardValue: (_value: unknown, row: Row) => format(row[f.name], f.name),
@@ -93,6 +96,7 @@ export function GridTable({ rows, fields, format, selection, select, tile }: Til
     <div ref={ref} className="devbi-grid-wrap" onKeyDown={onKeyDown}>
       <Grid<Row>
         className="devbi-table-grid"
+        classNames={popups}
         rows={rows}
         rowKeyGetter={keys.length ? (r) => keyOf(r, keys) : undefined}
         columns={columns}
