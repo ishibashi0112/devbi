@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // node scripts/version.mjs <version>           sets every published package (packages/*, not private) to <version>
-// node scripts/version.mjs --check <version>   fails unless they all are <version> (the release workflow, from its tag)
+// node scripts/version.mjs --check <version>   fails unless they all are <version>
 // The packages are released together, at one version: create-devbi makes projects that depend on ^<its version>.
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
