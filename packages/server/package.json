@@ -1,6 +1,6 @@
 {
   "name": "@devbi/server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DevBI's read-only API (SQL files on the server, Arrow to the browser) and devbi-serve: the built site and the API in one process.",
   "license": "MIT",
   "type": "module",

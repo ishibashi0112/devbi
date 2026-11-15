@@ -1,6 +1,6 @@
 {
   "name": "@devbi/react",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DevBI runtime for React: DuckDB-wasm engine, built-in tiles and cross-filtering.",
   "license": "MIT",
   "type": "module",

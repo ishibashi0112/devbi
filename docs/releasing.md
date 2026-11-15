@@ -23,13 +23,13 @@
 2. 名前に `devbi` と入れ、無料のプラン（公開パッケージだけ）を選びます。
 3. メンバーを招く画面は飛ばしてかまいません（作った人がそのまま持ち主です）。
 
-2026-11-15 の時点で、6 つの名前と Organization の名前 `devbi` は、どれも空いています。
+（2026-11-15 に作りました。次からは要りません。）
 
 ## 毎回
 
 ### 1. 準備（Claude がします）
 
-- 版を上げる PR（`node scripts/version.mjs 0.1.1` で 6 つの `package.json` の版をそろえて変える）をマージします。最初の公開は、いまの `0.1.0` のままで出します。
+- 版を上げる PR（`node scripts/version.mjs 0.1.2` のように、6 つの `package.json` の版をそろえて変える）をマージします。最初の 0.1.0（2026-11-15）は版を上げずに出しました。
 - GitHub の main の最新のコミットに、CI の緑のチェック（型チェック・テスト・`check:packed`）が付いているのを確かめます（`pnpm release` も確かめます）。
 
 ### 2. 公開（自分でします）
@@ -61,15 +61,17 @@ pnpm release --dry-run
 ```sh
 npm view devbi version            # 出した版が出る
 npm view @devbi/react version
+cd "$(mktemp -d)"                 # DevBI のフォルダの外で試す（前に作った my-reports とぶつからないように）
+npm create devbi@latest -- --version                # 出した版が出る（npm のキャッシュが古いときは数分待つ）
 npm create devbi@latest my-reports && cd my-reports && npm install && npm run dev
 ```
 
 npm のページ: <https://www.npmjs.com/package/devbi>、<https://www.npmjs.com/org/devbi>
 
-最後に、出したコミットに印（タグ）を付けておくと、あとでどのコミットから出したかが分かります（任意。`pnpm release` が最後にこのコマンドを出します）:
+最後に、出したコミットに印（タグ）を付けておくと、あとでどのコミットから出したかが分かります（任意。`pnpm release` が最後に、出した版でこのコマンドを出します）:
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.1 && git push origin v0.1.1
 ```
 
 ## うまくいかないとき
@@ -77,7 +79,7 @@ git tag v0.1.0 && git push origin v0.1.0
 - **途中で止まった**: 直して、もう一度 `pnpm release`。npm にもうある版は飛ばすので、続きから出します。その間にコードを変えたときは、続きではなく版を上げて出し直します（同じ版の中で、出したときのコードが混ざらないように）。
 - **`ENEEDAUTH` や `E401`**: ログインが切れています。`npm login --registry=https://registry.npmjs.org/` をして、もう一度。
 - **`@devbi/〜` で `E403` や `E404`**: Organization `devbi` がないか、そのメンバーになっていないログインで出しています（`npm whoami` で確かめます）。
-- **出したものに間違いがあった**: 同じ版は、消しても二度と使えません。直して版を上げ（`0.1.1`）、出し直します。間違った版には、6 つそれぞれに `npm deprecate devbi@0.1.0 "0.1.1 を使ってください"` で印を付けます（それぞれ passkey を求められます）。
+- **出したものに間違いがあった**: 同じ版は、消しても二度と使えません。直して版を上げ、出し直します。間違った版には、6 つそれぞれに `npm deprecate <名前>@<間違った版> "<出し直した版> を使ってください"` で印を付けます（例: `npm deprecate devbi@0.1.1 "0.1.2 を使ってください"`。それぞれ passkey を求められます）。
 - **見せてはいけないものが入っていた**: 出して 72 時間のうちなら `npm unpublish <名前>@<版>` で消せます。ほかが使っている `devbi` を最後にして、`create-devbi` から逆の順に消します。版が 1 つしかないパッケージを消すと、その名前には 24 時間出せません。
 - `0.2.0-beta.1` のような版（プレリリース）は、npm の `next` で出ます（`npm create devbi@next` で使えて、`@latest` は前のまま）。
 - `pnpm release` は、パソコンの npm がふだん別のレジストリ（会社のミラーなど）を向いていても、`@devbi` の分も含めて、いつも <https://registry.npmjs.org/> に出します。

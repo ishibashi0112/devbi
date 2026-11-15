@@ -4,7 +4,7 @@ DevBI のダッシュボードを、社内の人がブラウザで見られる�
 
 ファイル形式とコマンドのくわしい一覧は [reference.md](reference.md) にあります。このページは、どれを選ぶかと、置くときの手順・設定・気をつけることを扱います。
 
-> このページのコマンドは、DevBI を npm に公開したあとの形（`npm create devbi@latest`、`npm install -D @devbi/server`）で書いています。公開の前に試すときは、このリポジトリの `examples/sales` で、`pnpm example:build`（`examples/sales/dist/` を作る）と `pnpm example:serve`（`devbi-serve` で開く）が同じものです。
+> このページのコマンドは、npm から入れる形（`npm create devbi@latest`、`npm install -D @devbi/server`）で書いています。このリポジトリで試すときは、`examples/sales` で、`pnpm example:build`（`examples/sales/dist/` を作る）と `pnpm example:serve`（`devbi-serve` で開く）が同じものです。
 
 - [3 つの置き方](#3-つの置き方)
 - [どの置き方でも同じこと](#どの置き方でも同じこと)

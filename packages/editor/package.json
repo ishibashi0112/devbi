@@ -1,6 +1,6 @@
 {
   "name": "@devbi/editor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DevBI's GUI editor: lay out tiles and save dash.json from the Vite dev server. Never part of a build.",
   "license": "MIT",
   "type": "module",

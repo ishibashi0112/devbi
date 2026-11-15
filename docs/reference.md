@@ -1123,7 +1123,7 @@ Next.js（App Router、16 で確かめています）のアプリに、ダッシ
   components/devbi-dashboard.tsx   ダッシュボードを出す部品（"use client"）
 ```
 
-アプリに `@devbi/server`（Node 22.16 以上）と、使うデータベースのドライバ（`mssql` など。[接続先](#接続先)）を入れます。`@devbi/server` は npm にまだ出していないので、いまはこのリポジトリの `packages/server` をビルドして使います（見本は pnpm のワークスペースでつないでいる）。
+アプリに `@devbi/server`（Node 22.16 以上）と、使うデータベースのドライバ（`mssql` など。[接続先](#接続先)）を入れます。`npm install @devbi/server` で入れます（見本の `examples/nextjs` は、このリポジトリの pnpm のワークスペースでつないでいる）。
 
 ```ts
 // next.config.ts: node_modules の @devbi/server をバンドルせず、Node でそのまま動かす

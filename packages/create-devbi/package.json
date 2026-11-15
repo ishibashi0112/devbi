@@ -1,6 +1,6 @@
 {
   "name": "create-devbi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Start a DevBI project: npm create devbi@latest my-reports",
   "license": "MIT",
   "type": "module",

@@ -46,7 +46,7 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | `examples/oss` | （非公開） | ライブデモ。作者の npm パッケージの日ごとのダウンロード数と、GitHub のリポジトリのスター・フォーク・issue の数を `scripts/fetch-stats.mjs` が CSV にし、`.github/workflows/demo.yml` が毎朝ビルドして GitHub Pages に置く |
 | `examples/sales` | （非公開） | 売上のサンプル。`data/sales.xlsx` は `pnpm gen:data` で作った架空データ。`db/sales.sqlite` は同じ受注を表に分けて入れたもの（`pnpm gen:db`） |
 
-npm にはまだ公開していません。公開できる形（0.1.0、MIT）にはなっていて、npm の Organization `devbi` を作ったあと、手元から `pnpm release` で出します（passkey で確認。[docs/releasing.md](docs/releasing.md)）。公開したあとは、こう始めます。
+npm に公開しています（MIT。出し方は [docs/releasing.md](docs/releasing.md)）。こう始めます。
 
 ```sh
 npm create devbi@latest my-reports
