@@ -117,6 +117,20 @@ test("chart tooltips use the tile background in dark mode", async ({ page }) => 
   expect(fill).toBe(card);
 });
 
+test("the table tile's column menu has the tile's colors in dark mode, though it sits outside the dashboard", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await ready(page);
+  const products = tile(page, "products");
+  const header = products.getByRole("columnheader", { name: /数量/ });
+  await header.hover();
+  await header.getByRole("button", { name: "列メニュー" }).click();
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  const card = await products.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).color]);
+  await expect(menu).toHaveCSS("background-color", card[0]!);
+  await expect(menu).toHaveCSS("color", card[1]!);
+});
+
 test("the page's own script stays small; charts, the table grid and the DuckDB engine load as their own files", async ({ page, request }) => {
   const html = await (await request.get("/")).text();
   const entry = /<script type="module"[^>]*src="\.\/assets\/([^"]+\.js)"/.exec(html)?.[1];

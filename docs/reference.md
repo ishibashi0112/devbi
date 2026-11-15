@@ -1407,7 +1407,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 
 自作タイルでもこの変数を使えば、ダークモードに合わせて色が変わります。
 
-`table` タイルの表（spreadsheet-grid）は、背景・文字・枠線・強調の色をこの変数から取ります。ライト / ダークは `.devbi-root` に合わせます（`data-theme` が `"light"` か `"dark"` ならそれ、ほかは OS の設定）。表だけを変えるときは、`.devbi-root .devbi-table-grid` に spreadsheet-grid の変数（`--ssg-*`）を書きます。列見出しの ⋮ のメニューはページの最後に出るので、その色は spreadsheet-grid のライト / ダークの既定のままです。
+`table` タイルの表（spreadsheet-grid）は、背景・文字・枠線・強調の色をこの変数から取ります。ライト / ダークは `.devbi-root` に合わせます（`data-theme` が `"light"` か `"dark"` ならそれ、ほかは OS の設定）。列見出しの ⋮ のメニューもタイルと同じ色です（メニューはページの最後に出ますが、開くときに表の変数を写します）。表だけを変えるときは、`.devbi-root .devbi-table-grid` に spreadsheet-grid の変数（`--ssg-*`。メニューは `--ssg-panel-*`）を書きます。
 
 ## コマンド
 

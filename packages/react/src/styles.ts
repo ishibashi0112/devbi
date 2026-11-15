@@ -138,15 +138,16 @@ export const css = `
   --ssg-cell-bg: var(--devbi-card); --ssg-header-bg: var(--devbi-card); --ssg-readonly-bg: var(--devbi-card);
   --ssg-cell-text: var(--devbi-text); --ssg-readonly-text: var(--devbi-text); --ssg-header-text: var(--devbi-muted);
   --ssg-accent: var(--devbi-accent); --ssg-line: var(--devbi-border); --ssg-line-strong: var(--devbi-border); --ssg-divider: var(--devbi-border);
+  /* The column menu (⋮) sits at the end of the page, outside .devbi-root; the grid copies these to it when it opens. */
+  --ssg-panel-bg: var(--devbi-card); --ssg-panel-border: var(--devbi-border); --ssg-panel-separator: var(--devbi-border);
+  --ssg-panel-text-strong: var(--devbi-text); --ssg-panel-text: var(--devbi-text); --ssg-panel-text-sub: var(--devbi-muted); --ssg-panel-text-muted: var(--devbi-muted);
+  --ssg-panel-hover-bg: var(--devbi-accent-soft); --ssg-panel-accent: var(--devbi-accent); --ssg-panel-accent-bg: var(--devbi-accent-soft);
   border: 0; border-radius: 0; box-shadow: none;
 }
 .devbi-table-grid .ssg-body-cell { cursor: pointer; }
 .devbi-table-grid .devbi-dimmed { opacity: 1; }
 .devbi-table-grid .ssg-body-cell.devbi-dimmed { opacity: 0.45; }
 .devbi-table-grid .ssg-body-cell.devbi-selected { background: var(--devbi-accent-soft); }
-/* Fitting widths measures each text in a hidden copy of a cell, whose width comes out rounded to whole pixels: a value
-   0.4px wider than that showed as "¥10,489,5…". One extra pixel on the hidden copy only (not on the shown cells). */
-.devbi-table-grid .ssg-shell > [aria-hidden="true"] > .ssg-body-cell::after { content: ""; display: inline-block; width: 1px; }
 .devbi-pivot tbody th { font-weight: 500; }
 .devbi-pivot tbody td { cursor: pointer; }
 .devbi-pivot .devbi-total, .devbi-pivot tfoot th { font-weight: 650; }

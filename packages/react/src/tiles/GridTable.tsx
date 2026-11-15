@@ -82,7 +82,8 @@ export function GridTable({ rows, fields, format, selection, select, tile }: Til
           const v = r[f.name];
           return v instanceof Date ? v.getTime() : v;
         },
-        valueFormatter: ({ row }) => format(row[f.name], f.name),
+        // (No row is passed for group and total rows, which this table does not use: format the value then.)
+        valueFormatter: ({ row, value }) => format(row ? row[f.name] : value, f.name),
         // Copy what is shown (¥1,200 / 94.0% / 2026年5月): Excel reads these as numbers and dates.
         formatClipboardValue: (_value: unknown, row: Row) => format(row[f.name], f.name),
       })),
