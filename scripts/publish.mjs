@@ -96,17 +96,21 @@ if (problem) notice(problem);
 const sha = output("git", ["rev-parse", "HEAD"]).stdout.trim();
 const commit = sha.slice(0, 7);
 
-// GitHub's CI on this commit (typecheck, tests, check:packed): it must have passed.
+// GitHub's CI on this commit (.github/workflows/ci.yml: typecheck, tests, check:packed): each of its jobs passed,
+// in its latest run. Other workflows on the same commit (the live demo's daily build) do not count.
 const githubRepo = packages[0].pkg.repository?.url?.match(/github\.com[/:]([^/]+\/[^/.]+)/)?.[1];
+const ciJobs = [...(readFileSync(path.join(repo, ".github/workflows/ci.yml"), "utf8").split(/^jobs:\s*$/m)[1] ?? "").matchAll(/^ {2}([\w-]+):\s*$/gm)].map((m) => m[1]);
 try {
   const res = await fetch(`https://api.github.com/repos/${githubRepo}/commits/${sha}/check-runs?per_page=100`, { headers: { accept: "application/vnd.github+json" } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const runs = (await res.json()).check_runs;
-  const failed = runs.filter((r) => r.status === "completed" && !["success", "skipped", "neutral"].includes(r.conclusion)).map((r) => r.name);
-  const pending = runs.filter((r) => r.status !== "completed").map((r) => r.name);
+  const latest = (job) => runs.filter((r) => r.name === job).sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))[0];
+  const failed = ciJobs.filter((job) => latest(job)?.status === "completed" && !["success", "skipped", "neutral"].includes(latest(job).conclusion));
+  const pending = ciJobs.filter((job) => latest(job)?.status !== "completed");
+  if (!ciJobs.length) throw new Error(".github/workflows/ci.yml にジョブが見つかりません");
   if (failed.length) notice(`このコミットの CI が通っていません（${failed.join("、")}）: https://github.com/${githubRepo}/commit/${sha}`);
-  else if (pending.length || !runs.length) notice(`このコミットの CI がまだ終わっていません${pending.length ? `（${pending.join("、")}）` : ""}。数分待ってから、もう一度`);
-  else console.log(`このコミット（${commit}）の CI は通っています: ${runs.map((r) => r.name).join("、")}`);
+  else if (pending.length) notice(`このコミットの CI がまだ終わっていません（${pending.join("、")}）。数分待ってから、もう一度`);
+  else console.log(`このコミット（${commit}）の CI は通っています（${ciJobs.join("、")}）`);
 } catch (error) {
   console.log(`（このコミットの CI を確かめられませんでした: ${error.message}。GitHub で main に緑のチェックが付いているのを見てから進めてください）`);
 }

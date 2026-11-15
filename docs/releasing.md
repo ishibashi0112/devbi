@@ -30,7 +30,7 @@
 ### 1. 準備（Claude がします）
 
 - 版を上げる PR（`node scripts/version.mjs 0.1.1` で 6 つの `package.json` の版をそろえて変える）をマージします。最初の公開は、いまの `0.1.0` のままで出します。
-- GitHub の main の最新のコミットに、CI の緑のチェック（型チェック・テスト・`check:packed`）が付いているのを確かめます。
+- GitHub の main の最新のコミットに、CI の緑のチェック（型チェック・テスト・`check:packed`）が付いているのを確かめます（`pnpm release` も確かめます）。
 
 ### 2. 公開（自分でします）
 
@@ -38,17 +38,17 @@
 
 ```sh
 git switch main && git pull                          # GitHub の main と同じにする
-npm login --registry=https://registry.npmjs.org/     # ブラウザが開くので passkey で
+npm login --registry=https://registry.npmjs.org/     # Enter を押すとブラウザが開くので、passkey で
 pnpm release
 ```
 
 `pnpm release` は、次の順に進みます。
 
-1. 確かめる: main と同じで変更がないこと、6 つの版がそろっていること、npm にログインしていること、Organization `devbi` があること。どれかが違うと、何も出さずに止まり、何をすればいいかを出します。
-2. `pnpm install --frozen-lockfile` と `pnpm build` をして、6 つをパックします（ここまでで 1〜2 分）。
+1. 確かめる: main と同じで変更がないこと、そのコミットの CI が通っていること、6 つの版がそろっていること、npm にログインしていること、Organization `devbi` があってそのメンバーであること。どれかが違うと、何も出さずに止まり、何をすればいいかを出します。
+2. `pnpm install --frozen-lockfile` と `pnpm build` をして、6 つをパックします（ここまでで 1〜2 分）。パックしたものに git にないファイル（`.env.local` など、このパソコンにだけあるもの）が入っていたら、止まります。
 3. 出すものの一覧を出して、`y` の入力を待ちます。
 4. 1 つずつ `npm publish` します。npm が passkey での確認を求めたら（`Authenticate your account at:` と出て、Enter でブラウザが開きます）、ブラウザで passkey を使います。パッケージごとに求められることがあります。
-5. npm から版を読み直して、6 つとも `OK` と出たら終わりです。
+5. npm から版を読み直して、出したものがすべて `OK` と出たら終わりです。
 
 先に、何も出さずに通しで試すこともできます（ログインも Organization も要りません）:
 
@@ -74,12 +74,14 @@ git tag v0.1.0 && git push origin v0.1.0
 
 ## うまくいかないとき
 
-- **途中で止まった**: 直して、もう一度 `pnpm release`。npm にもうある版は飛ばすので、続きから出します。
+- **途中で止まった**: 直して、もう一度 `pnpm release`。npm にもうある版は飛ばすので、続きから出します。その間にコードを変えたときは、続きではなく版を上げて出し直します（同じ版の中で、出したときのコードが混ざらないように）。
 - **`ENEEDAUTH` や `E401`**: ログインが切れています。`npm login --registry=https://registry.npmjs.org/` をして、もう一度。
 - **`@devbi/〜` で `E403` や `E404`**: Organization `devbi` がないか、そのメンバーになっていないログインで出しています（`npm whoami` で確かめます）。
-- **出したものに間違いがあった**: 同じ版は、消しても二度と使えません。直して版を上げ（`0.1.1`）、出し直します。間違った版には `npm deprecate devbi@0.1.0 "0.1.1 を使ってください"` で印を付けます。
+- **出したものに間違いがあった**: 同じ版は、消しても二度と使えません。直して版を上げ（`0.1.1`）、出し直します。間違った版には、6 つそれぞれに `npm deprecate devbi@0.1.0 "0.1.1 を使ってください"` で印を付けます（それぞれ passkey を求められます）。
+- **見せてはいけないものが入っていた**: 出して 72 時間のうちなら `npm unpublish <名前>@<版>` で消せます。ほかが使っている `devbi` を最後にして、`create-devbi` から逆の順に消します。版が 1 つしかないパッケージを消すと、その名前には 24 時間出せません。
 - `0.2.0-beta.1` のような版（プレリリース）は、npm の `next` で出ます（`npm create devbi@next` で使えて、`@latest` は前のまま）。
-- `pnpm release` は、パソコンの npm がふだん別のレジストリ（会社のミラーなど）を向いていても、いつも <https://registry.npmjs.org/> に出します。
+- `pnpm release` は、パソコンの npm がふだん別のレジストリ（会社のミラーなど）を向いていても、`@devbi` の分も含めて、いつも <https://registry.npmjs.org/> に出します。
+- 前の手順（GitHub Actions から出す）で npm のトークン（Bypass 2FA）や GitHub の Secret `NPM_TOKEN` を作っていたら、もう使わないので消しておきます。
 
 ## 公開の前に確かめること（pnpm check:packed）
 
