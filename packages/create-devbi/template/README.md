@@ -7,7 +7,7 @@
 ```sh
 {{install}}
 {{run}} dev        # http://localhost:5173 。見出しの右の「編集」で GUI エディタ
-{{run}} build      # dist/ に静的なサイトを作る（どのフォルダに置いても開ける）
+{{run}} build      # dist/ に静的なサイトを作る（Web サーバーのどのフォルダに置いても開ける）
 {{run}} preview    # ビルドしたものを開く
 {{run}} typecheck  # 自作タイル（.tsx）の型チェック
 {{run}} check      # 指標とすべてのタイルのクエリをデータに流して確かめる（ブラウザを開かずに）
@@ -28,6 +28,10 @@ data/sales.xlsx                # データ（架空の受注明細）。CSV・Pa
 - `data/` に自分の Excel や CSV を置き、`{{run}} inspect -- data/<ファイル>` で列を見て、`models/` の `model:` をそのファイルに向け、指標と軸を書く。書いたら `{{run}} check`
 - `{{run}} dev` で開いたページの「編集」で、タイルを足して指標と軸を選ぶ。保存すると dash.json に書かれる
 - 組み込みのタイルで足りない表示は、エディタの「コードにする」で .tsx に書き出し、React で描く
+
+## 社内に公開する
+
+`{{run}} build` でできる `dist/` を、社内の Web サーバー（IIS など）に置くと、ほかの人もブラウザで見られます（`index.html` を直接開いても動きません）。置き方と、ログイン・データの守り方は [社内に公開する](https://github.com/ishibashi0112/devbi/blob/main/docs/deploying.md)。
 
 ## AI に頼む
 

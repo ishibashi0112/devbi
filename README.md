@@ -27,7 +27,7 @@ pnpm e2e              # パッケージと examples/sales をビルドして dev
 pnpm check:packed     # パッケージを npm に出す形に固め、create-devbi で作ったプロジェクトに npm と pnpm で入れて確認
 ```
 
-画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。
+画面を触って確かめる手順と、期待する結果の一覧は [docs/manual-check.md](docs/manual-check.md)。ファイル形式と API の一覧は [docs/reference.md](docs/reference.md)。社内の人がブラウザで見られるように置く方法（静的なサイト、`devbi-serve`、社内のアプリへの埋め込み）は [docs/deploying.md](docs/deploying.md)。
 
 e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on the web に入っている Chromium と同じ版）。別のブラウザで動かすときは `E2E_BROWSER_EXECUTABLE` に実行ファイルのパスを渡します。
 
@@ -62,7 +62,7 @@ dashboards/
 models/
   sales.metrics.yaml       # 指標と軸
 data/
-  sales.xlsx               # または .csv / .arrow / .parquet
+  sales.xlsx               # または .csv / .arrows / .parquet
 api/
   orders.sql               # read_api('orders') でデータベースから読む SELECT（サーバーだけが使う）
   sales_daily.sql          # 先頭に -- snapshot: 06:00 と書くと、毎朝作ったファイルから読む

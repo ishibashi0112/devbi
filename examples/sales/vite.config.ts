@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { defaultClientConditions, defineConfig } from "vite";
 
 export default defineConfig({
-  // Relative asset paths so dist/ works from any folder (IIS, a file share, GitHub Pages).
+  // Relative asset paths so dist/ works from any folder of a web server (IIS, nginx, GitHub Pages; not opened as a file).
   base: "./",
   // embed: also build devbi-embed.js, the one script that puts these dashboards into another app's page
   // (see public/embed-demo.html).

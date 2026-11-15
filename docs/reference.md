@@ -1,6 +1,6 @@
 # DevBI リファレンス（v0）
 
-DevBI のファイル形式と API の一覧です。v0 なので、1.0 までに名前や形が変わることがあります。使い方の流れは [README](../README.md)、画面での確かめ方は [manual-check.md](manual-check.md) を見てください。
+DevBI のファイル形式と API の一覧です。v0 なので、1.0 までに名前や形が変わることがあります。使い方の流れは [README](../README.md)、画面での確かめ方は [manual-check.md](manual-check.md)、社内の人に見せる置き方（静的なサイト、`devbi-serve`、社内のアプリへの埋め込み）は [deploying.md](deploying.md) を見てください。
 
 - [はじめる（create-devbi）](#はじめるcreate-devbi)
 - [プロジェクトの形](#プロジェクトの形)
@@ -53,7 +53,7 @@ dashboards/
 models/
   <名前>.metrics.yaml     # 指標と軸。dash.json の "metrics" で名前を指す
 data/
-  *.xlsx / *.csv / *.arrow / *.parquet / *.json
+  *.xlsx / *.csv / *.arrows / *.parquet / *.json
 api/
   <名前>.sql              # read_api('<名前>') でデータベースから読む SELECT。サーバーだけが使う（ビルドに入らず、開発サーバーもブラウザに渡さない）
 dist/snapshots/           # 毎朝のスナップショット（devbi-serve / devbi-snapshot が作る。git に入れない）
@@ -96,7 +96,7 @@ measures:
 | --- | --- | --- |
 | `read_xlsx('data/x.xlsx', sheet = '明細', range = 'A3:K', header = true, all_varchar = false)` | Excel | DevBI が自前で読む。引数は `sheet` 以外は省略可 |
 | `read_csv('data/x.csv')` / `read_csv_auto(...)` | CSV | DuckDB が読む |
-| `read_arrow('data/x.arrow')` | Arrow IPC | DuckDB が読む |
+| `read_arrow('data/x.arrows')` | Arrow IPC のストリーム形式 | DuckDB が読む。Arrow の file 形式（Feather v2。`.arrow` によく使う形）は読めない（「ArrowIpcDecoderDecodeHeader … failed」のエラー） |
 | `read_parquet('data/x.parquet')` | Parquet | DuckDB の拡張が要る（[@devbi/vite](#devbivite) の `extensionRepository`） |
 | `read_json(...)` / `read_ndjson(...)` | JSON | DuckDB が読む |
 | `read_api('orders', from = '2025-04-01')` | データベース | サーバーの `api/orders.sql` の結果を API から受け取る。[データベースから読む](#データベースから読むdevbiserver) |
