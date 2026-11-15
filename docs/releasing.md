@@ -29,7 +29,7 @@
 
 ### 1. 準備（Claude がします）
 
-- 版を上げる PR（`node scripts/version.mjs 0.1.1` で 6 つの `package.json` の版をそろえて変える）をマージします。最初の公開は、いまの `0.1.0` のままで出します。
+- 版を上げる PR（`node scripts/version.mjs 0.1.2` のように、6 つの `package.json` の版をそろえて変える）をマージします。最初の 0.1.0（2026-11-15）は版を上げずに出しました。
 - GitHub の main の最新のコミットに、CI の緑のチェック（型チェック・テスト・`check:packed`）が付いているのを確かめます（`pnpm release` も確かめます）。
 
 ### 2. 公開（自分でします）
@@ -66,10 +66,10 @@ npm create devbi@latest my-reports && cd my-reports && npm install && npm run de
 
 npm のページ: <https://www.npmjs.com/package/devbi>、<https://www.npmjs.com/org/devbi>
 
-最後に、出したコミットに印（タグ）を付けておくと、あとでどのコミットから出したかが分かります（任意。`pnpm release` が最後にこのコマンドを出します）:
+最後に、出したコミットに印（タグ）を付けておくと、あとでどのコミットから出したかが分かります（任意。`pnpm release` が最後に、出した版でこのコマンドを出します）:
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.1 && git push origin v0.1.1
 ```
 
 ## うまくいかないとき

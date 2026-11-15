@@ -1,6 +1,6 @@
 {
   "name": "@devbi/vite",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vite plugin for DevBI: reads dashboards/ and models/, bundles promoted tiles, copies data files into the build. Also devbi-check and devbi-inspect.",
   "license": "MIT",
   "type": "module",

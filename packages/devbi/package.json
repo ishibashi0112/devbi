@@ -1,6 +1,6 @@
 {
   "name": "devbi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "BI for developers: dashboards as files in git, tiles as JSX, DuckDB in the browser.",
   "license": "MIT",
   "type": "module",
