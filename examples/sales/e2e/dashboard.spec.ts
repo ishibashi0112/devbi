@@ -117,6 +117,28 @@ test("chart tooltips use the tile background in dark mode", async ({ page }) => 
   expect(fill).toBe(card);
 });
 
+test("the table tile's column menu opens from the keyboard and has the tile's colors and font in dark mode", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await ready(page);
+  const products = tile(page, "products");
+  // A cell of the 数量 column becomes the active cell (the second click clears the filter the first one set).
+  const cell = products.locator('[role=gridcell][data-ssg-col-key="quantity"]').first();
+  await cell.click();
+  await expect(page.locator(".devbi-filters")).toContainText("商品:");
+  await cell.click();
+  await expect(page.locator(".devbi-chip")).toHaveCount(1);
+  await page.keyboard.press("Alt+ArrowDown");
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expect(menu).toContainText("数量");
+  // The menu sits at the end of the page, outside the dashboard, and still looks like the tile.
+  await expect(page.locator(".devbi-root").getByRole("menu")).toHaveCount(0);
+  const card = await products.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).color, getComputedStyle(el).fontFamily]);
+  await expect(menu).toHaveCSS("background-color", card[0]!);
+  await expect(menu).toHaveCSS("color", card[1]!);
+  await expect(menu).toHaveCSS("font-family", card[2]!);
+});
+
 test("the page's own script stays small; charts, the table grid and the DuckDB engine load as their own files", async ({ page, request }) => {
   const html = await (await request.get("/")).text();
   const entry = /<script type="module"[^>]*src="\.\/assets\/([^"]+\.js)"/.exec(html)?.[1];
@@ -167,14 +189,16 @@ test("the table tile (spreadsheet-grid): a row click or Enter filters the other 
   await products.getByRole("gridcell", { name: "グリス" }).click({ modifiers: ["Shift"] });
   await expect(page.locator(".devbi-chip")).toHaveCount(1);
 
-  // Fitted widths show every value whole (no "¥10,489,5…").
+  // Fitted widths show every value whole (no "¥10,489,5…"): the text is no wider than the box it sits in, inside its padding.
   const clipped = await products.getByRole("gridcell").evaluateAll((cells) =>
     cells
       .filter((c) => {
-        const range = document.createRange();
-        range.selectNodeContents(c);
         const box = c.firstElementChild ?? c;
-        return range.getBoundingClientRect().width > box.getBoundingClientRect().width + 0.01;
+        const range = document.createRange();
+        range.selectNodeContents(box);
+        const s = getComputedStyle(box);
+        const inner = box.getBoundingClientRect().width - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+        return range.getBoundingClientRect().width > inner + 0.01;
       })
       .map((c) => (c as HTMLElement).innerText),
   );
