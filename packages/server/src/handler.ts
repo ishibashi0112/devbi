@@ -70,7 +70,7 @@ export interface RequestOptions {
   user?: DevBIUser | null;
   /**
    * Added in parentheses to the message of a `401` (nobody signed in): how to sign in. The dev server's
-   * 「上の『表示する利用者』で選びます」.
+   * 「開発サーバーのダッシュボードの右上の『表示する利用者』で選びます」.
    */
   signInHint?: string;
 }

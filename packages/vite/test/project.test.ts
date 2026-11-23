@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -220,11 +220,34 @@ describe("devUsers (「表示する利用者」)", () => {
     expect(devUserRequest(users, "devbi-dev-user=sato", true)).toEqual({ user: { id: "sato" } });
     // Another computer (vite --host) sending the cookie itself: nobody.
     expect(devUserRequest(users, "devbi-dev-user=yamada", false)).toEqual({ signInHint: expect.stringContaining("動かしているパソコン") });
-    expect(devUserRequest(users, undefined, true)).toEqual({ signInHint: "上の『表示する利用者』で選びます" });
-    expect(devUserRequest(users, "devbi-dev-user=", true)).toEqual({ signInHint: "上の『表示する利用者』で選びます" });
+    expect(devUserRequest(users, undefined, true)).toEqual({ signInHint: "開発サーバーのダッシュボードの右上の『表示する利用者』で選びます" });
+    expect(devUserRequest(users, "devbi-dev-user=", true)).toEqual({ signInHint: "開発サーバーのダッシュボードの右上の『表示する利用者』で選びます" });
     expect(devUserRequest(users, "devbi-dev-user=toString", true)).toEqual({ signInHint: expect.stringContaining("devUsers に toString がありません") });
     expect(devUserRequest(undefined, "devbi-dev-user=yamada", true)).toEqual({ signInHint: expect.stringContaining("devUsers") });
     expect(devUserRequest("preview", "devbi-dev-user=yamada", true)).toEqual({ signInHint: expect.stringContaining("vite preview") });
+    // Through a proxy or tunnel, or a name any page could point here: nobody.
+    expect(devUserRequest(users, "devbi-dev-user=yamada", "proxy")).toEqual({ signInHint: expect.stringContaining("プロキシーやトンネル") });
+    expect(devUserRequest(users, "devbi-dev-user=yamada", "host")).toEqual({ signInHint: expect.stringContaining("localhost か IP アドレス") });
+    // An unknown name is echoed on one line, cut short.
+    const long = devUserRequest(users, `devbi-dev-user=${encodeURIComponent(`a\nb${"x".repeat(5000)}`)}`, true).signInHint!;
+    expect(long).toBe(`devUsers に a b${"x".repeat(37)}… がありません。『表示する利用者』で選び直します`);
+  });
+
+  it("takes the cookie only from a request straight from this computer", async () => {
+    const { devUserOrigin } = await import("../src/index.js");
+    const req = (remoteAddress: string, headers: Record<string, string> = {}, localAddress = "127.0.0.1") => ({ socket: { remoteAddress, localAddress }, headers: { host: "localhost:5173", ...headers } });
+    expect(devUserOrigin(req("127.0.0.1"), undefined)).toBe(true);
+    expect(devUserOrigin(req("::1", {}, "::1"), undefined)).toBe(true);
+    expect(devUserOrigin(req("::ffff:127.0.0.1"), undefined)).toBe(true);
+    // the LAN address of this computer, opened on this computer
+    expect(devUserOrigin(req("192.168.1.5", {}, "192.168.1.5"), undefined)).toBe(true);
+    expect(devUserOrigin(req("192.168.1.9", {}, "192.168.1.5"), undefined)).toBe(false);
+    expect(devUserOrigin(req(""), undefined)).toBe(false);
+    for (const h of ["x-forwarded-for", "forwarded", "via", "x-real-ip", "cf-connecting-ip"]) expect(devUserOrigin(req("127.0.0.1", { [h]: "203.0.113.7" }), undefined)).toBe("proxy");
+    // allowedHosts: true lets any name in (DNS rebinding): only localhost and IP addresses then
+    expect(devUserOrigin(req("127.0.0.1", { host: "evil.example" }), true)).toBe("host");
+    expect(devUserOrigin(req("127.0.0.1", { host: "evil.example" }), ["evil.example"])).toBe(true);
+    for (const host of ["localhost:5173", "app.localhost", "127.0.0.1:5173", "[::1]:5173", "192.168.1.5"]) expect(devUserOrigin(req("127.0.0.1", { host }), true)).toBe(true);
   });
 
   it("filters the API's rows by the user picked, and tells the page whom it can pick", async () => {
@@ -244,10 +267,10 @@ describe("devUsers (「表示する利用者」)", () => {
     try {
       const base = server.resolvedUrls!.local[0]!;
       const { tableFromIPC } = await import("apache-arrow");
-      const ask = async (cookie?: string) => {
+      const ask = async (cookie?: string, more: Record<string, string> = {}) => {
         const res = await fetch(new URL("api/query", base), {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+          headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}), ...more },
           body: JSON.stringify({ name: "mine" }),
         });
         if (!res.ok) return `${res.status} ${((await res.json()) as { error: string }).error}`;
@@ -258,8 +281,10 @@ describe("devUsers (「表示する利用者」)", () => {
       };
       expect(await ask("devbi-dev-user=yamada")).toBe("関東 10, 関東 5");
       expect(await ask("devbi-dev-user=suzuki")).toBe("近畿 7");
-      expect(await ask()).toBe("401 ログインしていません（上の『表示する利用者』で選びます）");
+      expect(await ask()).toBe("401 ログインしていません（開発サーバーのダッシュボードの右上の『表示する利用者』で選びます）");
       expect(await ask("devbi-dev-user=sato")).toBe("403 利用者 sato に属性 region がありません（api/mine.sql の :user.region）");
+      // what a proxy on this computer passes on: not this computer's page
+      expect(await ask("devbi-dev-user=yamada", { "X-Forwarded-For": "203.0.113.7" })).toMatch(/^401 ログインしていません（.*プロキシーやトンネル/);
       // The page's list (virtual:devbi on the dev server): names and what each is, not the cookie's value.
       const mod = await server.transformRequest("virtual:devbi");
       expect(mod?.code).toContain(JSON.stringify([{ name: "yamada", note: "営業・region 関東" }, { name: "suzuki", note: "region 近畿" }, { name: "sato" }]));
@@ -279,5 +304,9 @@ describe("devUsers (「表示する利用者」)", () => {
     await expect(start({ yamada: { attrs: { id: "x" } } })).rejects.toThrow("devbi: devUsers の yamada: ");
     await expect(start({ yamada: { id: "" } })).rejects.toThrow("devbi: devUsers の yamada: id は空でない文字で書いてください");
     await expect(start({ yamada: "営業" })).rejects.toThrow("devbi: devUsers の yamada: { roles, attrs } の形で書いてください");
+    await expect(start({ " ": {} })).rejects.toThrow("devbi: devUsers の  : 名前は空でない文字で書いてください");
+    // without api/ too: the list is still on the page
+    rmSync(path.join(dir, "api"), { recursive: true });
+    await expect(start({ yamada: { roles: "営業" } })).rejects.toThrow("devbi: devUsers の yamada: ");
   });
 });

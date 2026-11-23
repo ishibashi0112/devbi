@@ -12,7 +12,7 @@ test("each user sees the rows of their own region; nobody signed in sees none", 
   await page.goto("/");
   // Nobody picked yet: the API answers 401, and the tile says where to pick someone.
   await expect(picker(page)).toHaveValue("");
-  await expect(tile(page, "kpi-revenue").locator(".devbi-error")).toHaveText("API の orders を読めません（401）: ログインしていません（上の『表示する利用者』で選びます）");
+  await expect(tile(page, "kpi-revenue").locator(".devbi-error")).toHaveText("API の orders を読めません（401）: ログインしていません（開発サーバーのダッシュボードの右上の『表示する利用者』で選びます）");
 
   await picker(page).selectOption("yamada");
   await expect(kpi(page)).toHaveText("¥72,393,280");
@@ -45,4 +45,29 @@ test("the browser cannot choose the user's values itself", async ({ request }) =
   expect(schema.access).toBe(1);
   expect(schema.user).toEqual({ id: "CORP\\yamada" });
   expect(schema.datasets.find((d: { name: string }) => d.name === "orders").params).toEqual(["from"]);
+});
+
+test("one pick per browser: another tab's pick is read again here, and a name no longer in devUsers can be dropped", async ({ context, page }) => {
+  await page.goto("/");
+  await picker(page).selectOption("yamada");
+  await expect(kpi(page)).toHaveText("¥72,393,280");
+  const other = await context.newPage();
+  await other.goto("/");
+  await picker(other).selectOption("suzuki");
+  await expect(kpi(other)).toHaveText("¥42,290,840");
+  // back on the first tab: read again as suzuki, no yamada rows left
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(picker(page)).toHaveValue("suzuki");
+  await expect(kpi(page)).toHaveText("¥42,290,840");
+  await other.close();
+
+  // A cookie naming someone no longer in devUsers: listed as such, and （ログインなし） drops it
+  await context.addCookies([{ name: "devbi-dev-user", value: "tanaka", url: page.url() }]);
+  await page.reload();
+  await expect(picker(page)).toHaveValue("tanaka");
+  await expect(picker(page).locator("option:checked")).toHaveText("tanaka（devUsers にありません）");
+  await expect(tile(page, "kpi-revenue").locator(".devbi-error")).toContainText("devUsers に tanaka がありません");
+  await picker(page).selectOption("");
+  await expect(tile(page, "kpi-revenue").locator(".devbi-error")).toContainText("（開発サーバーのダッシュボードの右上の『表示する利用者』で選びます）");
+  expect((await context.cookies()).some((c) => c.name === "devbi-dev-user")).toBe(false);
 });

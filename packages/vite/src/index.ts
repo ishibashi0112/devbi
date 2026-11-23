@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { isIP } from "node:net";
 import path from "node:path";
 import {
   DashboardError,
@@ -372,22 +373,64 @@ function realPath(p: string): string {
 }
 
 /**
- * Who the API of Vite's server answers as. The dev server: the one of devUsers the page picked (its cookie), for
- * requests from this computer only. Otherwise nobody, with how to pick one for the 401's message. `vite preview`:
- * nobody.
+ * Whether a request to the dev server may say which of devUsers it views as: it comes straight from this computer.
+ * Not through a proxy or tunnel (a header that says it passed one: the request may be anyone's), and, when
+ * `server.allowedHosts` is `true` (which lets any page point a name of its own at this server), only to localhost or
+ * an IP address. `"proxy"` and `"host"` are those cases, `false` another computer.
  */
-export function devUserRequest(users: Record<string, DevUser> | undefined | "preview", cookie: string | undefined, fromThisComputer: boolean): RequestOptions {
+export function devUserOrigin(
+  req: { socket: { remoteAddress?: string | undefined; localAddress?: string | undefined }; headers: Record<string, string | string[] | undefined> },
+  allowedHosts: unknown,
+): boolean | "proxy" | "host" {
+  if (!sameMachine(req as IncomingMessage)) return false;
+  if (PROXY_HEADERS.some((h) => req.headers[h] !== undefined)) return "proxy";
+  if (allowedHosts === true && !localHostName(req.headers.host)) return "host";
+  return true;
+}
+
+const PROXY_HEADERS = ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "via", "cf-connecting-ip", "true-client-ip", "x-client-ip"];
+
+/** localhost, a name under .localhost, or an IP address (no page can point those at this server). */
+function localHostName(host: string | string[] | undefined): boolean {
+  if (typeof host !== "string") return false;
+  const name = host.startsWith("[") ? host.slice(1, host.indexOf("]")) : host.replace(/:\d*$/, "");
+  const lower = name.toLowerCase().replace(/\.$/, "");
+  return lower === "localhost" || lower.endsWith(".localhost") || isIP(lower) !== 0;
+}
+
+/**
+ * Who the API of Vite's server answers as. The dev server: the one of devUsers the page picked (its cookie), for
+ * requests straight from this computer only (devUserOrigin). Otherwise nobody, with how to pick one for the 401's
+ * message. `vite preview`: nobody.
+ */
+export function devUserRequest(
+  users: Record<string, DevUser> | undefined | "preview",
+  cookie: string | undefined,
+  fromThisComputer: boolean | "proxy" | "host",
+): RequestOptions {
   if (users === "preview") return { signInHint: "vite preview では利用者を選べません。開発サーバー（vite）の『表示する利用者』で確かめます" };
   if (!users || !Object.keys(users).length) {
     return { signInHint: "開発サーバーでは、vite.config.ts の devbi({ devUsers }) に書いた人として見られます" };
   }
   const picked = cookieValue(cookie, DEV_USER_COOKIE);
-  if (picked === undefined || picked === "") return { signInHint: "上の『表示する利用者』で選びます" };
+  if (picked === undefined || picked === "") return { signInHint: "開発サーバーのダッシュボードの右上の『表示する利用者』で選びます" };
   // Another computer (vite --host) does not become someone by sending the cookie: the API reads .env's databases.
-  if (!fromThisComputer) return { signInHint: "『表示する利用者』は、開発サーバーを動かしているパソコンで開いたページからだけ使えます" };
-  if (!Object.hasOwn(users, picked)) return { signInHint: `devUsers に ${picked} がありません。上の『表示する利用者』で選び直します` };
+  if (fromThisComputer === false) return { signInHint: "『表示する利用者』は、開発サーバーを動かしているパソコンで開いたページからだけ使えます" };
+  if (fromThisComputer === "proxy") {
+    return { signInHint: "『表示する利用者』は、開発サーバーにじかにつないだページからだけ使えます（プロキシーやトンネルを通したページからは使えません）" };
+  }
+  if (fromThisComputer === "host") {
+    return { signInHint: "server.allowedHosts が true なので、『表示する利用者』は localhost か IP アドレスで開いたページからだけ使えます" };
+  }
+  if (!Object.hasOwn(users, picked)) return { signInHint: `devUsers に ${shortName(picked)} がありません。『表示する利用者』で選び直します` };
   const u = users[picked]!;
   return { user: { id: u.id ?? picked, ...(u.roles ? { roles: u.roles } : {}), ...(u.attrs ? { attrs: u.attrs } : {}) } };
+}
+
+/** A cookie's value as a message shows it: one line, at most 40 characters. */
+function shortName(name: string): string {
+  const line = name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ");
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line;
 }
 
 /** devUsers as the page lists them: `{ name: "yamada", note: "営業・region 関東" }`. */
@@ -523,7 +566,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   };
 
   const asUser = (req: IncomingMessage, preview: boolean): RequestOptions =>
-    devUserRequest(preview ? "preview" : options.devUsers, req.headers.cookie, sameMachine(req));
+    devUserRequest(preview ? "preview" : options.devUsers, req.headers.cookie, devUserOrigin(req, config.server.allowedHosts));
 
   /** A dashboard, metrics, data or api file, by its path in the project folder; anything else: undefined. */
   const projectChange = (file: string): string | undefined => {
@@ -678,10 +721,11 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
     },
     async configureServer(server: ViteDevServer) {
       // devUsers as the API takes users: a mistake stops the dev server here, not each request later.
-      if (options.devUsers && existsSync(path.join(dir, "api"))) {
+      if (options.devUsers) {
         const { viewerOf } = await import("@devbi/server");
         for (const [name, u] of Object.entries(options.devUsers)) {
           try {
+            if (!name.trim()) throw new TypeError("名前は空でない文字で書いてください");
             if (typeof u !== "object" || u === null || Array.isArray(u)) throw new TypeError("{ roles, attrs } の形で書いてください");
             if (u.id !== undefined && (typeof u.id !== "string" || !u.id.trim())) throw new TypeError("id は空でない文字で書いてください");
             viewerOf({ id: u.id ?? name, ...(u.roles ? { roles: u.roles } : {}), ...(u.attrs ? { attrs: u.attrs } : {}) });

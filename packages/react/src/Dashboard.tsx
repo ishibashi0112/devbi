@@ -392,18 +392,32 @@ function EditorHost({ dev, theme, children }: { dev: DevServer; theme?: Theme; c
  */
 function DevUserPicker({ users }: { users: readonly DevUserInfo[] }) {
   const [current] = useState(readDevUser);
-  const known = users.some((u) => u.name === current) ? current : "";
+  // A pick another tab made since this page read its rows: read them again as that one (one browser, one pick).
+  useEffect(() => {
+    const again = () => {
+      if (document.visibilityState === "visible" && readDevUser() !== current) location.reload();
+    };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, [current]);
+  // One no longer in devUsers stays listed, so that （ログインなし） can be picked to drop it.
+  const gone = current !== "" && !users.some((u) => u.name === current);
   return (
     <label className="devbi-dev-user" title="開発サーバーだけのものです。選んだ人として API が答えます">
       表示する利用者
       <select
-        value={known}
+        value={current}
         onChange={(e) => {
           writeDevUser(e.target.value);
           location.reload();
         }}
       >
         <option value="">（ログインなし）</option>
+        {gone && <option value={current}>{`${current}（devUsers にありません）`}</option>}
         {users.map((u) => (
           <option key={u.name} value={u.name}>
             {u.note ? `${u.name}（${u.note}）` : u.name}
