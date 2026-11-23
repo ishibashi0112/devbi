@@ -1,7 +1,10 @@
 node_modules/
 dist/
-# 開発サーバーと devbi-gen が models/ から作る補完と型（git に入れない）
-.devbi/
+# 開発サーバーと devbi-gen が models/ と api/ から作る補完と型（git に入れない）。
+# columns.json（データセットの列をデータベースに聞いた答え）だけは git に入れる: データベースにつながらない
+# CI やほかの人の手元でも、同じ行の型になるように
+.devbi/*
+!.devbi/columns.json
 *.tsbuildinfo
 .vite/
 .DS_Store

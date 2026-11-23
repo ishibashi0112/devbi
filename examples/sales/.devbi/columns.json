@@ -1,0 +1,66 @@
+{
+  "customer_totals": {
+    "sql": "7a679a2e05ae7196",
+    "columns": [
+      { "name": "顧客ID", "type": "int" },
+      { "name": "地域", "type": "string" },
+      { "name": "顧客", "type": "string" },
+      { "name": "受注数" },
+      { "name": "数量" },
+      { "name": "金額" }
+    ]
+  },
+  "customers": {
+    "sql": "1161396b86c9f974",
+    "columns": [
+      { "name": "顧客ID", "type": "int" },
+      { "name": "顧客", "type": "string" }
+    ]
+  },
+  "order_lines": {
+    "sql": "bb5dba61913c7845",
+    "columns": [
+      { "name": "受注日" },
+      { "name": "受注番号", "type": "string" },
+      { "name": "行番号", "type": "int" },
+      { "name": "顧客", "type": "string" },
+      { "name": "地域", "type": "string" },
+      { "name": "商品分類", "type": "string" },
+      { "name": "商品", "type": "string" },
+      { "name": "数量", "type": "int" },
+      { "name": "単価", "type": "int" },
+      { "name": "金額" }
+    ]
+  },
+  "orders": {
+    "sql": "7dd1cef35a593266",
+    "columns": [
+      { "name": "受注日" },
+      { "name": "受注番号", "type": "string" },
+      { "name": "顧客", "type": "string" },
+      { "name": "地域", "type": "string" },
+      { "name": "商品分類", "type": "string" },
+      { "name": "商品", "type": "string" },
+      { "name": "数量", "type": "int" },
+      { "name": "単価", "type": "int" },
+      { "name": "金額" }
+    ]
+  },
+  "regions": {
+    "sql": "c6a7fdad9fe9c320",
+    "columns": [
+      { "name": "地域", "type": "string" }
+    ]
+  },
+  "sales_daily": {
+    "sql": "f6deb1ef1db71f55",
+    "columns": [
+      { "name": "受注日" },
+      { "name": "地域", "type": "string" },
+      { "name": "商品分類", "type": "string" },
+      { "name": "金額" },
+      { "name": "数量" },
+      { "name": "明細数" }
+    ]
+  }
+}

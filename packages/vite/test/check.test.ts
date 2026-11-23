@@ -34,7 +34,55 @@ describe("devbi-check", () => {
     // A promoted tile's `query` export, read through Vite.
     expect(sales.find((t) => t.id === "top-customers")?.rows).toBe(10);
     expect(sales.find((t) => t.id === "period")?.note).toBe("データを読まないタイル");
+    // The report's tables: their columns asked of the sample SQLite database (api/describe), not their rows.
+    expect(r.tiles.find((t) => t.id === "customers")?.note).toBe(
+      "データセット customer_totals（api/customer_totals.sql）を読むタイル。列 6 個の名前はデータベースに聞いて確かめました。行はデータベースから読むため数えていません",
+    );
     expect(formatReport(r)).toMatch(/問題はありません$/);
+  }, 60_000);
+
+  it("a report's columns asked of its database: names in options and -- key: that the result does not have", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-check-"));
+    for (const d of ["api", "dashboards", "db"]) mkdirSync(path.join(dir, d));
+    cpSync(path.join(SALES, "db/sales.sqlite"), path.join(dir, "db/sales.sqlite"));
+    const files: Record<string, string> = {
+      "api/totals.sql": "-- key: 顧客番号\nSELECT c.id AS 顧客ID, c.region AS 地域, COUNT(*) AS 受注数 FROM orders o JOIN customers c ON c.id = o.customer_id GROUP BY c.id, c.region",
+      "api/broken.sql": "SELECT nope FROM customers",
+      "dashboards/r.dash.json": JSON.stringify({
+        tiles: [
+          tile("a", 0, { type: "table", query: { dataset: "totals" }, options: { columns: ["顧客名", "受注数"], groupBy: ["地方"] } }),
+          tile("b", 2, { type: "table", query: { dataset: "totals" } }),
+          tile("c", 4, { type: "table", query: { dataset: "broken" } }),
+        ],
+      }),
+    };
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+    const r = await checkProject(dir, { env: { DEVBI_DB: "sqlite:db/sales.sqlite" } });
+    expect(r.findings.map((f) => `${f.level} ${f.file} ${f.message}`)).toEqual([
+      "error dashboards/r.dash.json タイル a: options.columns の「顧客名」は結果の列にありません（列: 顧客ID、地域、受注数）",
+      "error dashboards/r.dash.json タイル a: options.groupBy の「地方」は結果の列にありません（列: 顧客ID、地域、受注数）",
+      // once for the file, not per tile
+      "error api/totals.sql -- key: の 顧客番号 は結果の列にありません（列: 顧客ID、地域、受注数）",
+      "warning api/broken.sql データベースが列を答えませんでした（api/broken.sql: no such column: nope）。列の名前は確かめていません",
+    ]);
+    expect(r.tiles.find((t) => t.id === "c")?.note).toBe("データセット broken（api/broken.sql）を読むタイル。列の名前は確かめていません。行はデータベースから読むため数えていません");
+  }, 60_000);
+
+  it("a report whose database does not answer: its columns are not checked, and that is a note, not a warning", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-check-"));
+    for (const d of ["api", "dashboards"]) mkdirSync(path.join(dir, d));
+    const files: Record<string, string> = {
+      "api/a.sql": "SELECT 1 AS x",
+      "api/b.sql": "SELECT 2 AS y",
+      "dashboards/r.dash.json": JSON.stringify({
+        tiles: [tile("a", 0, { type: "table", query: { dataset: "a" }, options: { columns: ["nope"] } }), tile("b", 2, { type: "table", query: { dataset: "b" } })],
+      }),
+    };
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+    // a port nothing listens on: the connection is refused when the pool first connects (the describe's error)
+    const r = await checkProject(dir, { env: { DEVBI_DB: "postgres://devbi@127.0.0.1:1/x" } });
+    expect(r.findings).toEqual([]);
+    for (const id of ["a", "b"]) expect(r.tiles.find((t) => t.id === id)?.note).toContain("データベースにつながらないため、列の名前は確かめていません。");
   }, 60_000);
 
   it("names the file, the tile and what to fix", async () => {
@@ -417,7 +465,8 @@ describe("devbi-check", () => {
       "error dashboards/r.dash.json タイル opts: options.click の nope はこのダッシュボードのパラメーターにありません（dash.json の params に type を書くか、そのパラメーターを使うデータセットの表を置いてください）",
     ]);
     expect(Object.fromEntries(r.tiles.map((t) => [t.id, t.note]))).toEqual({
-      lines: "データセット lines（api/lines.sql）を読むタイル（データベースから読むため行は数えていません）",
+      // no DEVBI_DB: the columns' names are left unchecked
+      lines: "データセット lines（api/lines.sql）を読むタイル。データベースにつながらないため、列の名前は確かめていません。行はデータベースから読むため数えていません",
       broken: "エラー",
       gone: "エラー",
       own: "エラー",

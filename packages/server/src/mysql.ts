@@ -1,6 +1,6 @@
 // MySQL and MariaDB, through mysql2. Read-only statements and sql_select_limit come from ashiato's adapter
 // (src/adapters/mysql.ts, MIT, same author).
-import { DATE, TIMESTAMP, base64, checkColumnNames, decimalNumber, loadDriver, timeoutMessage, wholeNumber, type ColumnType, type Connection, type ResultColumn } from "./result.js";
+import { DATE, TIMESTAMP, base64, checkColumnNames, decimalNumber, loadDriver, timeoutMessage, wholeNumber, type ColumnType, type Connection, type DescribedColumn, type ResultColumn } from "./result.js";
 
 type Mysql = typeof import("mysql2/promise");
 type PoolConnection = import("mysql2/promise").PoolConnection;
@@ -10,7 +10,11 @@ interface Field {
   columnType: number;
   columnLength?: number;
   characterSet?: number;
+  flags?: number;
 }
+
+/** The column's NOT NULL flag in result metadata. */
+const NOT_NULL = 1;
 
 /** MySQL's column types in result metadata. */
 const INTS = new Set([1, 2, 3, 8, 9, 13]); // TINY, SHORT, LONG, LONGLONG, INT24, YEAR
@@ -181,6 +185,38 @@ export async function connectMysql(url: URL): Promise<Connection> {
         } catch {
           conn.destroy();
         }
+      }
+    },
+    async describe(sql, _params, options = {}) {
+      // Prepared, not run: the server's description of the result's columns.
+      const conn = await take();
+      // Preparing can wait for a lock on a table (lock_wait_timeout is a year): the connection is closed after the limit.
+      let timedOut = false;
+      const timer = options.timeoutMs
+        ? setTimeout(() => {
+            timedOut = true;
+            conn.destroy();
+          }, options.timeoutMs)
+        : undefined;
+      try {
+        const stmt = await conn.prepare(sql);
+        // the promise API's statement wraps the driver's, which has the columns
+        const fields = (stmt as unknown as { statement: { columns?: Field[] } }).statement.columns ?? [];
+        // Closed on the server and dropped from the connection's cache (which would answer the same SQL again
+        // without asking, after the table changed).
+        conn.unprepare(sql);
+        checkColumnNames(fields.map((f) => f.name));
+        return fields.map((f): DescribedColumn => {
+          const type = typeOf(f);
+          // A NOT NULL date can still hold MySQL's zero date (0000-00-00), which comes as null.
+          const nullable = f.flags === undefined ? undefined : (f.flags & NOT_NULL) === 0 || type === "date" || type === "timestamp";
+          return { name: f.name, type, ...(nullable !== undefined ? { nullable } : {}) };
+        });
+      } catch (e) {
+        throw timedOut ? new Error(timeoutMessage(options.timeoutMs!)) : e;
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (!timedOut) conn.release();
       }
     },
     async close() {

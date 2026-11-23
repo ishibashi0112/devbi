@@ -18,6 +18,7 @@ import {
 } from "devbi";
 import { loadEnv, version as viteVersion, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type UserConfig, type ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
+import type { ApiHandler } from "@devbi/server";
 import { createEditorHandler, versionOf } from "./editor.js";
 import { generate } from "./gen.js";
 
@@ -355,6 +356,35 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   let editor: { linked: boolean } | undefined;
   /** The editor's last save of each file: a change to that content is the saving page's own (no reload there). */
   const lastWrites = new Map<string, { version: string; client: string | undefined }>();
+  /** The dev server's API (api/*.sql), which also tells .devbi/ the datasets' columns. */
+  let devApi: Promise<ApiHandler> | undefined;
+  let devEnv: Record<string, string | undefined> | undefined;
+  /** A run of .devbi/ that asks the databases for the datasets' columns, and whether another is wanted after it. */
+  let describing: Promise<void> | undefined;
+  let describeAgain = false;
+  /**
+   * Ask the datasets' databases for their columns, for .devbi/'s row types (dev server only), in the background: every
+   * dataset the first time (the database may have changed since), then those whose SQL changed. One run at a time.
+   */
+  const describeColumns = (mode: "all" | "changed") => {
+    // Not for a test run that starts Vite (Vitest): no databases asked behind the tests.
+    if (!devApi || process.env.VITEST) return;
+    if (describing) {
+      describeAgain = true;
+      return;
+    }
+    const api = devApi;
+    describing = (async () => {
+      let next: "all" | "changed" = mode;
+      do {
+        describeAgain = false;
+        await generate(dir, { describe: next, api: await api, ...(devEnv ? { env: devEnv } : {}) }).catch(() => undefined);
+        next = "changed";
+      } while (describeAgain);
+    })().finally(() => {
+      describing = undefined;
+    });
+  };
 
   /**
    * Whether a Host header names this server, as Vite checks it after the plugins' middlewares: its allowedHosts,
@@ -378,8 +408,13 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
     if (!existsSync(path.join(dir, "api"))) return;
     const env = { ...process.env, ...loadEnv(config.mode, config.envDir || config.root, "DEVBI_") };
     const handler = import("@devbi/server").then((m) =>
-      m.createApiHandler({ dir, env, exposeErrors: true, log: (line) => config.logger.info(`devbi: ${line}`, { timestamp: true }) }),
+      // api/describe (a dataset's columns, for the GUI editor) on the dev server only
+      m.createApiHandler({ dir, env, exposeErrors: true, describe: !preview, log: (line) => config.logger.info(`devbi: ${line}`, { timestamp: true }) }),
     );
+    if (!preview) {
+      devApi = handler;
+      devEnv = env;
+    }
     httpServer?.once("close", () => void handler.then((h) => h.close()));
     middlewares.use((req, res, next) => {
       // This runs before Vite's own check of the Host header (DNS rebinding): unknown hosts are left to it.
@@ -404,8 +439,11 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   };
   /** virtual:devbi is read again on the next load; .devbi/ follows models/. */
   const invalidate = (graph: { getModuleById(id: string): unknown; invalidateModule(mod: never): void }, rel: string) => {
-    // .devbi/'s names: the metrics files', and the datasets' (api/*.sql) for query.dataset.
-    if (rel.endsWith(".metrics.yaml") || /^api\/[^/]+\.sql$/.test(rel)) void generate(dir).catch(() => undefined);
+    // .devbi/'s names: the metrics files', and the datasets' (api/*.sql) for query.dataset, then their columns.
+    if (rel.endsWith(".metrics.yaml") || /^api\/[^/]+\.sql$/.test(rel)) {
+      void generate(dir, devEnv ? { env: devEnv } : {}).catch(() => undefined);
+      if (rel.startsWith("api/")) describeColumns("changed");
+    }
     const mod = graph.getModuleById(RESOLVED);
     if (mod) graph.invalidateModule(mod as never);
   };
@@ -454,8 +492,10 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       return id === VIRTUAL ? RESOLVED : id === EMBED ? RESOLVED_EMBED : undefined;
     },
     async buildStart() {
-      // Keep .devbi/ (names for TypeScript and the editors' JSON Schema) in step with models/.
-      await generate(dir).catch((e: unknown) => config.logger.warn(`devbi: .devbi/ を書けませんでした: ${(e as Error).message}`));
+      // Keep .devbi/ (names for TypeScript and the editors' JSON Schema) in step with models/ and api/: the datasets'
+      // columns as last asked, then (dev server) as their databases answer now.
+      await generate(dir, devEnv ? { env: devEnv } : {}).catch((e: unknown) => config.logger.warn(`devbi: .devbi/ を書けませんでした: ${(e as Error).message}`));
+      describeColumns("all");
     },
     async load(id) {
       // DuckDB-wasm's worker points at a .map file the package does not ship; drop the comment so the dev server

@@ -1,8 +1,23 @@
 // SQL Server, through the mssql package (tedious). The connection options come from ashiato's adapter
 // (src/adapters/mssql.ts, MIT, same author).
-import { base64, checkColumnNames, loadDriver, timeoutMessage, typeOfValues, utcText, wholeNumber, type ColumnType, type Connection, type ResultColumn } from "./result.js";
+import { base64, checkColumnNames, loadDriver, timeoutMessage, typeOfValues, utcText, wholeNumber, type ColumnType, type Connection, type DescribedColumn, type ResultColumn } from "./result.js";
 
 type Mssql = typeof import("mssql");
+
+/**
+ * A type as sp_describe_first_result_set names it (`int`, `nvarchar(100)`, `decimal(18,2)`) → what `query` makes of
+ * its values. sql_variant: only its values tell.
+ */
+export function mssqlDescribedType(name: string): ColumnType | undefined {
+  const base = name.toLowerCase().replace(/\(.*$/, "").trim();
+  if (["int", "smallint", "tinyint", "bigint"].includes(base)) return "int";
+  if (base === "bit") return "bool";
+  if (["float", "real", "decimal", "numeric", "money", "smallmoney"].includes(base)) return "float";
+  if (base === "date") return "date";
+  if (["datetime", "datetime2", "smalldatetime", "datetimeoffset"].includes(base)) return "timestamp";
+  if (base === "sql_variant") return undefined;
+  return "string";
+}
 
 /** TIME comes as a Date on 1970-01-01 (UTC). */
 const timeOnly = (d: Date) => d.getTime() >= 0 && d.getTime() < 86_400_000;
@@ -132,6 +147,40 @@ export async function connectMssql(url: URL): Promise<Connection> {
       checkColumnNames(names);
       const columns = names.map((name, i): ResultColumn => ({ name, type: typeOf(types[i], rows.map((r) => r[i])) }));
       return { columns, rows: rows.map((r) => r.map((v, i) => valueOf(v, columns[i]!.type, types[i]))) };
+    },
+    async describe(sql, values, options = {}) {
+      // Not run: the server reads the statement. The placeholders are declared as `query` sends their values (a
+      // column that is a parameter has its type; dates are text, CAST in the SQL).
+      const declared = (v: unknown) =>
+        typeof v === "boolean" ? "bit" : typeof v === "number" || typeof v === "bigint" ? (Number.isInteger(Number(v)) ? "bigint" : "float") : "nvarchar(4000)";
+      const req = new mssql.Request(pool);
+      req.input("tsql", mssql.NVarChar(mssql.MAX), sql);
+      req.input("params", mssql.NVarChar(mssql.MAX), values.map((v, i) => `@p${i + 1} ${declared(v)}`).join(", ") || null);
+      // Reading the statement can wait for a lock on a table (a change to it not yet committed): stopped after the limit.
+      let timedOut = false;
+      const timer = options.timeoutMs
+        ? setTimeout(() => {
+            timedOut = true;
+            req.cancel();
+          }, options.timeoutMs)
+        : undefined;
+      let res;
+      try {
+        res = await req.query<{ name: string | null; system_type_name: string | null; is_nullable: boolean | null; is_hidden: boolean }>(
+          "EXEC sp_describe_first_result_set @tsql = @tsql, @params = @params, @browse_information_mode = 0",
+        );
+      } catch (e) {
+        throw timedOut ? new Error(timeoutMessage(options.timeoutMs!)) : e;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      const shown = res.recordset.filter((c) => !c.is_hidden);
+      checkColumnNames(shown.map((c) => c.name ?? ""));
+      return shown.map((c): DescribedColumn => {
+        const dbType = c.system_type_name ?? undefined;
+        const type = dbType ? mssqlDescribedType(dbType) : undefined;
+        return { name: c.name ?? "", ...(type ? { type } : {}), ...(dbType ? { dbType } : {}), ...(c.is_nullable !== null ? { nullable: !!c.is_nullable } : {}) };
+      });
     },
     async close() {
       await pool.close();

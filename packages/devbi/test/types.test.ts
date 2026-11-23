@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from "vitest";
-import { defineQuery, type RowOf, type Scalar, type TileProps } from "../src/index.js";
+import { defineQuery, type Query, type Row, type RowOf, type Scalar, type TileProps } from "../src/index.js";
 
 // Type-level checks (run by `pnpm typecheck`). Here no names are generated, so any name is allowed.
 describe("defineQuery / RowOf without .devbi/env.d.ts", () => {
@@ -9,5 +9,15 @@ describe("defineQuery / RowOf without .devbi/env.d.ts", () => {
     expectTypeOf<R["revenue"]>().toEqualTypeOf<number | null>();
     expectTypeOf<R["customer"]>().toEqualTypeOf<Scalar>();
     expectTypeOf<TileProps<R>["rows"]>().toEqualTypeOf<R[]>();
+  });
+
+  it("keeps a query typed Query as before (measures are numbers)", () => {
+    const query: Query = { measures: ["revenue"] };
+    expectTypeOf<RowOf<typeof query>["revenue"]>().toMatchTypeOf<number | null>();
+  });
+
+  it("types a dataset's rows as plain rows, with any parameter name", () => {
+    const q = defineQuery({ dataset: "order_lines", params: { from: { param: "from" } } });
+    expectTypeOf<RowOf<typeof q>>().toEqualTypeOf<Row>();
   });
 });

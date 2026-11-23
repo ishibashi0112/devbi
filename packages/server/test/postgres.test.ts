@@ -110,6 +110,22 @@ describe.skipIf(!url)("PostgreSQL", () => {
     }
   });
 
+  it("describe: the columns and the types' names, with no rows", async () => {
+    // :from::date and :skip have no -- param: lines: null for both, as the dev server sends
+    expect((await api.describe("orders")).columns).toEqual([
+      { name: "id", type: "int", dbType: "bigint" },
+      { name: "order_date", type: "date", dbType: "date" },
+      { name: "created", type: "timestamp", dbType: "timestamp without time zone" },
+      { name: "created_tz", type: "timestamp", dbType: "timestamp with time zone" },
+      { name: "amount", type: "float", dbType: "numeric(12,2)" },
+      { name: "rate", type: "float", dbType: "double precision" },
+      { name: "ok", type: "bool", dbType: "boolean" },
+      { name: "region", type: "string", dbType: "text" },
+      { name: "extra", type: "string", dbType: "jsonb" },
+      { name: "big", type: "int", dbType: "bigint" },
+    ]);
+  });
+
   it("runs every query in a read-only transaction", async () => {
     await expect(admin.query("INSERT INTO devbi_test.orders (id) VALUES (3)", [])).rejects.toThrow(/read-only transaction/);
   });

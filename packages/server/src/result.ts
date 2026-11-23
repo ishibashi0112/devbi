@@ -27,6 +27,21 @@ export interface QueryOptions {
   maxRows?: number;
 }
 
+/** A result column as the database describes it without returning rows (`api/describe`: the editor, check, gen). */
+export interface DescribedColumn {
+  name: string;
+  /**
+   * The type its values come as (what `query` gives; `date` or `timestamp` for an Oracle DATE, `int` or `float` for
+   * an Oracle NUMBER without digits). Undefined: only its values tell (a SQLite expression, or a SQLite DATE or
+   * BOOLEAN column whose text and numbers are read as dates and true / false only when they all are; sql_variant).
+   */
+  type?: ColumnType;
+  /** The database's own name for its type, as it says it (`nvarchar(100)`, `NUMBER`, `numeric`…), where it says one. */
+  dbType?: string;
+  /** Whether it can be NULL (outer joins and expressions too). Undefined: the database does not say. */
+  nullable?: boolean;
+}
+
 /** A read-only connection to one database. */
 export interface Connection {
   dialect: Dialect;
@@ -35,6 +50,11 @@ export interface Connection {
    * transaction that cannot write where the database has one.
    */
   query(sql: string, params: unknown[], options?: QueryOptions): Promise<ResultSet>;
+  /**
+   * The result's columns, asking the database without running the SQL (SQL Server, Oracle, MySQL, SQLite) or with
+   * no rows (PostgreSQL: `LIMIT 0`). The parameters are placeholders' values, as for `query`.
+   */
+  describe?(sql: string, params: unknown[], options?: { timeoutMs?: number }): Promise<DescribedColumn[]>;
   close(): Promise<void>;
 }
 
@@ -120,4 +140,17 @@ export function limited(sql: string, maxRows: number | undefined): string {
 
 export function timeoutMessage(ms: number): string {
   return `${Math.round(ms / 100) / 10} 秒を過ぎたので止めました（--timeout で延ばせます）`;
+}
+
+/**
+ * An error's text for a message: its message, or (an empty one, as Node's AggregateError when every address of a host
+ * refused the connection) its inner errors' messages, or its code.
+ */
+export function errorText(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  if (e.message) return e.message;
+  const inner = (e as { errors?: unknown }).errors;
+  if (Array.isArray(inner) && inner.length) return [...new Set(inner.map(errorText))].join("; ");
+  const code = (e as { code?: unknown }).code;
+  return typeof code === "string" ? code : e.name;
 }

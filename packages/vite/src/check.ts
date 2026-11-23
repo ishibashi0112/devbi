@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import type { ApiHandler } from "@devbi/server";
 import {
   checkQuery,
   compileQuery,
@@ -18,6 +19,7 @@ import {
   customTable,
   customViews,
   dashboardParams,
+  tableColumnProblems,
   tableOptions,
   tileBindings,
   sqlColumns,
@@ -43,6 +45,7 @@ import {
   type TileTypeInfo,
 } from "devbi";
 import type { ViteDevServer } from "vite";
+import { askColumns, type Described } from "./describe.js";
 import { dashboardProblems, datasetProblems, modelSources, readDatasets } from "./index.js";
 import { createNodeEngine, duckdbMessage, fileHint, missingExtension, NotChecked, type NodeEngine } from "./node-engine.js";
 
@@ -98,6 +101,7 @@ export interface CheckOptions {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
 
 /** SQL that needs a DuckDB extension that could not be downloaded is not checked, rather than called a mistake. */
 const noExtension = (name: string) => `DuckDB の拡張 ${name} をインターネットから取ってこられないため確かめていません`;
@@ -221,7 +225,37 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
     }
   }
   // The datasets (api/*.sql) as the page knows them: their parameters, read with each database's quoting rules.
-  const datasetFiles = await readDatasets(dir, options.env ?? (await import("@devbi/server")).loadEnv(dir));
+  const env = options.env ?? (await import("@devbi/server")).loadEnv(dir);
+  const datasetFiles = await readDatasets(dir, env);
+  // Their columns, asked of their databases once each (api/describe): only where one answers.
+  let api: ApiHandler | undefined;
+  const described = new Map<string, Promise<Described>>();
+  // A connection that did not answer (DEVBI_DB…): its other datasets are not asked (each would wait again).
+  const offline = new Map<string, Described>();
+  const describe = (name: string): Promise<Described> => {
+    let found = described.get(name);
+    if (!found) {
+      found = (async () => {
+        let connection: string;
+        try {
+          const server = await import("@devbi/server");
+          connection = server.connectionVariable(server.connectionOf(await server.readDatasetText(dir, name)));
+          api ??= server.createApiHandler({ dir, env, exposeErrors: true });
+        } catch (e) {
+          return { why: message(e) };
+        }
+        const before = offline.get(connection);
+        if (before) return before;
+        const d = await askColumns(api, name);
+        if (d.offline) offline.set(connection, d);
+        return d;
+      })();
+      described.set(name, found);
+    }
+    return found;
+  };
+  /** `-- key:` columns the result does not have: once per SQL file. */
+  const keysChecked = new Set<string>();
   const dashboards: { dashboard: Dashboard; file: string }[] = [];
   for (const f of await list(path.join(dir, "dashboards"), ".dash.json")) {
     const file = `dashboards/${f}`;
@@ -526,7 +560,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
             }
           }
           if (t.type === "table") {
-            // The table's options as the tile reads them; the columns they name are checked when the page reads the rows.
+            // The table's options as the tile reads them.
             const { options: opts, problems } = tableOptions(t.options);
             for (const p of problems) fail(p);
             const lost = Object.keys(opts.click?.params ?? {}).filter((n) => !bar.some((p) => p.name.toLowerCase() === n.toLowerCase()));
@@ -535,8 +569,31 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
                 `options.click の ${lost.join("・")} はこのダッシュボードのパラメーターにありません（dash.json の params に type を書くか、そのパラメーターを使うデータセットの表を置いてください）`,
               );
           }
+          let columnsNote = "";
+          if (info) {
+            // The columns as the database describes them (not the rows): the names the options and -- key: use.
+            const d = await describe(name);
+            if (d.columns) {
+              const columns = d.columns.map((c) => c.name);
+              columnsNote = `列 ${columns.length} 個の名前はデータベースに聞いて確かめました。`;
+              if (t.type === "table") for (const p of tableColumnProblems(tableOptions(t.options).options, columns)) fail(p);
+              const missing = (info.key ?? []).filter((k) => !columns.includes(k));
+              if (missing.length && !keysChecked.has(name)) {
+                keysChecked.add(name);
+                add("error", `api/${name}.sql`, `-- key: の ${missing.join("・")} は結果の列にありません（列: ${columns.join("、")}）`);
+              }
+            } else if (d.offline) {
+              columnsNote = "データベースにつながらないため、列の名前は確かめていません。";
+            } else {
+              columnsNote = "列の名前は確かめていません。";
+              if (!keysChecked.has(name)) {
+                keysChecked.add(name);
+                add("warning", `api/${name}.sql`, `データベースが列を答えませんでした（${d.why}）。列の名前は確かめていません`);
+              }
+            }
+          }
           tile.note ??= info
-            ? `データセット ${name}（api/${name}.sql）を読むタイル（データベースから読むため行は数えていません）`
+            ? `データセット ${name}（api/${name}.sql）を読むタイル。${columnsNote}行はデータベースから読むため数えていません`
             : "エラー";
           continue;
         }
@@ -754,6 +811,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   } finally {
     engine?.close();
     await vite?.close();
+    await api?.close();
   }
   return { findings, views, tiles, dashboards: dashboards.map((d) => d.dashboard.name), periods };
 }

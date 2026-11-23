@@ -173,6 +173,25 @@ function inList(sql: string, start: number, end: number): boolean {
 
 export type ParamValue = string | number | boolean | null;
 
+// PostgreSQL works out constant expressions with the values while it plans (even under LIMIT 0): values that most
+// expressions take (a text that is also a number, no zero to divide by).
+const SAMPLES: Record<ParamType, ParamValue> = { text: "1", integer: 1, number: 1, date: "2000-01-01", datetime: "2000-01-01 00:00:00", boolean: false };
+
+/**
+ * A value for each parameter that passes its checks (`-- param:` typed ones as their type, a list of one for a
+ * list; the others null), to ask the database about the result's columns without anyone's values (`api/describe`).
+ */
+export function describeValues(dataset: Dataset): Record<string, ParamValue | ParamValue[]> {
+  return Object.fromEntries(
+    dataset.params.map((p) => {
+      const def = dataset.parameters.find((d) => d.name.toLowerCase() === p.toLowerCase());
+      if (!def?.type) return [p, null];
+      const v = SAMPLES[def.type];
+      return [p, def.multiple ? [v] : v];
+    }),
+  );
+}
+
 /** The placeholder for the k-th value (from 1): `?` (SQLite, MySQL), `$1` (PostgreSQL), `@p1` (SQL Server), `:p1` (Oracle). */
 function placeholder(dialect: Dialect, k: number): string {
   switch (dialect) {

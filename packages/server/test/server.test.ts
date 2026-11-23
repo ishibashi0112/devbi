@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bindParameters, connectionOf, createApiHandler, isHostAllowed, parameters, parseDataset, readOnlyProblem, serve, toArrowTable, type ApiHandler, type RunningServer } from "../src/index.js";
+import { errorText } from "../src/result.js";
 import { SAMPLE_DB, typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
 
 describe("parameters", () => {
@@ -413,6 +414,39 @@ describe("devbi-serve (SQLite)", () => {
     expect(t.schema.fields.map((f) => `${f.name}:${f.type}`)).toEqual(["order_date:Date32<DAY>", "region:Utf8", "amount:Float64", "qty:Int64"]);
   });
 
+  it("describe: the columns from the database without rows, only when asked for (the dev server)", async () => {
+    // devbi-serve does not answer it: the path is the site's (files, GET only)
+    const off = await fetch(new URL("api/describe", running.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "orders" }) });
+    expect(off.status).toBe(405);
+    expect(await createApiHandler({ dir }).fetch(new Request("http://x/api/describe", { method: "POST" }))).toBeUndefined();
+    // as the dev server makes it: the database's messages as they are
+    const api = createApiHandler({ dir, env: { DEVBI_DB: "sqlite:db/shop.sqlite" }, describe: true, exposeErrors: true });
+    try {
+      // declared types; an expression's only from its values; typed parameters get values that pass their checks.
+      // A DATE column's text is read as dates only when all of it is (its values tell).
+      expect(await api.describe("orders")).toEqual({
+        name: "orders",
+        columns: [
+          { name: "order_date", dbType: "DATE" },
+          { name: "region", type: "string", dbType: "TEXT" },
+          { name: "amount", type: "float", dbType: "REAL" },
+          { name: "qty", type: "int", dbType: "INTEGER" },
+        ],
+      });
+      expect((await api.describe("computed")).columns).toEqual([{ name: "region", type: "string", dbType: "TEXT" }, { name: "twice" }, { name: "blank" }]);
+      expect((await api.describe("typed")).columns.map((c) => c.name)).toEqual(["id", "region"]);
+      await expect(api.describe("twice")).rejects.toThrow(/列名が重なっています: id/);
+      await expect(api.describe("nope")).rejects.toMatchObject({ status: 404 });
+      const asked = await api.fetch(new Request("http://x/api/describe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "broken" }) }));
+      expect(asked?.status).toBe(500);
+      const missing = await api.fetch(new Request("http://x/api/describe", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }));
+      expect([missing?.status, await missing?.json()]).toEqual([400, { error: "name（api/ の SQL ファイルの名前）がありません" }]);
+      expect((await api.fetch(new Request("http://x/api/describe")))?.status).toBe(405);
+    } finally {
+      await api.close();
+    }
+  });
+
   it("SQLite: an expression with no values to go by is DuckDB's NULL type", async () => {
     const types = async (from: string) => {
       const res = await post({ name: "computed", params: { from } });
@@ -496,5 +530,17 @@ describe("devbi-serve (SQLite)", () => {
   it("does not serve files outside the site", async () => {
     const res = await fetch(new URL("/..%2f..%2fdb%2fshop.sqlite", running.url));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("errorText", () => {
+  it("says why when the message is empty (every address of a host refused the connection)", () => {
+    const refused = (address: string) => Object.assign(new Error(`connect ECONNREFUSED ${address}`), { code: "ECONNREFUSED" });
+    expect(errorText(new AggregateError([refused("::1:5432"), refused("127.0.0.1:5432")], ""))).toBe(
+      "connect ECONNREFUSED ::1:5432; connect ECONNREFUSED 127.0.0.1:5432",
+    );
+    expect(errorText(Object.assign(new Error(""), { code: "ETIMEDOUT" }))).toBe("ETIMEDOUT");
+    expect(errorText(new Error("no such table: x"))).toBe("no such table: x");
+    expect(errorText("text")).toBe("text");
   });
 });

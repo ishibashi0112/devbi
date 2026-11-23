@@ -1,6 +1,6 @@
 // Oracle Database, through node-oracledb (Thin mode, or Thick mode with Oracle Instant Client). Connecting and
 // Thick mode come from ashiato's adapter (src/adapters/oracle.ts, MIT, same author).
-import { base64, checkColumnNames, loadDriver, localText, timeoutMessage, utcText, wholeNumber, type ColumnType, type Connection, type ResultColumn } from "./result.js";
+import { base64, checkColumnNames, loadDriver, localText, timeoutMessage, utcText, wholeNumber, type ColumnType, type Connection, type DescribedColumn, type ResultColumn } from "./result.js";
 
 type OracleDb = typeof import("oracledb");
 type Metadata = import("oracledb").Metadata<unknown>;
@@ -136,6 +136,13 @@ export async function connectOracle(url: URL): Promise<Connection> {
         return "string";
     }
   };
+  /** The type before any value: a NUMBER without digits and an expression only by their values; a DATE as a date. */
+  const describedType = (m: Metadata): ColumnType | undefined => {
+    // NUMBER without digits (COUNT(*), SUM(…), a NUMBER column): `query` makes it int or float by its values.
+    if (m.dbType === oracledb.DB_TYPE_NUMBER) return m.scale === 0 && (m.precision ?? 0) > 0 ? "int" : "float";
+    if (m.dbType === oracledb.DB_TYPE_DATE) return "date";
+    return typeOf(m, []);
+  };
   const valueOf = (v: unknown, type: ColumnType): unknown => {
     if (v === null || v === undefined) return null;
     switch (type) {
@@ -207,6 +214,29 @@ export async function connectOracle(url: URL): Promise<Connection> {
         if (!(e instanceof Error) || !e.message.startsWith("ORA-01466")) throw e;
         await new Promise((r) => setTimeout(r, 1100));
         return run(sql, params, options);
+      }
+    },
+    async describe(sql, _params, options = {}) {
+      // Parsed by the server, not run.
+      const conn = await pool.getConnection();
+      try {
+        if (options.timeoutMs) conn.callTimeout = Math.round(options.timeoutMs);
+        let info;
+        try {
+          info = await conn.getStatementInfo(sql);
+        } catch (e) {
+          if (options.timeoutMs && /^(DPI-1067|NJS-123|ORA-03156)\b/.test((e as Error).message)) throw new Error(timeoutMessage(options.timeoutMs));
+          throw e;
+        }
+        const meta = (info.metaData ?? []) as Metadata[];
+        checkColumnNames(meta.map((m) => m.name));
+        return meta.map((m): DescribedColumn => {
+          const type = describedType(m);
+          return { name: m.name, ...(type ? { type } : {}), ...(m.dbTypeName ? { dbType: m.dbTypeName } : {}), ...(m.nullable !== undefined ? { nullable: m.nullable } : {}) };
+        });
+      } finally {
+        conn.callTimeout = 0;
+        await conn.close().catch(() => undefined);
       }
     },
     async close() {
