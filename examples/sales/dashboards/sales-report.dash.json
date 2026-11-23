@@ -1,0 +1,23 @@
+{
+  "$schema": "../.devbi/dash.schema.json",
+  "title": "受注明細レポート",
+  "description": "SQL（api/order_lines.sql）の結果をそのまま表にする、SSRS のレポートのような画面",
+  "fiscalYearStart": 4,
+  "tiles": [
+    {
+      "id": "lines",
+      "x": 0, "y": 0, "w": 12, "h": 9,
+      "type": "table",
+      "title": "受注明細",
+      "query": { "dataset": "order_lines" }
+    },
+    {
+      "id": "about",
+      "x": 0, "y": 9, "w": 12, "h": 1,
+      "type": "markdown",
+      "options": {
+        "text": "**このレポートについて** 上の欄は `api/order_lines.sql` の `-- param:` の行から作られます。値を変えると、サーバーがその値で SQL を実行し直します（ブラウザで集計はしません）。受注日（から）の既定は今年度の始まり（4 月）、地域の候補は `api/regions.sql` です。"
+      }
+    }
+  ]
+}

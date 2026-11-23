@@ -156,7 +156,8 @@ test("the page's own script stays small; charts, the table grid and the DuckDB e
   await expect.poll(() => first.filter((n) => scripts.has(n)).length).toBe(first.length);
   const size = first.reduce((sum, n) => sum + scripts.get(n)!, 0);
   expect(size).toBeGreaterThan(100_000); // the shared file is in it
-  expect(size).toBeLessThan(500_000);
+  // 0.1: under 500 KB; the parameter bar and its values (reports, about 25 KB) are in it since: every dashboard may have one.
+  expect(size).toBeLessThan(550_000);
   // The Excel and print code comes with the first export; Perspective with the first explore tile.
   expect([...scripts.keys()].filter((n) => /^(xlsx|print|Explore)-/.test(n))).toEqual([]);
 });

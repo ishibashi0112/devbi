@@ -208,6 +208,25 @@ html perspective-viewer, html perspective-dropdown {
 .devbi-button:disabled { opacity: 0.5; cursor: default; }
 .devbi-button.devbi-button-primary { background: var(--devbi-accent); border-color: var(--devbi-accent); color: #fff; }
 .devbi-button:focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 2px; }
+/* The parameters (SSRS's toolbar): under the heading, a row of labelled inputs. */
+.devbi-params { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; margin-bottom: 12px; padding: 10px 12px; background: var(--devbi-card); border: 1px solid var(--devbi-border); border-radius: var(--devbi-radius); }
+.devbi-param { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.devbi-param > label { font-size: 12px; color: var(--devbi-muted); }
+.devbi-param input, .devbi-param select, .devbi-multi-button { font: inherit; font-size: 13px; color: var(--devbi-text); background: var(--devbi-card); border: 1px solid var(--devbi-border); border-radius: 6px; padding: 3px 8px; min-height: 30px; box-sizing: border-box; max-width: 100%; }
+.devbi-param input[type="text"] { width: 12em; }
+.devbi-param input:focus-visible, .devbi-param select:focus-visible, .devbi-multi-button:focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 1px; }
+.devbi-param input[aria-invalid] { border-color: var(--devbi-down); }
+.devbi-param-bad { color: var(--devbi-down); font-size: 12px; }
+.devbi-params-problems { flex-basis: 100%; margin: 0; }
+.devbi-multi { position: relative; }
+.devbi-multi-button { cursor: pointer; text-align: left; min-width: 10em; max-width: 22em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devbi-multi-button::after { content: " ▾"; color: var(--devbi-muted); }
+.devbi-multi-list { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 100%; max-width: min(28em, 90vw); max-height: 320px; overflow: auto; background: var(--devbi-card); border: 1px solid var(--devbi-border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16); padding: 6px; }
+.devbi-multi-list label { display: flex; gap: 8px; align-items: center; padding: 3px 4px; cursor: pointer; white-space: nowrap; font-size: 13px; border-radius: 4px; }
+.devbi-multi-list label:hover { background: var(--devbi-accent-soft); }
+.devbi-multi-tools { display: flex; gap: 8px; padding: 2px 2px 6px; border-bottom: 1px solid var(--devbi-border); margin-bottom: 4px; }
+.devbi-multi-tools button { border: 0; background: none; color: var(--devbi-accent); cursor: pointer; font-size: 12px; padding: 0 2px; }
+.devbi-tile-needs { padding: 8px 0; }
 .devbi-index { padding: 24px 20px; max-width: 900px; margin: 0 auto; }
 .devbi-index h1 { font-size: 20px; }
 .devbi-index ul { list-style: none; padding: 0; display: grid; gap: 8px; }
@@ -221,6 +240,8 @@ html perspective-viewer, html perspective-dropdown {
    cell or inline-block of the page 0 wide. */
 .devbi-root[data-devbi-narrow] .devbi-dashboard { padding: 12px 16px 24px; }
 .devbi-root[data-devbi-narrow] .devbi-grid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+.devbi-root[data-devbi-narrow] .devbi-params { flex-direction: column; align-items: stretch; }
+.devbi-root[data-devbi-narrow] .devbi-param input, .devbi-root[data-devbi-narrow] .devbi-param select, .devbi-root[data-devbi-narrow] .devbi-multi-button { width: 100%; max-width: none; }
 .devbi-root[data-devbi-narrow] .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
 .devbi-actions > .devbi-error { align-self: center; }
 .devbi-printed { display: none; }
@@ -246,6 +267,8 @@ html perspective-viewer, html perspective-dropdown {
   .devbi-root .devbi-actions, .devbi-root .devbi-back, .devbi-root .devbi-chip button, .devbi-root .devbi-clear-all,
   .devbi-root .devbi-clear, .devbi-root .devbi-filters .devbi-hint { display: none; }
   .devbi-root .devbi-filters:not(:has(.devbi-chip)) { display: none; }
+  .devbi-root .devbi-params > button { display: none; }
+  .devbi-root .devbi-params { border: 0; padding: 0; }
   .devbi-root .devbi-printed { display: block; margin: 0; color: var(--devbi-muted); font-size: 12px; }
   .devbi-tile { break-inside: avoid; }
   .devbi-tile.devbi-loading::after { display: none; }

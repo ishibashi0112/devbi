@@ -1,3 +1,4 @@
+import type { ParamValue } from "devbi";
 import { createRoot, type Root } from "react-dom/client";
 import { Dashboard, type Theme } from "./Dashboard.js";
 import type { Project } from "./project.js";
@@ -15,6 +16,13 @@ export interface MountOptions {
   isolate?: boolean;
   /** The Excel and 印刷・PDF buttons in the dashboard's heading. Default `true`. */
   exports?: boolean;
+  /**
+   * Values of the dashboard's parameters (`{ customer: 1024 }`). Mounting again with other values sets them, keeping
+   * the rest of the dashboard as it is.
+   */
+  params?: Record<string, unknown>;
+  /** Called with every parameter's value when one changes. */
+  onParamsChange?: (values: Record<string, ParamValue>) => void;
 }
 
 export interface MountedDashboard {
@@ -70,6 +78,8 @@ export function mountDashboard(element: Element, project: Project, options: Moun
       isolate={options.isolate ?? true}
       exports={options.exports ?? true}
       {...(options.theme ? { theme: options.theme } : {})}
+      {...(options.params ? { params: options.params } : {})}
+      {...(options.onParamsChange ? { onParamsChange: options.onParamsChange } : {})}
     />,
   );
   return {

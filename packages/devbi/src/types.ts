@@ -1,3 +1,5 @@
+import type { ParamBinding } from "./params.js";
+
 /** A value that can appear in a filter or a result cell. Dates are JS Dates in UTC. */
 export type Scalar = string | number | boolean | null | Date;
 
@@ -44,6 +46,13 @@ export interface Query {
   malloy?: string;
   /** The query in SQL (DuckDB), likewise: `FROM sales` reads the rows of `models/sales.metrics.yaml`, filtered. */
   sql?: string;
+  /**
+   * The rows of a dataset (`api/<name>.sql` on the server) as they are, run with the dashboard's parameters (the bar
+   * above the tiles). Not with the metrics' keys (measures…), malloy or sql.
+   */
+  dataset?: string;
+  /** What goes in the dataset's parameters: `{ "param": "<dashboard parameter>" }` or a value. Default: the same name. */
+  params?: Record<string, ParamBinding>;
 }
 
 /**

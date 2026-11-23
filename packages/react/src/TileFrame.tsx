@@ -1,6 +1,7 @@
 import { checkQuery, componentProblem, customQuery, customSelectable, resolveComponent, type BuiltinTileType, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
 import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { makeFormatters, queryView, useDevbi, useDevbiQuery, useSelectionVersion } from "./context.js";
+import { ParamsNeeded } from "./param-store.js";
 import type { TileModule } from "./project.js";
 import { builtinTiles } from "./tiles/index.js";
 import { TileSizeContext } from "./tiles/util.js";
@@ -87,13 +88,16 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
   // A Malloy or SQL tile selects only on its view's dimensions and time (a column of its own filters nothing else).
   const custom = !!customQuery(query);
   const selectable = useMemo(() => (custom ? customSelectable(data.fields, view) : undefined), [custom, data.fields, view]);
+  // A dataset tile selects nothing: its columns are not the metrics files' dimensions (no cross-filtering yet).
+  const isDataset = query?.dataset !== undefined;
   const select = useCallback(
     (f: Filter | Filter[] | null) => {
+      if (isDataset) return;
       let list = f === null ? null : Array.isArray(f) ? f : [f];
       if (list && selectable) list = list.filter((x) => selectable.has(x.field));
       ctx.selection.set(tile.id, list?.length ? list : null);
     },
-    [ctx.selection, tile.id, selectable],
+    [ctx.selection, tile.id, selectable, isDataset],
   );
   const { format, label } = useMemo(() => makeFormatters(view, data.fields), [view, data.fields]);
   const [ref, size] = useSize();
@@ -137,7 +141,9 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
       )}
       <div className="devbi-tile-body" ref={ref}>
         <TileSizeContext.Provider value={size}>
-          {error ? (
+          {error instanceof ParamsNeeded ? (
+            <div className="devbi-hint devbi-tile-needs">{error.message}</div>
+          ) : error ? (
             <div className="devbi-error">{error.message}</div>
           ) : Body ? (
             <ErrorBoundary resetKey={data.rows}>

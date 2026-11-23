@@ -26,7 +26,8 @@ for (let i = 0; i < args.length; i++) {
   } else usage();
 }
 const root = path.resolve(dir);
-if (!existsSync(path.join(root, "models")))
+// A project of reports only has api/ (the SQL files) and dashboards/, without models/.
+if (!existsSync(path.join(root, "models")) && !(existsSync(path.join(root, "api")) && existsSync(path.join(root, "dashboards"))))
   usage(`${root} に models/ フォルダがありません。DevBI のプロジェクトのフォルダで実行するか、--dir で指してください`);
 let report: Awaited<ReturnType<typeof checkProject>>;
 try {

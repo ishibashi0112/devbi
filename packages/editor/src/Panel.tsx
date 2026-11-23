@@ -441,6 +441,17 @@ function QueryEditor({
 }) {
   const query = (isObj(tile.query) ? tile.query : {}) as Query;
   const names = Object.keys(metrics).sort();
+  if (typeof query.dataset === "string") {
+    // A dataset's rows (a report): its SQL file and parameters are edited as files for now.
+    return (
+      <>
+        <h3>データ</h3>
+        <p className="devbi-hint">
+          データセット {query.dataset}（api/{query.dataset}.sql）の結果をそのまま出します。SQL とパラメーターは、そのファイルと dash.json の query.params・params で書きかえてください。
+        </p>
+      </>
+    );
+  }
   const mode = queryMode(query);
   if (mode !== "names") return <CustomQueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} />;
   const name = metricsNameOf(metrics, spec, tile);

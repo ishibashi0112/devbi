@@ -382,6 +382,39 @@ describe("devbi-check", () => {
     expect(formatReport(r)).toContain("rows ");
   }, 60_000);
 
+  it("checks the datasets a report reads (api/*.sql) without metrics files, and does not run them", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-check-"));
+    for (const d of ["api", "dashboards", "dashboards/r"]) mkdirSync(path.join(dir, d));
+    const files: Record<string, string> = {
+      "api/lines.sql": "-- param: from date label=いつから\n-- param: region text values=regions\nSELECT * FROM t WHERE d >= :from AND r = :region",
+      "api/regions.sql": "SELECT DISTINCT r FROM t",
+      "api/broken.sql": "DELETE FROM t",
+      "dashboards/r.dash.json": JSON.stringify({
+        tiles: [
+          tile("lines", 0, { type: "table", query: { dataset: "lines", params: { regoin: "関東" } } }),
+          tile("broken", 2, { type: "table", query: { dataset: "broken" } }),
+          tile("gone", 4, { type: "table", query: { dataset: "gone" } }),
+          tile("own", 6, { component: "./r/Own.tsx" }),
+        ],
+      }),
+      "dashboards/r/Own.tsx": 'export const query = { dataset: "lines", params: { from: { param: "since" } } };\nexport default function T() {\n  return null;\n}\n',
+    };
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+    const r = await checkProject(dir);
+    expect(r.findings.map((f) => `${f.level} ${f.file} ${f.message}`)).toEqual([
+      "error dashboards/r.dash.json タイル lines: query.params の regoin は api/lines.sql のパラメーターにありません（あるのは from、region）",
+      expect.stringMatching(/^error dashboards\/r\.dash\.json タイル broken: api\/broken\.sql: SELECT か WITH で始まる文だけ使えます/),
+      "error dashboards/r.dash.json タイル gone: データセット gone がありません（api/gone.sql）",
+      "error dashboards/r.dash.json タイル own: ./r/Own.tsx の query: パラメーター since の欄がありません（dash.json のタイルの query に dataset を書くか、params に type を書いてください）",
+    ]);
+    expect(Object.fromEntries(r.tiles.map((t) => [t.id, t.note]))).toEqual({
+      lines: "データセット lines（api/lines.sql）を読むタイル（データベースから読むため行は数えていません）",
+      broken: "エラー",
+      gone: "エラー",
+      own: "エラー",
+    });
+  }, 60_000);
+
   it("reports a project without metrics files", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "devbi-check-"));
     mkdirSync(path.join(dir, "models"));
