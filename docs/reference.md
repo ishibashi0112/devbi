@@ -605,13 +605,46 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 12、date-range �
     受注日 2026年5月、売上 ¥7,855,210 …
 ```
 
-`devbi-check [--dir <フォルダ>] [--values [行数]] [--json]`:
+### 行レベル制御のプロジェクトを確かめる
+
+[行レベルのモード](#行レベルのモード絞り忘れを止める)のプロジェクトでは、データを読むのにログインした人が要ります。`devbi-check` は、`vite.config.ts` の [`devUsers`](#開発サーバーでこの人として見るdevusers) に書いた人ごとに、その人としてデータを流します（`--as suzuki` なら、その人だけ）。
+
+```
+$ pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts
+行レベルのモードです（api/orders.sql に :user. があるため）。データは yamada・suzuki・sato として読みました
+models/my_sales.metrics.yaml（yamada として）: 2,322 行、指標 2・軸 2
+models/my_sales.metrics.yaml（suzuki として）: 1,325 行、指標 2・軸 2
+models/my_sales.metrics.yaml（sato として）: 確かめていません（sato は API の orders を読めません: 利用者 sato に属性 region がありません（api/orders.sql の :user.region））
+dashboards/my-sales.dash.json（yamada として）: タイル 3（クエリを実行 2）
+  kpi-revenue 1 行、region 1 行
+…
+
+⚠ models/my_sales.metrics.yaml: sato として: 確かめていません: sato は API の orders を読めません: 利用者 sato に属性 region がありません（api/orders.sql の :user.region）
+
+エラー 0 件、注意 1 件
+```
+
+- 最初の行に、行レベルのモードになったわけと、だれとして読んだかを出します。人ごとに結果が違うので、指標ファイルとダッシュボードの行は人ごとに出します。エラーと注意は、一部の人だけのものに「sato として: 」を付けます（全員に出たものは 1 回）
+- `devUsers` は、今のフォルダかプロジェクトのフォルダの `vite.config.*` の `devbi()` のうち、`--dir` のフォルダを指すもの（`devbi({ dir })` を Vite の root から）から読みます。ほかの名前や場所の設定ファイルは `--config` で指します。`devUsers` がないときはデータを読まず、指標ファイルとタイルは「確かめていません」（注意）です。ファイルの検査（下）はします
+- その人が読めない SQL（`:user.region` の属性がない、`-- roles:` にない役割）は、その人の「確かめていません」の注意です。画面では、その人に 403 が出ます
+- 行レベルのモードでの検査（データベースは使いません）:
+  - だれにどの行を見せるかが書いていない `api/*.sql`（`:user.` も `-- access: all` もない）と、`:user` だけの名前はエラーです。`-- roles:`・`-- access:` の書き間違い（全角の文字、綴り、`--` のすぐあとにないなど）は、行レベルのモードでなくても、その SQL ファイルのエラーです
+  - `:user_id`・`:login`・`:社員番号` のような、ログインした人の値らしい名前のふつうのパラメーターは注意です。ブラウザが値を変えられるので、`:user.id` か `:user.<属性>` を使います
+  - `model` が `read_api` の外のファイル（`read_xlsx('data/…')` など）を読むときは注意です。だれが開いても同じ行が届きます（マスタなら問題ありません）
+  - `snapshots/` と `dist/snapshots/` に、今は作らないスナップショットのファイル（人で絞るようになった SQL の全員の行、`-- snapshot:` を消した SQL のものなど）があればエラーです（行レベルのモードでなければ注意）。`devbi-serve` か `devbi-snapshot` を動かすと消えます。IIS などに写したものは、写し先からも消します
+- 二人以上として読めたときは、`:user.` を使う SQL（パラメーターのないもの）、`model` の `read_api`、ダッシュボードの最初の画面のデータセットを、人ごとに流して比べます。全員に同じ行を返したら、その SQL に注意を出します（`:user.` を書いたのに絞っていないなど。属性の値が同じ人どうしなら問題ありません。全員 0 行のときは比べません）
+- `--url https://intra.example.com/devbi/` を付けると、置いた先の `api/schema` に聞いて、API が行レベル制御を知っているか（`"access": 1`）を確かめます。ログインの要る API（401）も、知っている API です。知らない古い API（アプリにコピーしたままの C# など）は、行レベルのモードならエラー、そうでなければ注意です。DevBI の API の答えでないとき（サイトのログインの画面が返るなど）とつながらないときは注意です。サイトのログインが要る場所は、`devbi-check` からは聞けません
+
+`devbi-check [--dir <フォルダ>] [--values [行数]] [--as <devUsers の名前>] [--config <vite.config.ts>] [--url <置いた場所>] [--json]`:
 
 | オプション | 中身 |
 | --- | --- |
 | `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
 | `--values` | タイルごとに結果の最初の行を、画面と同じ書式で出す。既定は 5 行（`--values 1` で 1 行） |
-| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ。`--values` なら `values` に最初の行）、`periods`（ダッシュボードごとの、流した期間の一覧） |
+| `--as` | `devUsers` のこの人としてだけデータを読む。行レベルのモードでは、付けなければ `devUsers` の全員 |
+| `--config` | `devUsers` を読む Vite の設定ファイル。既定は今のフォルダかプロジェクトのフォルダの `vite.config.*` |
+| `--url` | 置いた先の API が行レベル制御を知っているかを確かめる（上） |
+| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message, as? }` の一覧。`as` は一部の人だけに出たときのその人たち）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ。`--values` なら `values` に最初の行）、`periods`（ダッシュボードごとの、流した期間の一覧）。行レベルのモードでは `rowLevel`（モードになったわけ）と `as`（読んだ人）、`views` と `tiles` にも `as`。`--url` なら `url`（`{ url, access, status, note }`） |
 
 エラーがあれば終了コード 1、注意だけなら 0 です。フォルダに `models/` がないときや、確かめること自体ができなかったとき（DuckDB が動かないなど）は 2 です。
 
@@ -641,7 +674,7 @@ data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列
 - ファイルは、今のフォルダからのパスか、プロジェクトのフォルダからのパスで書きます。プロジェクトの外のファイルも読めます。xlsx・CSV・TSV・Parquet・Arrow・JSON（Parquet と JSON は DuckDB の拡張をインターネットから取ってきます）
 - 値がそのまま出ます。人に渡すときは気をつけてください（`pnpm try-xlsx` は値を出しません）
 
-`devbi-inspect <ファイル | 指標ファイル> [--sheet <シート名>] [--range <セル範囲>] [--values <数>] [--rows <数>] [--dir <フォルダ>] [--json]`、`devbi-inspect --sql "<SELECT>" [...]`:
+`devbi-inspect <ファイル | 指標ファイル> [--sheet <シート名>] [--range <セル範囲>] [--values <数>] [--rows <数>] [--as <devUsers の名前>] [--config <vite.config.ts>] [--dir <フォルダ>] [--json]`、`devbi-inspect --sql "<SELECT>" [...]`:
 
 | オプション | 中身 |
 | --- | --- |
@@ -651,6 +684,8 @@ data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列
 | `--sql` | ファイルの代わりに、この SELECT の結果を見る |
 | `--values` | 文字の列に出す多い値の数。既定は 8。0 で出さない |
 | `--rows` | 出す最初の行の数。既定は 10。0 で出さない |
+| `--as` | 行レベルのモードで、`model` の `read_api` を `devUsers` のこの人として読む（[`devbi-check` と同じ](#行レベル制御のプロジェクトを確かめる)）。付けないと、`read_api` の指標ファイルは読めません |
+| `--config` | `devUsers` を読む Vite の設定ファイル（`devbi-check` と同じ） |
 | `--json` | 結果を JSON で出す（`head` に最初の行、`notes` に ⚠ の中身） |
 
 読めないときは終了コード 1 です。
@@ -1112,7 +1147,7 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - `metrics.yaml` と `dash.json` の書き方は変わりません。同じダッシュボードが、人ごとに違う行で動きます。
 - いちばん確かな守りは、今と同じくデータベースの権限です（DevBI のユーザーは SELECT だけ）。
 
-今は、Node のサーバー（`@devbi/server` の `createApiHandler`・`devbi-serve`）と、開発サーバーの「[この人として見る](#開発サーバーでこの人として見るdevusers)」でこの形が動きます。`devbi-check` の確かめ、`devbi-serve` が前のサーバーからユーザー名を受け取る口、C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。それまで `devbi-serve` は利用者を受け取れないので、行レベルのモードでは、どのリクエストも `401` になります。
+今は、Node のサーバー（`@devbi/server` の `createApiHandler`・`devbi-serve`）と、開発サーバーの「[この人として見る](#開発サーバーでこの人として見るdevusers)」、[`devbi-check` の確かめ](#行レベル制御のプロジェクトを確かめる)でこの形が動きます。`devbi-serve` が前のサーバーからユーザー名を受け取る口、C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。それまで `devbi-serve` は利用者を受け取れないので、行レベルのモードでは、どのリクエストも `401` になります。
 
 #### `:user.<属性>` と `:user.id`
 

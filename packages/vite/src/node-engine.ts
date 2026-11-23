@@ -30,6 +30,10 @@ export interface NodeEngine {
 export interface NodeEngineOptions {
   /** Environment for the API's database (DEVBI_DB…). Default: the project's .env files and `process.env`. */
   env?: Record<string, string | undefined>;
+  /** Who reads the API (row-level security: `:user.` in api/*.sql), as a host passes them: one of devUsers (`--as`). */
+  user?: import("@devbi/server").DevBIUser;
+  /** The name of that user in devUsers, for the messages. */
+  userName?: string;
 }
 
 /**
@@ -200,11 +204,19 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
         const handler = await apiHandler();
         let bytes: Uint8Array;
         try {
-          ({ bytes } = await handler.run(s.path, apiParams(s)));
+          ({ bytes } = await handler.run(s.path, apiParams(s), options.user ? { user: options.user } : {}));
         } catch (e) {
           const message = (e as Error).message;
+          const status = (e as { status?: unknown }).status;
           // No database to read: the dashboards that use it are checked on devbi-serve, not here.
           if (/接続先がありません/.test(message)) throw new NotChecked(`API の ${s.path} を読んでいません: ${message}`);
+          // Row-level security: nobody signed in, or this user may not read it. Not a mistake in the files.
+          if (status === 401) {
+            throw new NotChecked(
+              `API の ${s.path} を読んでいません: 行レベルのモードなので、ログインした人が要ります。vite.config.ts の devbi({ devUsers }) に開発用の利用者を書くと、その人として確かめます（--as <名前>）`,
+            );
+          }
+          if (status === 403) throw new NotChecked(`${options.userName ?? options.user?.id ?? "この利用者"} は API の ${s.path} を読めません: ${message}`);
           throw new Error(`API の ${s.path}（api/${s.path}.sql）: ${message}`);
         }
         const name = `__devbi_src_${++seq}`;

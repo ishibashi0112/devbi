@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// devbi-inspect <data file | metrics file> [--dir <project>] [--sheet <name>] [--range <cells>] [--values <n>] [--rows <n>] [--json]
+// devbi-inspect <data file | metrics file> [--dir <project>] [--sheet <name>] [--range <cells>] [--values <n>] [--rows <n>] [--as <devUsers name>] [--config <vite config>] [--json]
 // devbi-inspect --sql "<SELECT …>" [...]
 // Shows the columns of a data file (or of a metrics file's model, or of a SELECT): type, range, empty cells, common
 // values, and the first rows.
 import { existsSync } from "node:fs";
 import path from "node:path";
 import "./quiet.js";
+import { devUserOf, loadDevUsers } from "./dev-users.js";
 import { formatInspect, inspectData } from "./inspect.js";
 import { missingExtension } from "./node-engine.js";
 
@@ -14,7 +15,7 @@ const usage = (message?: string): never => {
   if (message) console.error(message);
   console.error(
     [
-      "使い方: devbi-inspect <データファイル | 指標ファイル> [--sheet <シート名>] [--range <セル範囲>] [--values <数>] [--rows <数>] [--dir <プロジェクトのフォルダ>] [--json]",
+      "使い方: devbi-inspect <データファイル | 指標ファイル> [--sheet <シート名>] [--range <セル範囲>] [--values <数>] [--rows <数>] [--as <devUsers の名前>] [--config <vite.config.ts>] [--dir <プロジェクトのフォルダ>] [--json]",
       `        devbi-inspect --sql "SELECT … FROM read_xlsx('data/….xlsx', sheet = '…')" [--rows <数>] [--dir …] [--json]`,
     ].join("\n"),
   );
@@ -32,6 +33,8 @@ let sql: string | undefined;
 let values: number | undefined;
 let rows: number | undefined;
 let target: string | undefined;
+let as: string | undefined;
+let config: string | undefined;
 for (let i = 0; i < args.length; i++) {
   const a = args[i]!;
   // `npm run inspect -- <file> --sheet …` may pass the "--" on (pnpm does): not an argument.
@@ -43,14 +46,26 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--values") values = count(a, args[++i]);
   else if (a === "--rows") rows = count(a, args[++i]);
   else if (a === "--json") json = true;
+  else if (a === "--as") as = args[++i] ?? usage("--as のあとに devUsers の名前を書いてください");
+  else if (a === "--config") config = args[++i] ?? usage("--config のあとに Vite の設定ファイルを書いてください");
   else if (a.startsWith("-") || target) usage();
   else target = a;
 }
 if (!target === !sql) usage(sql ? "ファイルと --sql は、どちらか一つにしてください" : undefined);
 const root = path.resolve(dir);
 if (!existsSync(root)) usage(`フォルダ ${root} がありません`);
+// Row-level security: read the API (read_api in a model) as one of devUsers.
+let user: Awaited<ReturnType<typeof devUserOf>> | undefined;
+if (as) {
+  const dev = await loadDevUsers(root, config ? { config } : {}).catch((e: Error) => usage(e.message));
+  if (!dev || !Object.hasOwn(dev.users, as)) {
+    usage(dev ? `devUsers に ${as} がありません（${dev.config} にあるのは ${Object.keys(dev.users).join("・")}）` : "devUsers がありません。vite.config.ts の devbi({ devUsers }) に書きます（ほかの設定ファイルなら --config で指します）");
+  }
+  user = devUserOf(as, dev!.users[as]!);
+}
 try {
   const report = await inspectData(root, sql ? { sql } : target!, {
+    ...(user ? { user, userName: as! } : {}),
     ...(sheet ? { sheet } : {}),
     ...(range ? { range } : {}),
     ...(values !== undefined ? { values } : {}),

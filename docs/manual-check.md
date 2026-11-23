@@ -500,6 +500,18 @@ cd ../..
 | 207 | 開発サーバーを止め、`pnpm exec vite --config e2e/rls.vite.config.ts --host` で動かし直して、同じネットワークのスマホかほかのパソコンで、ターミナルに出た Network の URL を開き、yamada を選ぶ | 「…ログインしていません（『表示する利用者』は、開発サーバーを動かしているパソコンで開いたページからだけ使えます）」。このパソコンで開いたページでは今までどおり読める |
 | 208 | yamada を選んだまま、同じブラウザでもう一つタブを開いて suzuki を選び、前のタブに戻る | 前のタブも読み込み直され、「表示する利用者」が suzuki になり、近畿だけ（前のタブに yamada の行が残らない） |
 
+### 行レベル制御（devbi-check・devbi-inspect で確かめる）
+
+行レベルのモードのプロジェクトを、`devUsers` の人として確かめます（[リファレンス](reference.md#行レベル制御のプロジェクトを確かめる)）。`pnpm build` のあと、`examples/sales` のフォルダで動かします。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 209 | `pnpm exec devbi-check --dir e2e/rls` | 最初の行が「行レベルのモードです（api/orders.sql に :user. があるため）。データは読んでいません（devUsers を書くか --as を付けます）」。指標ファイルとタイル kpi-revenue・region は「確かめていません（… ログインした人が要ります …）」で、注意 1 件。`examples/sales/vite.config.ts` の `devbi()` は `e2e/rls` を指さないので、`devUsers` を読まない |
+| 210 | `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts` | 「データは yamada・suzuki・sato として読みました」。`models/my_sales.metrics.yaml（yamada として）: 2,322 行`、`（suzuki として）: 1,325 行`、sato は「確かめていません（sato は API の orders を読めません: 利用者 sato に属性 region がありません …）」。ダッシュボードも人ごとに 3 つ。最後に「⚠ models/my_sales.metrics.yaml: sato として: 確かめていません: …」と「エラー 0 件、注意 1 件」 |
+| 211 | `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts --as suzuki --values 3` | 「データは suzuki として読みました」。`kpi-revenue: 売上 ¥42,290,840`、`region: 地域 近畿、売上 ¥42,290,840`。最後に「問題はありません」。`--as tanaka` にすると「devUsers に tanaka がありません（e2e/rls.vite.config.ts にあるのは yamada・suzuki・sato）」で終了コード 2 |
+| 212 | `pnpm exec devbi-inspect --dir e2e/rls --config e2e/rls.vite.config.ts --as yamada my_sales`、次に `--config` と `--as` を外して同じコマンド | 1 つ目は「2,322 行、9 列」で、地域は「1 種類 関東 (2,322)」。2 つ目は「API の orders を読んでいません: 行レベルのモードなので、ログインした人が要ります。…」 |
+| 213 | `pnpm exec vite --config e2e/rls.vite.config.ts` を動かしたまま、別のターミナルで `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts --as yamada --url http://127.0.0.1:5180/` | 2 行目に「置いた先 http://127.0.0.1:5180/: ログインが要る API です（行レベルのモードで動いています）」。`devbi-serve` を動かして `--url http://localhost:8080/` にすると、「行レベル制御を知っている API です」 |
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。

@@ -4,10 +4,13 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { ApiHandler } from "@devbi/server";
+import type { ApiHandler, DevBIUser, RowLevelMode } from "@devbi/server";
 import {
+  apiCalls,
   checkQuery,
   compileQuery,
+  defaultRequests,
+  scanSources,
   compileMalloy,
   compileRows,
   compileSource,
@@ -53,12 +56,16 @@ export type Level = "error" | "warning";
 
 export interface Finding {
   level: Level;
+  /** Checked as these users of devUsers only (the others did not get it). */
+  as?: string[];
   /** The file to change, relative to the project (`models/sales.metrics.yaml`). */
   file: string;
   message: string;
 }
 
 export interface ViewReport {
+  /** The user of devUsers it was read as (row-level security). */
+  as?: string;
   name: string;
   file: string;
   /** Rows of the model, when it ran. */
@@ -70,6 +77,8 @@ export interface ViewReport {
 }
 
 export interface TileReport {
+  /** The user of devUsers it was read as (row-level security). */
+  as?: string;
   dashboard: string;
   id: string;
   /** Rows of the tile's query, when it ran. */
@@ -81,6 +90,12 @@ export interface TileReport {
 }
 
 export interface CheckReport {
+  /** Why the project is in row-level mode (`api/orders.sql に :user. があるため`), when it is. */
+  rowLevel?: string;
+  /** The users of devUsers the data was read as (`--as`, or each of them). */
+  as?: string[];
+  /** `--url`: what the API there says (`api/schema`). */
+  url?: { url: string; access: boolean; status: number; note: string };
   findings: Finding[];
   views: ViewReport[];
   tiles: TileReport[];
@@ -98,7 +113,19 @@ export interface CheckOptions {
   env?: Record<string, string | undefined>;
   /** How many rows of each tile's result to keep in `values`, formatted as on the screen. Default 0. */
   values?: number;
+  /**
+   * Read the data as these users of devUsers (row-level security: `:user.` in api/*.sql): one (`--as`), or several,
+   * each in turn, warning when SQL that filters by user gives them all the same rows.
+   */
+  users?: { name: string; user: DevBIUser }[];
+  /** Where the site is (`--url https://intra/devbi/`): whether its API knows row-level security (`"access": 1`). */
+  url?: string;
+  /** For `url`: default the global fetch. */
+  fetch?: typeof fetch;
 }
+
+/** Names of ordinary parameters that look meant for the signed-in user's value (the browser can change them). */
+const USER_LIKE = /^(user_?id|userid|user_?name|username|login(_?id|_?name)?|account(_?id)?|e?mail|employee_?(id|no|number)|emp_?(id|no)|staff_?(id|no)|社員(番号|id|ID|コード)|ログイン(id|ID|名)?|ユーザー(id|ID|名)|利用者(id|ID)?)$/i;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -188,6 +215,159 @@ async function list(dir: string, suffix: string): Promise<string[]> {
  * DuckDB-wasm, in Node). Promoted tiles' `query` is read with Vite.
  */
 export async function checkProject(dir: string, options: CheckOptions = {}): Promise<CheckReport> {
+  const users = options.users ?? [];
+  let report: CheckReport;
+  if (users.length <= 1) {
+    report = await checkOnce(dir, options, users[0]);
+    if (users[0]) {
+      report.as = [users[0].name];
+      for (const v of report.views) v.as = users[0].name;
+      for (const t of report.tiles) t.as = users[0].name;
+    }
+  } else {
+    // Each user in turn; what all of them got is one finding, the rest say whose.
+    const runs: { name: string; report: CheckReport }[] = [];
+    for (const u of users) runs.push({ name: u.name, report: await checkOnce(dir, options, u) });
+    const seen = new Map<string, { finding: Finding; names: string[] }>();
+    for (const run of runs) {
+      for (const f of run.report.findings) {
+        const key = JSON.stringify([f.level, f.file, f.message]);
+        const s = seen.get(key);
+        if (s) s.names.push(run.name);
+        else seen.set(key, { finding: f, names: [run.name] });
+      }
+    }
+    const first = runs[0]!.report;
+    report = {
+      ...first,
+      as: runs.map((r) => r.name),
+      findings: [...seen.values()].map(({ finding, names }) => (names.length === runs.length ? finding : { ...finding, as: names })),
+      views: runs.flatMap((r) => r.report.views.map((v) => ({ ...v, as: r.name }))),
+      tiles: runs.flatMap((r) => r.report.tiles.map((t) => ({ ...t, as: r.name }))),
+    };
+    for (const f of await sameRows(dir, options, users)) report.findings.push(f);
+  }
+  if (options.url) report.findings.push(...(await checkUrl(options.url, report, options.fetch ?? fetch)));
+  return report;
+}
+
+/**
+ * SQL that filters by user (`:user.`) and gives every one of devUsers the same rows: maybe not filtered after all
+ * (`SELECT :user.id AS 見ている人, …`). Run with the parameters the models and dashboards use as they open.
+ */
+async function sameRows(dir: string, options: CheckOptions, users: { name: string; user: DevBIUser }[]): Promise<Finding[]> {
+  if (!existsSync(path.join(dir, "api"))) return [];
+  const server = await import("@devbi/server");
+  const env = options.env ?? server.loadEnv(dir);
+  const requests = new Map<string, { name: string; params: Record<string, unknown> }>();
+  const ask = (name: string, params: Record<string, unknown>) => {
+    const key = JSON.stringify([name, Object.keys(params).sort().map((k) => [k, params[k]])]);
+    if (!requests.has(key)) requests.set(key, { name, params });
+  };
+  const datasets: Record<string, import("devbi").DatasetInfo> = {};
+  const filtering = new Set<string>();
+  for (const name of await server.listDatasets(dir)) {
+    try {
+      const text = await server.readDatasetText(dir, name);
+      const d = server.parseDataset(name, text, server.dialectOf(env[server.connectionVariable(server.connectionOf(text))] ?? ""));
+      datasets[name] = { parameters: d.parameters, ...(d.key ? { key: d.key } : {}) };
+      if (d.user?.length) {
+        filtering.add(name);
+        if (!d.params.length) ask(name, {});
+      }
+    } catch {
+      // its own finding
+    }
+  }
+  if (!filtering.size) return [];
+  for (const f of await list(path.join(dir, "models"), ".metrics.yaml")) {
+    try {
+      const view = parseMetricsYaml(await readFile(path.join(dir, "models", f), "utf8"), f.slice(0, -".metrics.yaml".length), `models/${f}`);
+      for (const call of apiCalls(view.model)) ask(call.name, call.params);
+    } catch {
+      // its own finding
+    }
+  }
+  for (const f of await list(path.join(dir, "dashboards"), ".dash.json")) {
+    try {
+      const d = parseDashboardJson(await readFile(path.join(dir, "dashboards", f), "utf8"), f.slice(0, -".dash.json".length), `dashboards/${f}`);
+      for (const r of defaultRequests(d, datasets)) ask(r.dataset, r.params);
+    } catch {
+      // its own finding
+    }
+  }
+  const api = server.createApiHandler({ dir, env, exposeErrors: true });
+  const out: Finding[] = [];
+  try {
+    const done = new Set<string>();
+    for (const { name, params } of requests.values()) {
+      if (!filtering.has(name) || done.has(name)) continue;
+      const got = new Map<string, string[]>();
+      for (const u of users) {
+        try {
+          const { bytes, rows } = await api.run(name, params, { user: u.user });
+          // Everyone getting no rows says nothing about the filter (a period without data).
+          if (!rows) continue;
+          const key = Buffer.from(bytes).toString("base64");
+          got.set(key, [...(got.get(key) ?? []), u.name]);
+        } catch {
+          // this user may not read it (403), or the database is away: not compared
+        }
+      }
+      const read = [...got.values()].flat();
+      if (got.size === 1 && read.length >= 2) {
+        done.add(name);
+        out.push({
+          level: "warning",
+          file: `api/${name}.sql`,
+          message: `devUsers の ${read.join("・")} に、同じ行を返しました。:user.… で行を絞っているか確かめてください（属性の値が同じ人どうしなら問題ありません）`,
+        });
+      }
+    }
+  } finally {
+    await api.close();
+  }
+  return out;
+}
+
+/** `--url`: whether the API where the site is knows row-level security (`"access": 1` in api/schema). */
+async function checkUrl(url: string, report: CheckReport, fetchFn: typeof fetch): Promise<Finding[]> {
+  const base = url.endsWith("/") ? url : `${url}/`;
+  const at = new URL("api/schema", base).href;
+  const file = "--url";
+  const level: Level = report.rowLevel ? "error" : "warning";
+  let res: Response;
+  try {
+    res = await fetchFn(at, { headers: { Accept: "application/json" } });
+  } catch (e) {
+    report.url = { url, access: false, status: 0, note: `つながりません: ${message(e)}` };
+    return [{ level: "warning", file, message: `${at} につながりません（${message(e)}）。置いた先の API を確かめていません` }];
+  }
+  const body = (await res.json().catch(() => undefined)) as { access?: unknown; error?: unknown } | undefined;
+  if (res.ok && body?.access === 1) {
+    report.url = { url, access: true, status: res.status, note: "行レベル制御を知っている API です" };
+    return [];
+  }
+  if (res.status === 401 && typeof body?.error === "string") {
+    report.url = { url, access: true, status: 401, note: "ログインが要る API です（行レベルのモードで動いています）" };
+    return [];
+  }
+  if (res.ok && body && typeof body === "object") {
+    report.url = { url, access: false, status: res.status, note: "行レベル制御を知らない API です" };
+    return [
+      {
+        level,
+        file,
+        message: `${at} に "access": 1 がありません。行レベル制御を知らない古い DevBI の API です（アプリにコピーしたままの C# など）。-- roles: を読まず、:user. の SQL は動きません。新しいものに入れ替えます`,
+      },
+    ];
+  }
+  report.url = { url, access: false, status: res.status, note: `確かめられません（HTTP ${res.status}）` };
+  return [{ level: "warning", file, message: `${at} が HTTP ${res.status} で答えました（DevBI の API の答えではありません。サイトのログインの前で止まったなど）。置いた先の API を確かめていません` }];
+}
+
+/** One run of the checks, as one user of devUsers (or nobody). */
+async function checkOnce(dir: string, options: CheckOptions, as?: { name: string; user: DevBIUser }): Promise<CheckReport> {
   const findings: Finding[] = [];
   const views: ViewReport[] = [];
   const tiles: TileReport[] = [];
@@ -227,6 +407,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   // The datasets (api/*.sql) as the page knows them: their parameters, read with each database's quoting rules.
   const env = options.env ?? (await import("@devbi/server")).loadEnv(dir);
   const datasetFiles = await readDatasets(dir, env);
+  const rowLevel = await rowLevelChecks(dir, env, metrics, add);
   // Their columns, asked of their databases once each (api/describe): only where one answers.
   let api: ApiHandler | undefined;
   const described = new Map<string, Promise<Described>>();
@@ -287,7 +468,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   let engine: NodeEngine | undefined;
   let vite: ViteDevServer | undefined;
   try {
-    if (metrics.size) engine = await createNodeEngine(dir, options.env ? { env: options.env } : {});
+    if (metrics.size) engine = await createNodeEngine(dir, { ...(options.env ? { env: options.env } : {}), ...(as ? { user: as.user, userName: as.name } : {}) });
     // Per view: the model SQL (or why it did not run), and the names that failed or were not checked. A name that
     // failed only because another did (a measure of a broken measure) has its causes in `causes`, not an error.
     const state = new Map<
@@ -813,44 +994,123 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
     await vite?.close();
     await api?.close();
   }
-  return { findings, views, tiles, dashboards: dashboards.map((d) => d.dashboard.name), periods };
+  return { ...(rowLevel?.on ? { rowLevel: rowLevel.why! } : {}), findings, views, tiles, dashboards: dashboards.map((d) => d.dashboard.name), periods };
+}
+
+/**
+ * The api/*.sql files as the API reads them (each error once, on its file), and what row-level mode needs: every file
+ * says who sees which rows, no ordinary parameter meant for the user's value, models that read files everyone gets
+ * (a warning), and no snapshot files left that no job makes any more.
+ */
+async function rowLevelChecks(
+  dir: string,
+  env: Record<string, string | undefined>,
+  metrics: Map<string, { view: MetricsView; file: string }>,
+  add: (level: Level, file: string, text: string) => void,
+): Promise<RowLevelMode | undefined> {
+  if (!existsSync(path.join(dir, "api"))) return undefined;
+  const server = await import("@devbi/server");
+  const mode = await server.rowLevelMode(dir);
+  // `api/x.sql（3 行目）: …` on the file api/x.sql: `3 行目: …`
+  const own = (rel: string, text: string) =>
+    text.startsWith(`${rel}: `)
+      ? text.slice(rel.length + 2)
+      : text.startsWith(`${rel} は、`)
+        ? text.slice(rel.length + 3)
+        : text.startsWith(`${rel}（`)
+          ? text.slice(rel.length).replace(/^（(\d+) 行目）/, "$1 行目")
+          : text;
+  for (const name of await server.listDatasets(dir)) {
+    const rel = `api/${name}.sql`;
+    let d: import("@devbi/server").Dataset;
+    try {
+      const text = await server.readDatasetText(dir, name);
+      d = server.parseDataset(name, text, server.dialectOf(env[server.connectionVariable(server.connectionOf(text))] ?? ""));
+    } catch (e) {
+      add("error", rel, own(rel, message(e)));
+      continue;
+    }
+    const problem = server.rowLevelProblem(d, mode);
+    if (problem) add("error", rel, own(rel, problem));
+    if (!mode.on) continue;
+    for (const p of d.params) {
+      if (USER_LIKE.test(p)) {
+        add("warning", rel, `:${p} は、ブラウザが値を変えられるふつうのパラメーターです。ログインした人の値なら :user.id か :user.<属性> を使います（行レベルのモード）`);
+      }
+    }
+  }
+  if (mode.on) {
+    for (const { view, file } of metrics.values()) {
+      for (const s of scanSources(view.model)) {
+        if (s.format === "api") continue;
+        add("warning", file, `model の ${s.path} は、だれが開いても同じ行が届きます（行レベルのモード）。マスタなら問題ありません。人ごとに変えたいデータは、データベースに入れて api/*.sql から読みます`);
+      }
+    }
+  }
+  // Snapshot files no job makes any more: everyone's rows of SQL that filters by user now, or of an older build.
+  const found = await server.snapshotJobs(dir, env, { rowLevel: mode.on });
+  if (found.snapshotting && found.problems.length <= (found.leftOut ?? 0)) {
+    const made = new Set(found.jobs.map((j) => j.file));
+    for (const folder of ["snapshots", "dist/snapshots"]) {
+      for (const f of await list(path.join(dir, folder), ".arrows")) {
+        if (made.has(f)) continue;
+        add(
+          mode.on ? "error" : "warning",
+          `${folder}/${f}`,
+          "今は作らないスナップショットのファイルです（-- snapshot: を消した SQL、人で絞るようになった SQL、パラメーターを変える前のもの）。devbi-serve か devbi-snapshot を動かすと消えます。IIS などに写したものは robocopy /MIR で写し先からも消します",
+        );
+      }
+    }
+  }
+  return mode;
 }
 
 /** The report as text: a line per metrics file and dashboard, then the problems. */
 export function formatReport(report: CheckReport): string {
   const lines: string[] = [];
+  if (report.rowLevel) {
+    lines.push(
+      `行レベルのモードです（${report.rowLevel}）。${report.as?.length ? `データは ${report.as.join("・")} として読みました` : "データは読んでいません（devUsers を書くか --as を付けます）"}`,
+    );
+  }
+  if (report.url) lines.push(`置いた先 ${report.url.url}: ${report.url.note}`);
+  // `（yamada として）` after a file when the data was read as several users.
+  const whose = (as: string | undefined) => (as && (report.as?.length ?? 0) > 1 ? `（${as} として）` : "");
   for (const v of report.views) {
     lines.push(
       v.notChecked
-        ? `${v.file}: 確かめていません（${v.notChecked}）`
-        : `${v.file}: ${v.rows === undefined ? "エラー" : `${v.rows.toLocaleString("en-US")} 行`}、指標 ${v.measures}・軸 ${v.dimensions}`,
+        ? `${v.file}${whose(v.as)}: 確かめていません（${v.notChecked}）`
+        : `${v.file}${whose(v.as)}: ${v.rows === undefined ? "エラー" : `${v.rows.toLocaleString("en-US")} 行`}、指標 ${v.measures}・軸 ${v.dimensions}`,
     );
   }
-  for (const name of report.dashboards) {
-    const list = report.tiles.filter((t) => t.dashboard === name);
-    const ran = list.filter((t) => t.rows !== undefined);
-    const period = Object.hasOwn(report.periods, name) ? `、date-range の最初の期間: ${report.periods[name]!.join("・")}` : "";
-    lines.push(`dashboards/${name}.dash.json: タイル ${list.length}（クエリを実行 ${ran.length}${period}）`);
-    if (ran.some((t) => t.values)) {
-      // --values: each tile's first rows, as the screen shows them.
-      for (const t of ran) {
-        const more = t.values && t.rows! > t.values.length ? " …" : "";
-        if (t.rows === 1 && t.values?.length) lines.push(`  ${t.id}: ${t.values[0]}`);
-        else
-          lines.push(
-            `  ${t.id} ${t.rows!.toLocaleString("en-US")} 行${t.values?.length ? ":" : ""}`,
-            ...(t.values ?? []).map((v, i, a) => `    ${v}${i === a.length - 1 ? more : ""}`),
-          );
+  const runs = (report.as?.length ?? 0) > 1 ? report.as! : [undefined];
+  for (const run of runs) {
+    for (const name of report.dashboards) {
+      const list = report.tiles.filter((t) => t.dashboard === name && (run === undefined || t.as === run));
+      const ran = list.filter((t) => t.rows !== undefined);
+      const period = Object.hasOwn(report.periods, name) ? `、date-range の最初の期間: ${report.periods[name]!.join("・")}` : "";
+      lines.push(`dashboards/${name}.dash.json${whose(run)}: タイル ${list.length}（クエリを実行 ${ran.length}${period}）`);
+      if (ran.some((t) => t.values)) {
+        // --values: each tile's first rows, as the screen shows them.
+        for (const t of ran) {
+          const more = t.values && t.rows! > t.values.length ? " …" : "";
+          if (t.rows === 1 && t.values?.length) lines.push(`  ${t.id}: ${t.values[0]}`);
+          else
+            lines.push(
+              `  ${t.id} ${t.rows!.toLocaleString("en-US")} 行${t.values?.length ? ":" : ""}`,
+              ...(t.values ?? []).map((v, i, a) => `    ${v}${i === a.length - 1 ? more : ""}`),
+            );
+        }
+      } else if (ran.length) lines.push(`  ${ran.map((t) => `${t.id} ${t.rows!.toLocaleString("en-US")} 行`).join("、")}`);
+      // Tiles not run, by reason (the problems are listed below; tiles without data need no line).
+      const notes = new Map<string, string[]>();
+      for (const t of list) {
+        if (t.rows === undefined && t.note && t.note !== "エラー" && t.note !== "データを読まないタイル") {
+          notes.set(t.note, [...(notes.get(t.note) ?? []), t.id]);
+        }
       }
-    } else if (ran.length) lines.push(`  ${ran.map((t) => `${t.id} ${t.rows!.toLocaleString("en-US")} 行`).join("、")}`);
-    // Tiles not run, by reason (the problems are listed below; tiles without data need no line).
-    const notes = new Map<string, string[]>();
-    for (const t of list) {
-      if (t.rows === undefined && t.note && t.note !== "エラー" && t.note !== "データを読まないタイル") {
-        notes.set(t.note, [...(notes.get(t.note) ?? []), t.id]);
-      }
+      for (const [note, ids] of notes) lines.push(`  ${ids.join("・")}: ${note}`);
     }
-    for (const [note, ids] of notes) lines.push(`  ${ids.join("・")}: ${note}`);
   }
   // By file: the metrics files, then the dashboards.
   const rank = (f: Finding) => (f.file.startsWith("models/") ? 0 : 1);
@@ -860,7 +1120,7 @@ export function formatReport(report: CheckReport): string {
   if (report.findings.length) lines.push("");
   for (const f of [...errors, ...warnings]) {
     const [first, ...rest] = f.message.split("\n");
-    lines.push(`${f.level === "error" ? "✗" : "⚠"} ${f.file}: ${first}`);
+    lines.push(`${f.level === "error" ? "✗" : "⚠"} ${f.file}: ${f.as ? `${f.as.join("・")} として: ` : ""}${first}`);
     for (const r of rest) if (r.trim()) lines.push(`    ${r}`);
   }
   lines.push("");

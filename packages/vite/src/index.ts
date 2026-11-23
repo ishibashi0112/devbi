@@ -21,11 +21,13 @@ import { loadEnv, version as viteVersion, type Connect, type Plugin, type Previe
 import { parse as parseYaml } from "yaml";
 import type { IncomingMessage } from "node:http";
 import type { ApiHandler, RequestOptions } from "@devbi/server";
+import { devUserOf, type DevbiPluginApi } from "./dev-users.js";
 import { createEditorHandler, sameMachine, versionOf } from "./editor.js";
 import { generate } from "./gen.js";
 
 export { generate, envDts, schemaNames, type GenerateResult } from "./gen.js";
 export { createEditorHandler, versionOf, NEW_NAME, type EditorOptions } from "./editor.js";
+export { loadDevUsers, devUserOf, type DevbiPluginApi } from "./dev-users.js";
 
 export interface DevbiOptions {
   /** Directory holding `dashboards/`, `models/` and `data/`. Relative to the Vite root. Default: the root. */
@@ -423,8 +425,7 @@ export function devUserRequest(
     return { signInHint: "server.allowedHosts が true なので、『表示する利用者』は localhost か IP アドレスで開いたページからだけ使えます" };
   }
   if (!Object.hasOwn(users, picked)) return { signInHint: `devUsers に ${shortName(picked)} がありません。『表示する利用者』で選び直します` };
-  const u = users[picked]!;
-  return { user: { id: u.id ?? picked, ...(u.roles ? { roles: u.roles } : {}), ...(u.attrs ? { attrs: u.attrs } : {}) } };
+  return { user: devUserOf(picked, users[picked]!) };
 }
 
 /** A cookie's value as a message shows it: one line, at most 40 characters. */
@@ -593,6 +594,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   return {
     name: "devbi",
     enforce: "pre",
+    // For tools that read the project's Vite config (devbi-check --as, devbi-inspect --as): the options as given.
+    api: { devbi: { dirOption: options.dir, devUsers: options.devUsers } satisfies DevbiPluginApi },
     config(user, { mode, command }) {
       // The dev server serves the project folder: keep the API's SQL and SQLite databases out of it (they are
       // for the server only). Vite's own list stays when the project has none of its own.
@@ -728,7 +731,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
             if (!name.trim()) throw new TypeError("名前は空でない文字で書いてください");
             if (typeof u !== "object" || u === null || Array.isArray(u)) throw new TypeError("{ roles, attrs } の形で書いてください");
             if (u.id !== undefined && (typeof u.id !== "string" || !u.id.trim())) throw new TypeError("id は空でない文字で書いてください");
-            viewerOf({ id: u.id ?? name, ...(u.roles ? { roles: u.roles } : {}), ...(u.attrs ? { attrs: u.attrs } : {}) });
+            viewerOf(devUserOf(name, u));
           } catch (e) {
             throw new Error(`devbi: devUsers の ${name}: ${(e as Error).message}`);
           }

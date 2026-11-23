@@ -1,5 +1,5 @@
-export { createApiHandler, ARROW_STREAM, type ApiHandler, type ApiOptions, type DatasetColumns, type RequestOptions } from "./handler.js";
-export { viewerOf, accessLines, rowLevelSignal, type DevBIUser, type AccessLines } from "./access.js";
+export { createApiHandler, rowLevelMode, rowLevelProblem, ARROW_STREAM, type ApiHandler, type ApiOptions, type DatasetColumns, type RequestOptions, type RowLevelMode } from "./handler.js";
+export { viewerOf, accessLines, rowLevelSignal, logSafe, type DevBIUser, type AccessLines } from "./access.js";
 export { serve, isHostAllowed, type ServeOptions, type RunningServer } from "./serve.js";
 export { connect, dialectOf, loadDriver, type Connection, type ColumnType, type DescribedColumn, type Dialect, type ResultColumn, type ResultSet } from "./connect.js";
 export { listDatasets, readDataset, readDatasetText, connectionOf, snapshotOf, parseDataset, bindParameters, connectionVariable, describeValues, DatasetError, type Dataset, type ParamValue, type BindUser, type BindOptions } from "./datasets.js";
