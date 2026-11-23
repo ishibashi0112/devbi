@@ -1,12 +1,13 @@
 // Typed parameters (`-- param:`) on a real database: the same cases on SQLite (server.test.ts), PostgreSQL
 // (postgres.test.ts), and SQL Server, MySQL, MariaDB and Oracle (databases.test.ts). They read the sample's tables
 // (customers, orders); the answers come from the sample's SQLite file (examples/sales/db/sales.sqlite).
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC } from "apache-arrow";
-import { expect, it } from "vitest";
-import type { ApiHandler, Dialect } from "../src/index.js";
+import { afterAll, expect, it } from "vitest";
+import type { ApiHandler, DevBIUser, Dialect } from "../src/index.js";
 
 export const SAMPLE_DB = path.resolve(import.meta.dirname, "../../../examples/sales/db/sales.sqlite");
 
@@ -82,5 +83,37 @@ export function typedParameterTests(get: () => ApiHandler, dialect?: Dialect): v
     expect(await count("typed_flag", { ok: true })).toBe(sample<number>("SELECT COUNT(*) FROM customers"));
     expect(await count("typed_flag", { ok: false })).toBe(0);
     expect(await count("typed_number", { rate: 2.5 })).toBe(sample<number>("SELECT COUNT(*) FROM customers WHERE id * 2.5 < 10"));
+  });
+}
+
+/**
+ * Row-level security on a real database (docs/design/row-level-security.md): `:user.region` bound as the database's
+ * parameter. In a project of its own (its files put it in row-level mode); `open` makes the API for that folder.
+ */
+export function userFilterTests(open: (dir: string) => ApiHandler, schema = ""): void {
+  let api: ApiHandler | undefined;
+  const get = () => {
+    if (!api) {
+      const dir = mkdtempSync(path.join(tmpdir(), "devbi-rls-db-"));
+      mkdirSync(path.join(dir, "api"));
+      writeFileSync(path.join(dir, "api", "user_region.sql"), `-- 自分の地域の顧客\nSELECT COUNT(*) AS n FROM ${schema}customers c WHERE c.region = :user.region`);
+      writeFileSync(path.join(dir, "api", "user_all.sql"), `-- access: all\nSELECT COUNT(*) AS n FROM ${schema}customers c`);
+      api = open(dir);
+    }
+    return api;
+  };
+  afterAll(async () => {
+    await api?.close();
+  });
+  const count = async (name: string, user?: DevBIUser) => Number(tableFromIPC((await get().run(name, {}, { user })).bytes).get(0)!.toArray()[0]);
+
+  it("row-level security: :user.region from the user, a quote in it stays a value, nobody is 401", async () => {
+    const region = (r: string) => ({ id: "CORP\\yamada", attrs: { region: r } });
+    expect(await count("user_region", region("関東"))).toBe(sample<number>("SELECT COUNT(*) FROM customers WHERE region = '関東'"));
+    expect(await count("user_region", region("近畿"))).toBe(sample<number>("SELECT COUNT(*) FROM customers WHERE region = '近畿'"));
+    expect(await count("user_region", region("' OR 1=1 --"))).toBe(0);
+    expect(await count("user_all", { id: "CORP\\yamada" })).toBe(sample<number>("SELECT COUNT(*) FROM customers"));
+    await expect(get().run("user_all")).rejects.toMatchObject({ status: 401 });
+    await expect(get().run("user_region", {}, { user: { id: "CORP\\yamada" } })).rejects.toMatchObject({ status: 403 });
   });
 }

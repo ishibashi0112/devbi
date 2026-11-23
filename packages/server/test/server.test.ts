@@ -6,7 +6,7 @@ import { tableFromIPC } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bindParameters, connectionOf, createApiHandler, isHostAllowed, parameters, parseDataset, readOnlyProblem, serve, toArrowTable, type ApiHandler, type RunningServer } from "../src/index.js";
 import { errorText } from "../src/result.js";
-import { SAMPLE_DB, typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
+import { SAMPLE_DB, typedParameterTests, userFilterTests, writeTypedDatasets } from "./typed-cases.js";
 
 describe("parameters", () => {
   it("finds :name outside quotes and comments, not casts", () => {
@@ -242,6 +242,7 @@ describe("typed parameters on SQLite", () => {
     await api?.close();
   });
   typedParameterTests(() => api, "sqlite");
+  userFilterTests((dir) => createApiHandler({ dir, env: { DEVBI_DB: `sqlite:${SAMPLE_DB}` }, exposeErrors: true }));
 });
 
 describe("toArrowTable", () => {

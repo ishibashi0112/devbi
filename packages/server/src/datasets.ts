@@ -2,13 +2,14 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Dialect } from "./result.js";
-import { MAX_PLACEHOLDERS, ParamLineError, RESERVED, checkValue, headerDirectives, type DatasetParameter, type ParamType } from "./params.js";
+import { AccessLineError, accessLines, isBareUser, isUserName, type AttrValue } from "./access.js";
+import { MAX_PLACEHOLDERS, ParamLineError, checkValue, headerDirectives, type DatasetParameter, type ParamType } from "./params.js";
 import { isNameChar, parameters, readOnlyProblem, splitStatements } from "./sqltext.js";
 
 /** One `api/<name>.sql` file: a SELECT the API runs for `read_api('<name>')`. */
 export interface Dataset {
   name: string;
-  /** The comment lines above the SELECT, without the `connection:`, `snapshot:`, `param:` and `key:` lines. */
+  /** The comment lines above the SELECT, without the `connection:`, `snapshot:`, `param:`, `key:`, `roles:` and `access:` lines. */
   description: string;
   /** The `-- connection: <name>` line: which DEVBI_DB_<NAME> to use. Undefined: DEVBI_DB. */
   connection?: string;
@@ -16,8 +17,17 @@ export interface Dataset {
   snapshot?: string[];
   /** The statement, without the comments above it and without a final `;`. */
   sql: string;
-  /** Parameter names (`:from` → `from`), each once, in the order they first appear. */
+  /** Parameter names (`:from` → `from`), each once, in the order they first appear. Not the user's (`:user.region`). */
   params: string[];
+  /**
+   * The signed-in user's values the SQL uses (`:user.id`, `:user.region` → `id`, `region`; lower case, each once, in
+   * the order they first appear): row-level security. They come from the user the host hands over, never the browser.
+   */
+  user?: string[];
+  /** The `-- roles: 経理, CORP\Managers` line: only users with one of these roles may read it. */
+  roles?: string[];
+  /** The `-- access: all` line: on purpose, every signed-in user gets every row. */
+  access?: "all";
   /**
    * One per parameter: those with a `-- param:` line first, in the order of the lines (with their type, label,
    * default…), then the others in the order they first appear (only `name`).
@@ -104,8 +114,11 @@ export function snapshotOf(text: string, name = "?"): string[] | undefined {
   return undefined;
 }
 
-export function parseDataset(name: string, text: string, dialect?: Dialect): Dataset {
-  const rel = `api/${name}.sql`;
+/**
+ * Read and check an `api/<name>.sql` file's text. `rel`: the file as messages name it (`access/user.sql` for the
+ * user's attributes). Throws DatasetError (400).
+ */
+export function parseDataset(name: string, text: string, dialect?: Dialect, rel = `api/${name}.sql`): Dataset {
   const statements = splitStatements(text, dialect);
   if (statements.length === 0) throw new DatasetError(`${rel}: SELECT 文がありません`, 400);
   if (statements.length > 1) throw new DatasetError(`${rel}: 1 つのファイルに書ける SELECT 文は 1 つだけです（${statements.length} 個あります）`, 400);
@@ -122,18 +135,31 @@ export function parseDataset(name: string, text: string, dialect?: Dialect): Dat
   }
   const connection = connectionOf(text);
   const snapshot = snapshotOf(text, name);
-  const description = st.title.split("\n").filter((line) => !/^(connection|snapshot|param|key)\s*:/i.test(line.trim()));
+  const description = st.title.split("\n").filter((line) => !/^(connection|snapshot|param|key|roles|access)\s*:/i.test(line.trim()));
   const places = parameters(st.sql, dialect);
   const params: string[] = [];
+  const user: string[] = [];
   for (const p of places) {
-    if (!params.some((q) => q.toLowerCase() === p.name.toLowerCase())) params.push(p.name);
+    if (isUserName(p.name)) {
+      const attr = p.name.slice("user.".length).toLowerCase();
+      if (!user.includes(attr)) user.push(attr);
+    } else if (!params.some((q) => q.toLowerCase() === p.name.toLowerCase())) params.push(p.name);
   }
   let header: ReturnType<typeof headerDirectives>;
+  let access: ReturnType<typeof accessLines>;
   try {
-    header = headerDirectives(text, name, params);
+    header = headerDirectives(text, name, params, rel);
+    access = accessLines(text, rel);
   } catch (e) {
-    if (e instanceof ParamLineError) throw new DatasetError(e.message, 400);
+    if (e instanceof ParamLineError || e instanceof AccessLineError) throw new DatasetError(e.message, 400);
     throw e;
+  }
+  if (access.access && user.length) {
+    throw new DatasetError(`${rel}: -- access: all（全員に全部の行）と :user.${user[0]}（人で絞る）が両方あります。どちらかにしてください`, 400);
+  }
+  if (snapshot && (user.length || access.roles)) {
+    const why = user.length ? `:user.${user[0]} で人ごとに行が変わる` : "-- roles: の役割を、静的なファイルでは確かめられない";
+    throw new DatasetError(`${rel}: ${why}ので、-- snapshot: は書けません（スナップショットは全員に同じファイルです）`, 400);
   }
   // A multiple-value parameter only in `IN (:name)`: the server writes one placeholder per value there.
   for (const p of places) {
@@ -154,6 +180,9 @@ export function parseDataset(name: string, text: string, dialect?: Dialect): Dat
     params,
     parameters: [...header.parameters, ...params.filter((p) => !declared.has(p.toLowerCase())).map((p) => ({ name: p }))],
     ...(header.key ? { key: header.key } : {}),
+    ...(user.length ? { user } : {}),
+    ...(access.roles ? { roles: access.roles } : {}),
+    ...(access.access ? { access: access.access } : {}),
   };
 }
 
@@ -190,6 +219,11 @@ export function describeValues(dataset: Dataset): Record<string, ParamValue | Pa
       return [p, def.multiple ? [v] : v];
     }),
   );
+}
+
+/** A stand-in user for `describeValues`: `"1"` for `:user.id` and every attribute the SQL uses (no rows are read). */
+export function describeUser(dataset: Dataset): BindUser {
+  return { id: "1", attrs: new Map((dataset.user ?? []).filter((a) => a !== "id").map((a) => [a, "1"])) };
 }
 
 /** The placeholder for the k-th value (from 1): `?` (SQLite, MySQL), `$1` (PostgreSQL), `@p1` (SQL Server), `:p1` (Oracle). */
@@ -241,20 +275,38 @@ function driverValue(dialect: Dialect, v: ParamValue): unknown {
   return typeof v === "number" && Number.isSafeInteger(v) ? BigInt(v) : v;
 }
 
+/** The signed-in user whose values `:user.id` and `:user.<name>` take. `attrs`: lower-case names; null = none. */
+export interface BindUser {
+  id: string;
+  attrs: ReadonlyMap<string, AttrValue | null>;
+}
+
+export interface BindOptions {
+  /** The signed-in user (row-level security). Without one, a `:user.` in the SQL is 401. */
+  user?: BindUser;
+  /** Row-level mode: a parameter named `user` itself is refused too (likely meant as `user.id`). */
+  rowLevel?: boolean;
+  /** The file as messages name it. Default `api/<name>.sql`. */
+  rel?: string;
+}
+
 /**
  * The dataset's SQL with its `:name` parameters in the database's placeholder style, and the values in order:
  * `?` for each place (SQLite, MySQL), or one numbered placeholder per name (`$1` PostgreSQL, `@p1` SQL Server,
  * `:p1` Oracle). Every parameter needs a value, and no others may be given. A parameter with a `-- param:` line is
  * checked against its type and goes typed (`typedPlace`); a multiple-value one becomes one placeholder per value in
- * its `IN (…)`. Names starting with `user.` are refused: they are the signed-in user's values (row-level security).
+ * its `IN (…)`. `values` are the browser's (or the caller's) and never fill `:user.` names: those come from
+ * `options.user` only (no user: 401; no such attribute, or an empty one: 403), and names starting with `user.` in
+ * `values` are refused (400), as is `user` itself in row-level mode.
  */
-export function bindParameters(dataset: Dataset, dialect: Dialect, values: Record<string, unknown>): { sql: string; params: unknown[] } {
-  const rel = `api/${dataset.name}.sql`;
+export function bindParameters(dataset: Dataset, dialect: Dialect, values: Record<string, unknown>, options: BindOptions = {}): { sql: string; params: unknown[] } {
+  const rel = options.rel ?? `api/${dataset.name}.sql`;
   // Names match without regard to case, like SQL names (and DuckDB passes read_api's argument names in lower case).
   const given = new Map<string, unknown>();
   for (const [key, v] of Object.entries(values)) {
     const lower = key.toLowerCase();
-    if (RESERVED.test(key)) throw new DatasetError(`${rel}: パラメーター ${key} は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）`, 400);
+    if (isUserName(key)) throw new DatasetError(`${rel}: パラメーター ${key} は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）`, 400);
+    if (options.rowLevel && isBareUser(key)) throw new DatasetError(`${rel}: パラメーター ${key} は渡せません（行レベルのモードでは、user という名前はログインした人のために取ってあります）`, 400);
     if (given.has(lower)) throw new DatasetError(`${rel}: パラメーター ${key} が 2 回あります`, 400);
     if (!dataset.params.some((p) => p.toLowerCase() === lower)) {
       const known = dataset.params.length ? `（使えるのは ${dataset.params.join(", ")}）` : "（この SQL にはパラメーターがありません）";
@@ -283,6 +335,16 @@ export function bindParameters(dataset: Dataset, dialect: Dialect, values: Recor
     }
     checked.set(lower, v);
   }
+  // The user's values: from the user only, checked before anything runs.
+  for (const attr of dataset.user ?? []) {
+    const u = options.user;
+    if (!u) throw new DatasetError(`ログインしていません（${rel} は、ログインした人の :user.${attr} で行を絞ります）`, 401);
+    const v = attr === "id" ? u.id : u.attrs.get(attr);
+    if (v === undefined || v === null || (typeof v === "string" && v.trim() === "")) {
+      throw new DatasetError(`利用者 ${u.id} に属性 ${attr} がありません（${rel} の :user.${attr}）`, 403);
+    }
+    checked.set(`user.${attr}`, v);
+  }
   const numbered = dialect === "postgres" || dialect === "mssql" || dialect === "oracle";
   // PostgreSQL, SQL Server, Oracle: a name's placeholders, written again where the name comes again.
   const written = new Map<string, string>();
@@ -291,10 +353,13 @@ export function bindParameters(dataset: Dataset, dialect: Dialect, values: Recor
   let last = 0;
   for (const p of parameters(dataset.sql, dialect)) {
     out += dataset.sql.slice(last, p.start);
-    const lower = p.name.toLowerCase();
+    // `user.` and the attribute lower-cased apart, as they were checked (`user.Σ` as a whole would end in ς).
+    const lower = isUserName(p.name) ? `user.${p.name.slice("user.".length).toLowerCase()}` : p.name.toLowerCase();
     let place = numbered ? written.get(lower) : undefined;
     if (place === undefined) {
-      const v = checked.get(lower)!;
+      const v = checked.get(lower);
+      // Never bound as nothing (a driver may take undefined for NULL, and `:user.x IS NULL OR …` would pass).
+      if (v === undefined) throw new DatasetError(`${rel}: :${p.name} の値がありません`, 500);
       const type = types.get(lower);
       place = (Array.isArray(v) ? v : [v]).map((x) => typedPlace(dialect, type, placeholder(dialect, params.push(driverValue(dialect, x))), x)).join(", ");
       if (numbered) written.set(lower, place);

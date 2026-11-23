@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { readProject } from "../src/index.js";
+import { isSnapshotPath, readProject } from "../src/index.js";
 
 describe("readProject and read_api", () => {
   const project = (withSql: boolean) => {
@@ -41,15 +41,19 @@ describe("datasets", () => {
 });
 
 describe("the dev server", () => {
-  it("does not hand out the API's SQL or the SQLite database", async () => {
+  it("does not hand out the API's SQL, access/ or the SQLite database", async () => {
     const { createServer } = await import("vite");
     const devbi = (await import("../src/index.js")).default;
     // Through a link, as on macOS (where the temporary folder /var/… is really /private/var/…).
     const real = mkdtempSync(path.join(tmpdir(), "devbi-dev-"));
     const dir = `${real}-link`;
     symlinkSync(real, dir, "junction");
-    for (const d of ["api", "db", "data"]) mkdirSync(path.join(dir, d));
+    for (const d of ["api", "db", "data", "access", "dist/snapshots", "snapshots"]) mkdirSync(path.join(dir, d), { recursive: true });
+    // devbi-serve's snapshots (everyone's rows of an older build): only its API answers these
+    writeFileSync(path.join(dir, "dist", "snapshots", "orders.arrows"), "everyone's rows");
+    writeFileSync(path.join(dir, "snapshots", "orders.arrows"), "everyone's rows");
     writeFileSync(path.join(dir, "api", "orders.sql"), "SELECT 1 AS one");
+    writeFileSync(path.join(dir, "access", "user.sql"), "SELECT region FROM devbi_users WHERE login = :user.id");
     writeFileSync(path.join(dir, "db", "shop.data"), "not for the browser");
     writeFileSync(path.join(dir, "db", "other.sqlite"), "not for the browser");
     writeFileSync(path.join(dir, "data", "sales.csv"), "a\n1\n");
@@ -62,9 +66,16 @@ describe("the dev server", () => {
       expect(await status("data/sales.csv")).toBe(200);
       expect(await status("api/orders.sql")).toBe(403);
       expect(await status("api/orders.sql?raw")).toBe(403);
+      expect(await status("access/user.sql")).toBe(403);
+      expect(await status("access/user.sql?raw")).toBe(403);
       expect(await status("db/shop.data")).toBe(403);
       expect(await status("db/other.sqlite")).toBe(403);
       expect(await status(".env")).toBe(403);
+      for (const p of ["dist/snapshots/orders.arrows", "dist/snapshots/orders.arrows?raw", "dist/snapshots//orders.arrows", "dist/snapshots/orders%2Earrows", "snapshots//orders.arrows", "snapshots/orders.arrows/"]) {
+        // the API (401: access/ puts it in row-level mode), or refused; never the file
+        expect([401, 403, 404], p).toContain(await status(p));
+      }
+      expect(await (await fetch(new URL(`@fs${real}/dist/snapshots/orders.arrows`, base))).text()).not.toContain("everyone's rows");
     } finally {
       await server.close();
     }
@@ -189,5 +200,14 @@ describe("embed: true", () => {
     expect(await warnings(unset)).toMatch(/base: "\/"（Vite の既定）/);
     expect(unset.base).toBeUndefined();
     expect(await warnings({ root: "/p", base: "./" })).toBe("");
+  });
+});
+
+describe("snapshot files", () => {
+  it("are known however their path is written", () => {
+    for (const p of ["/snapshots/x.arrows", "/snapshots//x.arrows", "/dist/snapshots/x.arrows/", "/a/Snapshots/x%2Earrows?raw", "/snapshots/x.arrows.", "/snapshots%2Fx.arrows", "/snapshots/sub/x.arrows.1-2.tmp", "\\snapshots\\x.arrows"]) {
+      expect(isSnapshotPath(p), p).toBe(true);
+    }
+    for (const p of ["/src/snapshots/view.ts", "/data/x.arrows", "/snapshots.arrows", "/my-snapshots/x.arrows", "/assets/index.js"]) expect(isSnapshotPath(p), p).toBe(false);
   });
 });

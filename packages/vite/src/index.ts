@@ -340,8 +340,31 @@ function realPath(p: string): string {
 
 /** Vite's server.fs.deny when a project sets none (it is replaced, not added to, when one is given). */
 const VITE_DENY = [".env", ".env.*", "*.{crt,pem}", "**/.git/**"];
-/** Files the read-only API reads, which the browser must not get from the dev server. */
-const SERVER_ONLY = ["**/api/**/*.sql", "*.{sqlite,sqlite3,db}", "*.{sqlite,sqlite3,db}-{wal,shm,journal}"];
+/** Files the read-only API reads, which the browser must not get from the dev server (access/: row-level security). */
+const SERVER_ONLY = [
+  "**/api/**/*.sql",
+  "**/access/**",
+  "*.{sqlite,sqlite3,db}",
+  "*.{sqlite,sqlite3,db}-{wal,shm,journal}",
+  // devbi-serve's snapshots (dist/snapshots/): the API answers snapshots/<file>, as it checks who may read them
+  "**/snapshots/**/*.arrows",
+  "**/snapshots/**/*.tmp",
+];
+
+/**
+ * A snapshot file's path however it is written (`/snapshots//x.arrows`, `/dist/snapshots/x.arrows/`, `%2E`): only the
+ * API answers these, never the dev or preview server's static files (`vite preview` serves dist/ as it is).
+ */
+export function isSnapshotPath(url: string | undefined): boolean {
+  let p = (url ?? "").split(/[?#]/)[0]!;
+  try {
+    p = decodeURIComponent(p);
+  } catch {
+    // not a path a static server finds either
+  }
+  p = p.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/[/. ]+$/, "");
+  return /(^|\/)snapshots\/(.+\/)?[^/]*\.(arrows|tmp)$/i.test(p);
+}
 
 /**
  * The DevBI Vite plugin. Provides `virtual:devbi` (the project: dashboards, metrics, promoted tiles, DuckDB bundle),
@@ -420,7 +443,14 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       // This runs before Vite's own check of the Host header (DNS rebinding): unknown hosts are left to it.
       handler
         .then(async (h) => {
-          if (!(await allowedHost(req.headers.host, preview)) || !(await h.handle(req, res))) next();
+          if (!(await allowedHost(req.headers.host, preview))) return next();
+          if (await h.handle(req, res)) return;
+          if (isSnapshotPath(req.url)) {
+            res.statusCode = 404;
+            res.end();
+            return;
+          }
+          next();
         })
         .catch(next);
     });

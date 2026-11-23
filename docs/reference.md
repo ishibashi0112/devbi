@@ -720,7 +720,7 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check?, describe?, api?, env? })` も入っています（`describe` は `"all"`・`"changed"`・`false`。結果の `unasked` に、列を聞けなかったデータセットとわけ）。
 - コマンド [`devbi-check`](#ファイルを確かめるdevbi-check) と [`devbi-inspect`](#データの中を見るdevbi-inspect) も入っています（DuckDB-wasm を Node で動かすので、`@duckdb/duckdb-wasm` と `apache-arrow` に依存します）。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
-- `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
+- `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`snapshots/` の下の `.arrows`（`devbi-serve` が `dist/snapshots/` に作ったものなど）は、API からだけ返し、静的なファイルとしては配りません。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
 - `api/` の SQL の先頭の `-- snapshot:` の行を読み、どの SQL を[スナップショット](#毎朝のスナップショット)から読むかを `virtual:devbi` に入れます（SQL の中身は入れません）。開発サーバーと `vite preview` は、スナップショットのファイルを保存せず、聞かれるたびにデータベースから読んで返します。
 - 開発サーバーと `vite preview` の読み取り API は、知らない `Host`（IP・localhost・`server.allowedHosts` / `preview.allowedHosts` 以外の名前）の要求に答えず、Vite の確認（403）に回します（ほかのサイトが自分の名前をこのパソコンに向けて API を読む DNS rebinding を防ぐ）。
 - 開発サーバーは、`api/` の SQL と SQLite のファイル（`*.sqlite`、`*.sqlite3`、`*.db` と、`DEVBI_DB…` の `sqlite:` が指すファイル）をブラウザに渡しません（Vite の `server.fs.deny` に足します。`.env` は Vite がもとから渡しません）。
@@ -907,7 +907,8 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - SELECT のすぐ上のコメントは、説明として `api/schema` に出ます。
 - ファイルの先頭の `--` のコメントの中に `-- connection: erp` の行を書くと、接続先を `DEVBI_DB_ERP` にします（SELECT より前に書きます。間に空の行があってもかまいません）。
 - 同じところに `-- snapshot: 06:00` の行を書くと、[スナップショット](#毎朝のスナップショット)から読むようになります。
-- 同じところに `-- param:` の行（[パラメーターの型](#パラメーターの型---param)）と `-- key:` の行（[行を見分ける列](#行を見分ける列---key)）も書けます。`-- connection:`・`-- snapshot:`・`-- param:`・`-- key:` の行は、説明には入りません。
+- 同じところに `-- param:` の行（[パラメーターの型](#パラメーターの型---param)）と `-- key:` の行（[行を見分ける列](#行を見分ける列---key)）、`-- roles:` と `-- access:` の行（[利用者ごとに見える行を変える](#利用者ごとに見える行を変える行レベル制御)）も書けます。これらの行は、説明には入りません。
+- `:user.region` や `:user.id` は、パラメーターではなく、ログインした人の値です（[利用者ごとに見える行を変える](#利用者ごとに見える行を変える行レベル制御)）。
 - 引用符などの読み方は、接続先のデータベースに合わせます（SQLite と SQL Server の `[列名]`、PostgreSQL の `$$ … $$`）。
 - ファイルを保存すると、開発サーバーではページを読み込み直します。`devbi-serve` は呼ばれるたびにファイルを読むので、止めなくても反映されます。
 
@@ -1071,7 +1072,7 @@ SELECT o.order_date AS 受注日, c.region AS 地域, SUM(l.qty * l.unit_price) 
 
 作るのは次のどれかです。
 
-- **`devbi-serve`**: 起動したときに、ないものと、最後の時刻より古いものを作ります。そのあとは毎日その時刻に作り直します。まだないファイルを聞かれたときは、その場で作ってから返します。
+- **`devbi-serve`**: 起動したときに、ないものと、最後の時刻より古いものを作ります。そのあとは毎日その時刻に作り直します。まだないファイルを聞かれたときは、その場で作ってから返します。`api/<名前>.sql` をファイルより後に保存したとき（列を減らした、`WHERE` を足したなど）も、次に聞かれたときと起動したときに作り直します（前の行と列を返し続けないため）。
 - **`devbi-snapshot`**: いま作ります。`devbi-serve` を使わず、IIS などにサイトを置くときに、Windows のタスクスケジューラ（または cron）から毎朝動かします。
 - **開発サーバー**: ファイルは作らず、聞かれるたびにデータベースから読みます。
 
@@ -1089,6 +1090,152 @@ npx devbi-snapshot --dir C:\reports\sales --out C:\inetpub\wwwroot\sales
 - 作れなかったものがあると、終了コードが 1 になります。前のファイルはそのまま残ります（新しいファイルは、書き終わってから置き換えます）。くわしい理由はログに出ます。
 - IIS では `.arrows` も配れるように、`web.config` の `<staticContent>` に `<mimeMap fileExtension=".arrows" mimeType="application/vnd.apache.arrow.stream" />` を足します（[サーバーの設定](#5-サーバーの設定)）。
 - `pnpm build` は `dist/` を作り直すので、`snapshots/` も消えます。`devbi-serve` は次に聞かれたときに作り直します。静的に置くときは、ビルドしたあとに `devbi-snapshot` を動かします。
+- `devbi-serve`（起動したとき。`schedule: false` でも。それと決まった時刻）、`devbi-snapshot`、Node のホストの `createApiHandler`（最初にスナップショットを聞かれたとき）は、今は作らないスナップショットのファイル（`-- snapshot:` の行を消した SQL、`read_api` のパラメーターを変える前のもの、人で絞るようになった SQL のもの）を `snapshots/` から消し、ログに「スナップショット: 今は作らない orders.arrows を消しました」と書きます。消すのは `snapshots/` のすぐ下の `.arrows` のファイルと、1 時間より前に書きかけで残った `.tmp` のファイルだけです。読めない SQL ファイルや指標ファイルがあるあいだは、まだ `-- snapshot:` の行がある SQL のファイルは消しません（その SQL のファイルかもしれないため）。行レベルのモードで `-- access: all` がないために作らない SQL は、読めないファイルとは数えません。IIS に写すときは `robocopy /MIR`（写し先にしかないファイルを消す）を使います。
+- `:user.` で絞る SQL と `-- roles:` のある SQL には、`-- snapshot:` を書けません（ファイルは全員に同じなので）。[行レベルのモード](#行レベルのモード絞り忘れを止める)では、`-- access: all` のある SQL のものだけを作ります。
+
+### 利用者ごとに見える行を変える（行レベル制御）
+
+ログインした人ごとに、見せてよい行だけを返します。ログインの仕組み（Windows 認証、Entra ID・Okta などの OpenID Connect、SAML）は DevBI にはなく、ホスト（ASP.NET や Next.js のアプリ、前に置いたサーバー）がログインを確かめて、だれが見ているか（利用者）を API に渡します。DevBI は、`api/*.sql` の中の `:user.region` のような名前にその人の値を入れて実行します。設計の考え方は [設計書](design/row-level-security.md) にあります。
+
+```sql
+-- 自分の地域の受注
+SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * l.unit_price AS 金額
+  FROM orders o
+  JOIN order_lines l ON l.order_no = o.order_no
+  JOIN customers c ON c.id = o.customer_id
+ WHERE o.order_date >= :from
+   AND c.region = :user.region
+```
+
+- **絞り込みは、サーバーが実行する `api/*.sql` にだけ書きます。** `metrics.yaml` の `model`、`dash.json` の `filters`、パラメーターの欄は、ブラウザに届いた行の中で絞るだけなので、見せない行を守れません（開発者ツールで、届いた行はすべて見えます）。サーバーから出ていかない行は、ブラウザでどうやっても見えません。
+- `metrics.yaml` と `dash.json` の書き方は変わりません。同じダッシュボードが、人ごとに違う行で動きます。
+- いちばん確かな守りは、今と同じくデータベースの権限です（DevBI のユーザーは SELECT だけ）。
+
+今はまず、Node のサーバー（`@devbi/server` の `createApiHandler`・`devbi-serve`）でこの形が動きます。開発サーバーの「この人として見る」と `devbi-check` の確かめ、`devbi-serve` が前のサーバーからユーザー名を受け取る口、C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。それまで `devbi-serve` は利用者を受け取れないので、行レベルのモードでは、どのリクエストも `401` になります。
+
+#### `:user.<属性>` と `:user.id`
+
+```sql
+ WHERE c.region = :user.region
+   AND o.sales_rep = :user.id
+```
+
+- `:user.id` はログインした人の ID、`:user.<名前>` はその人の属性です。ふつうのパラメーターと同じく、データベースのパラメーター（`$1`、`@p1`、`:p1`、`?`）で渡します。SQL の文字に値をつなげることはないので、値に `'` が入っていても SQL は変わりません。
+- 値はサーバーだけが入れます。ブラウザから名前が `user.` で始まるパラメーターが来たら `400` です。`read_api('orders', user.region = '近畿')` のようには書けません。
+- ログインしていない人には `401`（「ログインしていません」）、その属性がない人には `403`（「利用者 CORP\yamada に属性 region がありません（api/orders.sql の :user.region）」）を返し、SQL は実行しません。値が `null`、空の文字、空白だけの属性も、ないものとして `403` です（`(:user.region IS NULL OR …)` で全部の行が出てしまうのを防ぐため。Oracle は空の文字を `NULL` として扱います）。
+- 属性の名前は、大文字と小文字を区別しません（`:USER.Region` も同じ）。`user` のところは半角の英字だけで比べます。`:user_id` や `:username` は、ブラウザが値を送るふつうのパラメーターです。
+- 属性は 1 つの値（文字・数値・真偽）だけです。担当の地域が複数ある、のようなときは、権限の表を作って JOIN します（下の「よくある書き方」）。`',' || :user.regions || ',' LIKE …` のように文字でつないだ一覧にはしません（`%` や `_` を含む値、空の一覧で壊れます）。
+
+#### `-- roles:` と `-- access: all`
+
+```sql
+-- 給与の明細。経理と管理者だけ。
+-- roles: 経理, CORP\Managers
+-- access: all
+SELECT …
+```
+
+```sql
+-- 商品のマスタ。ログインした人は全員、全部の行を見てよい。
+-- access: all
+SELECT code AS 商品コード, name AS 商品名 FROM products
+```
+
+- `-- roles:` に書いた役割のどれかを持つ人だけが、その SQL を読めます。ほかの人には `403` を返し、`api/schema` の一覧にも出しません。区切りは `,`（`、` も可）。名前は完全に一致したときだけ通します（大文字と小文字も区別します。Windows のグループのように区別しない名前は、ホストがそろえて渡します）。
+- `-- access: all` は「この SQL は人で絞らない（ログインした人には全部の行を返す）」と、わざと決めたしるしです。書けるのは `all` だけです。`:user.` と同じファイルには書けません（どちらのつもりかわからないので）。
+- どちらも、`-- connection:` と同じく、ファイルの先頭から続く `--` のコメントの中に書きます。
+- 書き間違いで、守ったつもりの決まりが黙って効かなくなるのを防ぐため、次はエラーです（`api/schema` のそのデータセットの `error` と、`api/query` の `400`）: `-- role:`・`-- acess:` のような近い書き間違い、`:` のない `-- roles 経理`・`-- access all`、全角の `ｒｏｌｅｓ`・`：`、`--` のすぐあとでない `roles:`・`access:`（`--- roles:`、`-- @roles:`、`-- ※roles:`、説明の文の途中）、中身のない `-- roles:`、`all` 以外の `-- access:`、2 つ目の `-- roles:`・`-- access:`、先頭のコメントより後ろ（SQL の中や `/* … */` の中）の `roles:`・`access:`。説明の文が `-- Roles of …` で始まるときや、文の中に `access:` があるときも、この決まりに当たるので、言い回しを変えます。`--` のあとの空白は全角でもかまいません。`:` のない `access` は、ふつうの説明（`-- Access log`）として読みます（`-- access: all` を書き忘れても、断るほうに倒れるだけなので）。
+- `-- roles:` と `-- access:` を知らない古いサーバー（アプリにコピーしたままの C# など）は、この行をただのコメントとして読み、だれにでも読ませます。置いた先のサーバーの `api/schema` に `"access": 1` があるかを確かめます。特に見せたくない SQL は、役割の確かめを SQL にも書いておくと、古いサーバーでも止まります（`AND EXISTS (SELECT 1 FROM devbi_user_roles r WHERE r.login = :user.id AND r.role = '経理')`）。
+
+#### 行レベルのモード（絞り忘れを止める）
+
+いちばん起こりやすい事故は、あとから足した `api/*.sql` で絞り忘れることです。そこで、プロジェクトが**行レベルのモード**のときは、次の決まりにします。
+
+1. **すべての** `api/*.sql` に、`:user.` か `-- access: all` が要ります。どちらもないファイルは実行せず、`400` と「api/x.sql は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: …）」を返します。`:user`（点なし）も、`:user.id` の書き間違いとしてエラーです。
+2. **すべての**リクエスト（`api/schema`、`api/query`、`snapshots/`、ホストが呼ぶ `run`）に、ログインが要ります。利用者がなければ `401` です。ホストが利用者を渡し忘れても、行が出ていくことはありません。
+
+行レベルのモードになるのは、次のどれかのときです。メッセージの最後の（ ）に、どれでなったかが出ます。
+
+- **ホストの設定で決めたとき**（勧める形）: `createApiHandler({ requireUser: true })`。ファイルを消したり書き間違えたりしても外れないので、本番では必ず付けます。
+- **プロジェクトのファイルが行レベル制御を使っているとき**: `api/*.sql` のどれかの文字に `:user.` があるか、`--` のコメントの中に `roles:` か `access:` があるか（全角の文字と `：` も半角として読みます）、`access/` フォルダがあるとき。SQL として読んだ結果ではなく、ただの文字の検索で決めます（引用符の中や SQL の後ろのコメントでもモードにします。迷ったら守る側に倒すため）。`:` のない `-- Access log` のような説明では、モードになりません。
+
+ホストが利用者を渡しているのに、どちらでもないときは、サーバーのログに 1 回だけ「利用者を受け取っていますが、行レベルのモードになっていません…」と書きます。
+
+この決まりで止められるのは「書き忘れ」だけです。`SELECT :user.id AS 見ている人, …` のように、`:user.` を使っていても絞っていない SQL は止められないので、SQL はレビューします。
+
+#### ホストから利用者を渡す
+
+```ts
+import { createApiHandler } from "@devbi/server";
+
+const api = createApiHandler({ dir, requireUser: true });
+
+// node:http や Express: ログインを確かめたあとで
+await api.handle(req, res, { user: { id: req.user.id, roles: req.user.roles, attrs: { region: req.user.region } } });
+
+// Web 標準の Request（Next.js の route.ts など）
+const response = await api.fetch(request, { user });
+
+// SQL を 1 つ実行する（テストや自分のジョブ）
+await api.run("orders", { from: "2024-04-01" }, { user });
+```
+
+| 項目 | 中身 |
+| --- | --- |
+| `id` | 利用者の、**あとから変わらない、ほかの人が名乗れない** ID（文字）。SQL では `:user.id`。Entra ID なら `oid`、ほかの OpenID Connect なら `sub`、Windows 認証ならアカウント名（`CORP\yamada`）。メールアドレスは、本人が変えられたり確かめられていなかったりするので勧めません。前後の空白は除き、空ならログインしていない人です |
+| `roles` | 役割（文字の配列）。`-- roles:` と比べます。Windows や Entra ID のグループは、属性ではなく役割として渡します |
+| `attrs` | 属性（`{ 名前: 値 }`）。SQL では `:user.<名前>`。値は文字・数値・真偽。`null`・空の文字・空白だけは「その属性はない」です。`undefined` は渡していないのと同じです（`access/user.sql` の値を使います）。名前は文字・数字・`_`（`id` は使えません） |
+
+- `user` を渡さない（`undefined` か `null`）のは、ログインしていない人です。
+- 形の違うもの（`id` が文字でない、`attrs` に `id` がある、など）を渡すと、ホストの書き間違いとして `500` と、そのわけを返します。
+- `api/query` の答えは、今と同じ `Cache-Control: no-store` です（人によって中身が違うので、どこのキャッシュにも残しません）。
+- サーバーのログの 1 行に、利用者の ID が付きます（`CORP\yamada api/orders.sql: 1,234 行、85 ms`）。だれが何を読んだかの記録になります。
+- 同じオリジンの API なら、アプリの Cookie や Windows 認証がそのまま API に届くので、ホストはそこから利用者を作ります。ほかのオリジンの API には Cookie が送られないので、行レベル制御は同じオリジンの API でだけ使えます。
+- ページを読み込み直さずに利用者が変わるアプリ（SPA でログアウトして、別の人でログインする）では、ページの中に前の人の行が残ります。ログアウトしたら、ページを読み込み直します。
+
+#### 利用者の属性と役割を表から引く（`access/user.sql`）
+
+ホストが `id` だけを渡すとき（Windows 認証のユーザー名だけ、など）は、属性と役割をデータベースの表から引きます。
+
+```sql
+-- 利用者の属性。:user.id はログイン名（CORP\yamada）。
+-- connection: hr
+SELECT u.region AS region, u.dept AS dept, u.roles AS roles
+  FROM devbi_users u
+ WHERE u.login = :user.id
+```
+
+- プロジェクトの `access/user.sql` に置きます。`api/` の外なので、ブラウザから名前で呼ばれることはありません。開発サーバーは `access/` のファイルをブラウザに配らず（`403`）、`pnpm build` も `dist/` に入れません。`access/` フォルダがあると、プロジェクトは行レベルのモードになります。
+- `api/*.sql` と同じ決まり（SELECT か WITH の文 1 つ、読み取り専用、`-- connection:`）で実行します。使えるパラメーターは `:user.id` だけで、`:user.id` で行を選ぶことが要ります。
+- 結果が 1 行なら、列が属性になります（列名は大文字と小文字を区別しない。`id` という列は使えません）。`roles` という列は、`,` で区切って役割にします。0 行なら、表には属性も役割もない人です。2 行以上なら `500` です（どちらの行の人か決められないため）。
+- ホストが渡したものと両方あるときは、役割はどちらかにあれば持っていて、属性はホストが渡したものが先です。ホストが同じ名前で `null` や空を渡したら、その属性はありません（表の値も使いません）。`undefined`（`{ region: claims.region }` で、その値がないとき）は渡していないのと同じで、表の値を使います。
+- 使うのは、SQL が `:user.id` のほかの属性か `-- roles:` を使うときだけです。結果は `createApiHandler({ userCacheMs })` の間（既定は 60,000 ミリ秒 = 60 秒）覚えておきます。表で役割を外しても、その間は前の役割のままです。
+- ユーザー名の大文字と小文字は、SQL ごとに `LOWER()` を書かず、ホストがそろえて渡します。
+
+#### よくある書き方
+
+```sql
+-- 担当の地域が 1 つ
+ WHERE c.region = :user.region
+
+-- 担当の地域が複数（権限の表を作って JOIN する）
+ WHERE c.region IN (SELECT r.region FROM devbi_user_regions r WHERE r.login = :user.id)
+
+-- 管理者は全部（全部を見てよい人も、SQL に書いて決める）
+ WHERE c.region IN (SELECT r.region FROM devbi_user_regions r WHERE r.login = :user.id)
+    OR EXISTS (SELECT 1 FROM devbi_admins a WHERE a.login = :user.id)
+
+-- 自分の担当の受注だけ
+ WHERE o.sales_rep = :user.id
+```
+
+- 「集計は見せるが明細は見せない」は、サーバーの SQL で `GROUP BY` して明細を送らないことでしか守れません（`-- access: all` を付けた集計の SQL にします）。ブラウザに届いた行は、探索のタイルや開発者ツールでそのまま見えます。
+- 権限の表と比べる列（`login` など）が、大文字と小文字・全角と半角・アクセントを区別しない照合順序（SQL Server の `Japanese_CI_AS`、MySQL の `utf8mb4_0900_ai_ci` など）だと、`ｙａｍａｄａ` が `yamada` と一致します。利用者が自分で名前を決められる ID を使うときは、区別する照合順序の列にするか、変わらない ID を使います。
+
+#### 行レベル制御の外にあるもの
+
+- `data/` の Excel・CSV と、スナップショットのファイルは、だれが読んでも同じファイルです。人で絞る SQL（`:user.`、`-- roles:`）には `-- snapshot:` を書けず、行レベルのモードでは `-- access: all` の SQL のスナップショットだけを作ります（[毎朝のスナップショット](#毎朝のスナップショット)）。サイト全体にログインをかけて守ります。
+- Malloy・SQL・探索のタイル、自作タイル、Excel・PDF・CSV への書き出しは、ブラウザに届いた行から作るので、そのままで人ごとの行になります。
 
 ### `devbi-serve`
 
@@ -1111,7 +1258,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 
 - 社内の人に見せるときは、IIS などを前に置いて Windows 認証をかけ、`devbi-serve` には IIS から転送します。`devbi-serve` 自身はログインの仕組みを持ちません。
 - API はパスの最後が `/api/schema`、`/api/query`、`/snapshots/<ファイル>.arrows` のリクエストに答えます。前に何が付いていてもかまわないので、`/reports/` の下に転送しても動きます。
-- [スナップショット](#毎朝のスナップショット)を、決まった時刻に `<static>/snapshots/` に作ります。
+- [スナップショット](#毎朝のスナップショット)を、決まった時刻に `<static>/snapshots/` に作ります。`snapshots/` の下のファイルは、API（`…/snapshots/<ファイル>.arrows`）からだけ返し、静的なファイルとしては返しません（`/snapshots//x.arrows` や `/snapshots/x.arrows/` のように書いても `404`）。API はだれが聞いているかを確かめ（[行レベル制御](#利用者ごとに見える行を変える行レベル制御)）、今は作らないファイルを返さないためです。
 - 知らないホスト名で来たリクエストは `403` で断ります。ほかのサイトが自分の名前をこのコンピューターに向けて（DNS リバインディング）、ブラウザから API を読むのを防ぐためです。`--host 0.0.0.0` で社内に出すときも、名前で開くなら `--allowed-hosts` にその名前を書きます。
 - `dist/assets/` のファイルは長くキャッシュさせ、ほかは毎回確かめさせます。Parquet などの部分読み（Range）にも答えます。
 - 開発サーバー（`vite`）と `vite preview` にも、`@devbi/vite` が同じ API を付けます。こちらはデータベースのエラーをそのまま出します。
@@ -1149,6 +1296,8 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - `parameters` はパラメーターごとに 1 つで、`-- param:` を書いたものがその行の順に先、書いていないものがそのあとに SQL に出てくる順（`name` だけ）です。キーは書いたものだけが出ます（`multiple`、`optional`、`hidden` は `true` のときだけ。`label` と `default` は書いたとおりの文字）。
 - `key` は `-- key:` の列で、書いていなければありません。
 - 読めないファイルは `{ "name": …, "error": "…" }` です。
+- `access` は `1` です（行レベル制御を知っているサーバーのしるし）。利用者を受け取ったときは `"user": { "id": "CORP\\yamada" }` も付きます（役割と属性は返しません）。
+- [行レベルのモード](#行レベルのモード絞り忘れを止める)では、ログインしていないと `401` です。`-- roles:` の役割を持っていない SQL は、一覧に出しません。`params` と `parameters` に `:user.` のものは出ません（ブラウザが値を渡すものではないので）。
 
 `snapshots` は、作るスナップショットと、最後に作った時刻（まだなければ `null`）です。作れなかったときは `error` も付きます。
 
@@ -1160,10 +1309,10 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 ```
 
 - `params` の値は、文字・数値・`true` / `false`・`null` と、複数の値のパラメーター（`text[]` など）には配列です。本文は 256 KB まで（超えると `413`）。
-- 名前が `user.` で始まるパラメーターは、いつも `400` です（ログインした人の値のために取ってあります）。
+- 名前が `user.` で始まるパラメーターは、いつも `400` です（ログインした人の値のために取ってあります）。行レベルのモードでは、名前が `user` そのもののパラメーターも `400` です。
 
 - 成功: `200`、`Content-Type: application/vnd.apache.arrow.stream`（Arrow IPC のストリーム）。8 KB を超えて `Accept-Encoding: gzip` なら gzip で返す。行数は `X-DevBI-Rows` ヘッダー。
-- 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
+- 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`401`（ログインしていない）、`403`（その SQL を読む役割がない、`:user.` の属性がない）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
 - `Content-Type: application/json` 以外は受け付けません。ほかのサイトのページから、ブラウザに確かめさせずに送ることができないようにするためです。
 
 `POST <場所>/api/describe`（`Content-Type: application/json`。開発サーバーだけ）
@@ -1182,10 +1331,10 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - スナップショットのファイルです。ふつうの静的ファイルとして置けば足ります（API のサーバーでなくてよい）。ブラウザは `Last-Modified` を「何時点のデータか」として出します。
 - ブラウザは毎回確かめに来ます（`Cache-Control: no-cache` と同じ。変わっていなければ `304` で足ります）。
 - `404` のときは、ブラウザは `POST …/api/query` で読みます。
-- `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。
+- `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。行レベルのモードでは、ログインしていないと、作る前に `401` です。
 - ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
 
-`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, describe?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。`run(name, params)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します）、`describe(name)` でその結果の列を聞き（`describe: true` でなくても使えます。`describe: true` は `api/describe` の口を開けるだけ）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, describe?, log?, snapshotDir?, requireUser?, userCacheMs? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。どちらも、3 つめ（`fetch` は 2 つめ）の引数 `{ user }` でログインした人を渡します（[ホストから利用者を渡す](#ホストから利用者を渡す)）。`run(name, params, { user }?)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します。`api/query` と同じ確かめをし、エラーには `status` が付きます）、`describe(name)` でその結果の列を聞き（`describe: true` でなくても使えます。`describe: true` は `api/describe` の口を開けるだけ）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
 ## レポート（パラメーターの欄と、SQL の結果の表）
 
@@ -1304,7 +1453,7 @@ SSRS のレポートのように、`api/<名前>.sql`（データセット）の
 - 複数の値は、1 つのパラメーターで 1,000 個まで送れます（サーバーの上限。「すべて」も同じ）。超えると表に「… 1,000 個までです」と出ます。候補が多いパラメーターは、`all` にせず、上の欄で候補を絞ります。
 - 値がないパラメーター（`optional` でなく、既定値もない）があると、表は読まずに「受注日（から）を入れてください」と出します。
 - 値は、欄で決まるとすぐに表を読み直します。dash.json に `"apply": "button"` と書くと、欄の右に「表示」のボタンが出て、押したときに読み直します（いくつも変えてから 1 回だけ読むとき）。候補の連動は、「表示」を押す前の欄の値で動きます。
-- 欄の値は、見る人が選べる絞り込みです。見てよい行の制限（権限）ではありません。人によって見てはいけない行があるなら、SQL の側で絞る仕組みが要ります（[行レベル制御の設計](design/row-level-security.md)）。値は、サーバーでも型を確かめます。
+- 欄の値は、見る人が選べる絞り込みです。見てよい行の制限（権限）ではありません。人によって見てはいけない行があるなら、SQL の中を `:user.` で絞ります（[利用者ごとに見える行を変える](#利用者ごとに見える行を変える行レベル制御)）。値は、サーバーでも型を確かめます。
 
 ### dash.json の `params`
 

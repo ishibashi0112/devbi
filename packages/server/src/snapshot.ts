@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import path from "node:path";
 import { apiCalls, DashboardError, defaultRequests, defineDashboard, parseMetricsYaml, snapshotFile, type ApiParamValue, type DatasetInfo } from "devbi";
 import { dialectOf } from "./connect.js";
-import { connectionOf, connectionVariable, DatasetError, listDatasets, parseDataset, readDatasetText, snapshotOf } from "./datasets.js";
+import { connectionOf, connectionVariable, DatasetError, listDatasets, parseDataset, readDatasetText, snapshotOf, type Dataset } from "./datasets.js";
 
 /**
  * One snapshot to make, of an SQL file with a `-- snapshot:` line: a `read_api(name, params)` call in models/, or a
@@ -100,17 +100,35 @@ export function nextDue(times: string[], now: Date): Date | undefined {
   return best;
 }
 
+/** The snapshots to make, and what was found on the way. */
+export interface SnapshotJobList {
+  jobs: SnapshotJob[];
+  /** Files that cannot be read, and SQL whose `-- snapshot:` line is not used (it breaks a rule). */
+  problems: string[];
+  /** The SQL files whose snapshots are made (a `-- snapshot:` line that is used). Undefined: api/ could not be read. */
+  snapshotting?: string[];
+  /**
+   * How many of `problems` are only SQL left out on purpose (row-level mode, no `-- access: all`): what is made is
+   * known all the same. The others leave it unsure (a file that cannot be read may be one with jobs).
+   */
+  leftOut?: number;
+}
+
 /**
  * The snapshots of a project, of the SQL files with a `-- snapshot: 06:00` line: each `read_api(...)` call in
  * `models/*.metrics.yaml` with the parameters written there, and each dataset table of `dashboards/*.dash.json` (and
  * the choices of its parameters) with the parameters at their defaults, when those are fixed values (not a word like
- * `today`, not `all`, not a list). Files that cannot be read are listed in `problems`.
+ * `today`, not `all`, not a list). Files that cannot be read are listed in `problems`, and so is SQL whose snapshot
+ * is not made: one that does not parse (a `-- snapshot:` with `:user.` or `-- roles:`), and in row-level mode
+ * (`rowLevel`) one without `-- access: all`.
  */
 export async function snapshotJobs(
   dir: string,
   env: Record<string, string | undefined> = process.env,
-): Promise<{ jobs: SnapshotJob[]; problems: string[] }> {
+  options: { rowLevel?: boolean } = {},
+): Promise<SnapshotJobList> {
   const problems: string[] = [];
+  const leftOut: string[] = [];
   const times = new Map<string, string[]>();
   let names: string[];
   try {
@@ -120,18 +138,33 @@ export async function snapshotJobs(
     return { jobs: [], problems: [`api/ を読めません: ${(e as Error).message}`] };
   }
   const texts = new Map<string, string>();
+  const parsed = new Map<string, Dataset>();
+  const parse = (name: string, text: string) => {
+    let d = parsed.get(name);
+    if (!d) parsed.set(name, (d = parseDataset(name, text, dialectOf(env[connectionVariable(connectionOf(text))] ?? ""))));
+    return d;
+  };
   for (const name of names) {
     try {
       const text = await readDatasetText(dir, name);
       texts.set(name, text);
       const t = snapshotOf(text, name);
-      if (t) times.set(name, t);
+      if (!t) continue;
+      // Only SQL that may be a file everyone gets: it parses (no :user., no -- roles:), and says so in row-level mode.
+      if (options.rowLevel && parse(name, text).access !== "all") {
+        leftOut.push(`api/${name}.sql: 行レベルのモードなので、-- access: all のない SQL のスナップショットは作りません`);
+        continue;
+      }
+      parse(name, text);
+      times.set(name, t);
     } catch (e) {
       problems.push((e as Error).message);
     }
   }
   const jobs = new Map<string, SnapshotJob>();
-  if (times.size === 0) return { jobs: [], problems };
+  const snapshotting = [...times.keys()];
+  const done = (list: SnapshotJob[]): SnapshotJobList => ({ jobs: list, problems: [...leftOut, ...problems], snapshotting, leftOut: leftOut.length });
+  if (times.size === 0) return done([]);
   const add = (name: string, params: Record<string, ApiParamValue>, from: { model?: string; dashboard?: string }) => {
     const t = times.get(name);
     if (!t) return;
@@ -168,7 +201,7 @@ export async function snapshotJobs(
     const datasets: Record<string, DatasetInfo> = {};
     for (const [name, text] of texts) {
       try {
-        const d = parseDataset(name, text, dialectOf(env[connectionVariable(connectionOf(text))] ?? ""));
+        const d = parse(name, text);
         datasets[name] = { parameters: d.parameters, ...(d.key ? { key: d.key } : {}) };
       } catch {
         // its own problem when it is read (the API and devbi-check report it)
@@ -184,8 +217,13 @@ export async function snapshotJobs(
       }
     }
   }
-  return { jobs: [...jobs.values()], problems };
+  return done([...jobs.values()]);
 }
+
+/** A snapshot's file name, and the SQL file it is of: `<name>.arrows` or `<name>~<16 hex>.arrows`. */
+const SNAPSHOT_FILE = /^(.+?)(?:~[0-9a-f]{16})?\.arrows$/;
+/** A file being written (`<file>.<pid>-<ms>.tmp`), left behind when the process stopped. */
+const TMP_FILE = /\.arrows\.\d+-\d+\.tmp$/;
 
 /** Replace `target` with `tmp`. Windows refuses while another process reads the old file: try again for a while. */
 async function replace(tmp: string, target: string): Promise<void> {
@@ -208,6 +246,8 @@ export function createSnapshots(options: {
   run: (name: string, params: Record<string, unknown>) => Promise<{ bytes: Uint8Array; rows: number }>;
   /** Where the files are saved. Without it, nothing is saved: `get` runs the SQL each time. */
   outDir?: string;
+  /** Whether the project is in row-level mode now: only `-- access: all` SQL is then made into files. */
+  rowLevel?: () => Promise<boolean>;
   log?: (line: string) => void;
   /** Show file system errors (which name server paths) in `status()` and to the browser. Default off. */
   exposeErrors?: boolean;
@@ -222,14 +262,57 @@ export function createSnapshots(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let reported = "";
+  let swept = false;
 
-  const jobs = async () => {
-    const { jobs, problems } = await snapshotJobs(dir, options.env);
+  const list = async () => {
+    const found = await snapshotJobs(dir, options.env, { rowLevel: (await options.rowLevel?.()) ?? false });
     // Each problem once, not on every request.
-    const text = problems.join("\n");
-    if (text && text !== reported) for (const p of problems) log(`スナップショット: ${p}`);
+    const text = found.problems.join("\n");
+    if (text && text !== reported) for (const p of found.problems) log(`スナップショット: ${p}`);
     reported = text;
-    return jobs;
+    // The folder tidied before the first answer, made on a schedule or not (a host that only calls get).
+    if (!swept) {
+      swept = true;
+      await sweep(found);
+    }
+    return found;
+  };
+  const jobs = async () => (await list()).jobs;
+
+  /**
+   * Remove the files no job makes any more (and files left half written over an hour ago): an SQL file that stopped
+   * being a snapshot, or now filters by user, must not leave everyone's rows behind in the folder. When some file
+   * could not be read, only the files of SQL that no longer has a snapshot go (the others may be its jobs').
+   */
+  const sweep = async (found: SnapshotJobList) => {
+    if (!outDir || !found.snapshotting) return;
+    let files: string[];
+    try {
+      files = await readdir(outDir);
+    } catch {
+      return;
+    }
+    const made = new Set(found.jobs.map((j) => j.file));
+    const still = new Set(found.snapshotting);
+    const unsure = found.problems.length > (found.leftOut ?? 0);
+    for (const f of files) {
+      const file = path.join(outDir, f);
+      try {
+        if (TMP_FILE.test(f)) {
+          if (Date.now() - (await stat(file)).mtimeMs > 3_600_000) await rm(file, { force: true });
+          continue;
+        }
+        const m = SNAPSHOT_FILE.exec(f);
+        if (!m || made.has(f) || making.has(f)) continue;
+        if (unsure && still.has(m[1]!)) continue;
+        await rm(file, { force: true });
+        errors.delete(f);
+        rows.delete(f);
+        log(`スナップショット: 今は作らない ${f} を消しました`);
+      } catch (e) {
+        log(`スナップショット: ${f} を消せませんでした: ${(e as Error).message}`);
+      }
+    }
   };
 
   const save = (job: SnapshotJob): Promise<SnapshotResult> => {
@@ -274,13 +357,24 @@ export function createSnapshots(options: {
     }
   };
 
+  /** Whether the SQL file was saved after the snapshot was made: its old rows (and columns) are not what it says now. */
+  const sqlNewer = async (job: SnapshotJob, made: Date) => {
+    try {
+      return (await stat(path.join(dir, "api", `${job.name}.sql`))).mtime > made;
+    } catch {
+      return false;
+    }
+  };
+
   const catchUp = async (now = new Date()) => {
     if (!outDir) return [];
+    const found = await list();
+    await sweep(found);
     const results: SnapshotResult[] = [];
-    for (const job of await jobs()) {
+    for (const job of found.jobs) {
       const due = lastDue(job.times, now);
       const made = await mtime(job.file);
-      if (!made || (due && made < due)) results.push(await save(job));
+      if (!made || (due && made < due) || (await sqlNewer(job, made))) results.push(await save(job));
     }
     return results;
   };
@@ -313,7 +407,8 @@ export function createSnapshots(options: {
         const result = await run(job.name, job.params);
         return { at: new Date(), rows: result.rows, bytes: result.bytes };
       }
-      if (!(await mtime(file))) {
+      const made = await mtime(file);
+      if (!made || (await sqlNewer(job, made))) {
         const result = await save(job);
         if (!result.ok) throw new DatasetError(`スナップショット ${file} を作れませんでした: ${result.error}`, result.status ?? 500);
       }
@@ -321,7 +416,9 @@ export function createSnapshots(options: {
     },
     async make(names) {
       if (!outDir) throw new Error("スナップショットを置くフォルダがありません");
-      const all = await jobs();
+      const found = await list();
+      await sweep(found);
+      const all = found.jobs;
       const chosen = names?.length ? all.filter((j) => names.includes(j.name)) : all;
       const results: SnapshotResult[] = [];
       for (const job of chosen) results.push(await save(job));
