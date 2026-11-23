@@ -132,3 +132,5 @@ export {
 export { writeXlsx, type XlsxSheet, type XlsxCell } from "./xlsx/write.js";
 export { Workbook, MAX_ROWS, MAX_COLS, sheetRef, type Sheet, type Cell, type CellStyle, type CellValue } from "./xlsx/workbook.js";
 export { resultCell, addResultTable, TABLE_STYLES } from "./xlsx/result.js";
+export { writeZip } from "./xlsx/zip.js";
+export { csvParts, csvValue, csvTimeFormat, CSV_BOM, type CsvTimeFormat } from "./csv.js";

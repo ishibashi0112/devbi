@@ -1,6 +1,7 @@
 import type { ParamValue } from "devbi";
 import { createRoot, type Root } from "react-dom/client";
 import { Dashboard, type Theme } from "./Dashboard.js";
+import type { ExportKind } from "./ExportMenu.js";
 import type { Project } from "./project.js";
 
 export interface MountOptions {
@@ -14,8 +15,11 @@ export interface MountOptions {
   fetch?: typeof fetch;
   /** Keep the page's CSS for plain elements (h1 { … }, td { … }) out of the dashboard. Default `true`. */
   isolate?: boolean;
-  /** The Excel and 印刷・PDF buttons in the dashboard's heading. Default `true`. */
-  exports?: boolean;
+  /**
+   * The ファイル出力 menu in the dashboard's heading (Excel, 印刷・PDF, CSV). Default `true`; `false` leaves it out, a
+   * list such as `["xlsx", "pdf"]` offers only those.
+   */
+  exports?: boolean | readonly ExportKind[];
   /**
    * Values of the dashboard's parameters (`{ customer: 1024 }`). Mounting again with other values sets them, keeping
    * the rest of the dashboard as it is.
@@ -61,6 +65,15 @@ function fetchId(f: typeof fetch | undefined): number {
  * again replaces what it shows: another dashboard, API or fetch starts fresh, another theme only changes the colors.
  * `project` is what `loadProject()` returns.
  */
+/** `exports` from plain JavaScript: true, false or a list of kinds; anything else (`"xlsx,pdf"`) leaves the menu out, with an error. */
+function exportsOption(value: unknown): boolean | readonly ExportKind[] {
+  if (value === undefined) return true;
+  if (value === null) return false;
+  if (typeof value === "boolean" || Array.isArray(value)) return value as boolean | readonly ExportKind[];
+  console.error(`DevBI: exports は true・false か、["xlsx", "pdf"] のような配列です（${JSON.stringify(value)} なのでメニューを出しません）`);
+  return false;
+}
+
 export function mountDashboard(element: Element, project: Project, options: MountOptions = {}): MountedDashboard {
   const names = Object.keys(project.dashboards);
   const name = options.dashboard ?? (names.length === 1 ? names[0]! : "");
@@ -76,7 +89,7 @@ export function mountDashboard(element: Element, project: Project, options: Moun
       project={p}
       name={name}
       isolate={options.isolate ?? true}
-      exports={options.exports ?? true}
+      exports={exportsOption(options.exports)}
       {...(options.theme ? { theme: options.theme } : {})}
       {...(options.params ? { params: options.params } : {})}
       {...(options.onParamsChange ? { onParamsChange: options.onParamsChange } : {})}

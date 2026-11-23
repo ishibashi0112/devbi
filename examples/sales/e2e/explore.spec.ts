@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { listSheets, readXlsx } from "devbi";
 import { readFileSync } from "node:fs";
+import { chooseExport } from "./file-menu.js";
 
 // The explore tile (Perspective) on dashboards/sales-explore.dash.json: the period's order lines, grouped by 商品分類.
 const tile = (page: Page, id: string) => page.locator(`[data-tile="${id}"]`);
@@ -82,10 +83,10 @@ test("clicking a region filters the explore tile, which keeps how the viewer was
   await expect.poll(() => hosted(page)).toBe(1);
 });
 
-test("Excel writes the explore tile's rows; 印刷・PDF prints its view as a table", async ({ page }) => {
+test("Excel and CSV write the explore tile's rows; 印刷・PDF prints its view as a table", async ({ page }) => {
   await ready(page);
   const rows = await loaded(page);
-  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Excel" }).click()]);
+  const [download] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "Excel（.xlsx）")]);
   const file = readFileSync((await download.path())!);
   expect(await listSheets(file)).toEqual(["概要", "地域別売上", "明細"]);
   const sheet = await readXlsx(file, { sheet: "明細", range: "A5:I200000" });
@@ -94,6 +95,10 @@ test("Excel writes the explore tile's rows; 印刷・PDF prints its view as a ta
   expect(sheet.columns[0]!.type).toBe("DATE");
   const total = sheet.columns.at(-1)!.values.reduce((a: number, v) => a + (v as number), 0);
   expect(total).toBe((await totals(page))?.["金額"]);
+  const [csv] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "明細")]);
+  const csvLines = readFileSync((await csv.path())!, "utf8").split("\r\n");
+  expect(csvLines[0]).toBe("\uFEFF受注日,受注番号,顧客,地域,商品分類,商品,数量,単価,金額");
+  expect(csvLines).toHaveLength(rows + 2); // and the empty one after the last CRLF
 
   // In print, the view as a table (Perspective draws in a shadow DOM a copy cannot show).
   await page.evaluate(() => {
@@ -108,7 +113,7 @@ test("Excel writes the explore tile's rows; 印刷・PDF prints its view as a ta
       }
     }).observe(document.body, { childList: true });
   });
-  await page.getByRole("button", { name: "印刷・PDF" }).click();
+  await chooseExport(page, "印刷・PDF");
   await expect.poll(() => page.evaluate(() => (window as unknown as { printed?: boolean }).printed)).toBe(true);
   const printed = page.frameLocator("iframe[data-devbi-print-frame]").locator('[data-tile="explore"] .devbi-explore-print table');
   await expect(printed.locator("thead")).toContainText("商品分類");

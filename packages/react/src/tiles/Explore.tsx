@@ -271,7 +271,7 @@ function startConfig(layout: unknown, numbers: string[], theme: string): Record<
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
-/** What the 印刷・PDF button calls on a part it cannot copy (Perspective draws in its own shadow DOM): what to print. */
+/** What 印刷・PDF (the ファイル出力 menu) calls on a part it cannot copy (Perspective draws in its own shadow DOM): what to print. */
 const PRINT = Symbol.for("devbi.print");
 
 /**

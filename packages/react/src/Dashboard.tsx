@@ -13,7 +13,7 @@ import { DevbiProvider, fieldInfo, useDevbi, useParamsVersion, useSelectionVersi
 import { describeFilter, snapshotText } from "./describe.js";
 import type { DevServer, EditorModule, SavedDashboard } from "./dev.js";
 import type { SnapshotInfo } from "./engine.js";
-import { ExportButtons } from "./ExportButtons.js";
+import { ExportMenu, exportKinds, type ExportKind } from "./ExportMenu.js";
 import { formatTimesOfDay, loadProject, snapshotTimesOf, viewsOf, type Project, type ProjectInput } from "./project.js";
 import { ParamBar } from "./ParamBar.js";
 import { injectStyles } from "./styles.js";
@@ -231,8 +231,11 @@ export function Dashboard({
   back?: string;
   theme?: Theme;
   isolate?: boolean;
-  /** The Excel and 印刷・PDF buttons in the heading. Default `true`. */
-  exports?: boolean;
+  /**
+   * The ファイル出力 menu in the heading (Excel, 印刷・PDF, CSV). Default `true`; `false` leaves it out, a list such as
+   * `["xlsx", "pdf"]` offers only those.
+   */
+  exports?: boolean | readonly ExportKind[];
   /** Buttons at the end of the heading (DevbiApp's 編集 on the dev server). */
   actions?: ReactNode;
   /**
@@ -247,7 +250,7 @@ export function Dashboard({
   paramsInUrl?: boolean;
 }) {
   useInsertionEffect(injectStyles, []);
-  // The element printed (印刷・PDF), and narrow layout by its width.
+  // The element printed (ファイル出力 → 印刷・PDF), and narrow layout by its width.
   const rootEl = useRef<HTMLDivElement | null>(null);
   const rootRef = useCallback((el: HTMLDivElement | null) => {
     rootEl.current = el;
@@ -291,6 +294,7 @@ export function Dashboard({
   }
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   const readsDatasets = datasetTiles(dashboard.tiles).length > 0;
+  const kinds = exportKinds(exports);
   return (
     <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard} params={seedFor(checked?.list, seed.current)}>
       <ParamsSync given={givenLater} onChange={onParamsChange} onValues={(v) => (seed.current = v)} url={paramsInUrl ? name : undefined} />
@@ -305,10 +309,10 @@ export function Dashboard({
             <h1>{dashboard.title}</h1>
             {dashboard.description && <p>{dashboard.description}</p>}
             <SnapshotNote />
-            {(exports || actions || readsDatasets) && (
+            {(kinds.length > 0 || actions || readsDatasets) && (
               <div className="devbi-actions">
                 {readsDatasets && <RefreshButton />}
-                {exports && <ExportButtons root={rootEl} />}
+                {kinds.length > 0 && <ExportMenu root={rootEl} kinds={kinds} />}
                 {actions}
               </div>
             )}
@@ -394,8 +398,8 @@ export function DevbiApp({
 }: {
   project: ProjectInput;
   theme?: Theme;
-  /** The Excel and 印刷・PDF buttons on each dashboard. Default `true`. */
-  exports?: boolean;
+  /** The ファイル出力 menu on each dashboard (Excel, 印刷・PDF, CSV). Default `true`; a list offers only those kinds. */
+  exports?: boolean | readonly ExportKind[];
 }) {
   useInsertionEffect(injectStyles, []);
   const dev = input.dev?.editor ? input.dev : undefined;

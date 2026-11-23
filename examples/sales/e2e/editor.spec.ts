@@ -544,9 +544,9 @@ test("the property panel: a report's table from its dataset's columns, as the da
   await p.getByLabel("データの元").selectOption("metrics");
   await expect(p.getByLabel("データセット", { exact: true })).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+s");
-  await expect(page.getByRole("status")).toContainText("保存しました");
+  // The status says 保存しました from the save above already: wait for the file itself.
+  await expect.poll(() => read().query).not.toHaveProperty("dataset");
   const back = read();
-  expect(back.query).not.toHaveProperty("dataset");
   expect(back.query).toHaveProperty("measures", ["revenue"]);
   expect(back.options).toBeUndefined();
 });

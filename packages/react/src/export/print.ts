@@ -1,4 +1,4 @@
-// The 印刷・PDF button: the dashboard as it is on the screen, printed from a copy in a hidden frame, so only the
+// ファイル出力 → 印刷・PDF: the dashboard as it is on the screen, printed from a copy in a hidden frame, so only the
 // dashboard is printed (not the page around an embedded one) and the screen does not change. The browser's print
 // dialog saves it as PDF ("PDF に保存").
 
