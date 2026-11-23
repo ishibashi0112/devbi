@@ -9,7 +9,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { tableFromIPC } from "apache-arrow";
+import { tableFromIPC, type Table } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { connect, createApiHandler, toArrowTable, type ApiHandler, type Connection, type Dialect } from "../src/index.js";
 import { typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
@@ -252,10 +252,23 @@ for (const c of CASES) {
         const regions = tableFromIPC((await big.run("regions")).bytes);
         expect(regions.numRows).toBe(6);
         const all = Array.from({ length: regions.numRows }, (_, i) => String(regions.get(i)!.toArray()[0]));
-        const selected = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: null, regions: all })).bytes);
+        const sum = (t: Table, column: string) =>
+          Array.from(t.getChild(column)!.toArray() as ArrayLike<number | bigint>, Number).reduce((a, b) => a + b, 0);
+        const selected = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: null, regions: all, customer: null })).bytes);
         expect(selected.numRows).toBe(6044);
-        expect(Array.from(selected.getChild("金額")!.toArray() as ArrayLike<number | bigint>, Number).reduce((a, b) => a + b, 0)).toBe(193161410);
-        const until = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: "2024-04-02", regions: ["関東"] })).bytes);
+        expect(sum(selected, "金額")).toBe(193161410);
+        // one customer (a click on the report's customers table): an optional integer
+        const one = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: null, regions: all, customer: 5 })).bytes);
+        expect(one.numRows).toBe(276);
+        expect(sum(one, "金額")).toBe(10012620);
+        // the customers' totals (GROUP BY, COUNT(DISTINCT), ORDER BY an aggregate) and the customers to pick from
+        const totals = tableFromIPC((await big.run("customer_totals", { from: "2024-04-01", to: null, regions: all })).bytes);
+        expect(totals.numRows).toBe(40);
+        expect(sum(totals, "金額")).toBe(193161410);
+        expect(Number(totals.get(0)!.toJSON()["顧客ID"])).toBe(5);
+        const customers = tableFromIPC((await big.run("customers", { regions: ["関東"] })).bytes);
+        expect(customers.numRows).toBeGreaterThan(0);
+        const until = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: "2024-04-02", regions: ["関東"], customer: null })).bytes);
         expect(until.numRows).toBeGreaterThan(0);
         expect(new Set(Array.from({ length: until.numRows }, (_, i) => until.get(i)!.toJSON()["地域"]))).toEqual(new Set(["関東"]));
       } finally {

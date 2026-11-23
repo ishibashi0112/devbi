@@ -1060,11 +1060,12 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 ```json
 {
   "datasets": [
-    { "name": "order_lines", "description": "受注の明細を…", "params": ["from", "to", "regions"],
+    { "name": "order_lines", "description": "受注の明細を…", "params": ["from", "to", "regions", "customer"],
       "parameters": [
         { "name": "from", "type": "date", "label": "受注日（から）", "default": "fiscal_year_start" },
         { "name": "to", "type": "date", "label": "受注日（まで）", "optional": true },
-        { "name": "regions", "type": "text", "multiple": true, "label": "地域", "default": "all", "values": "regions" }
+        { "name": "regions", "type": "text", "multiple": true, "label": "地域", "default": "all", "values": "regions" },
+        { "name": "customer", "type": "integer", "label": "顧客", "optional": true, "values": "customers" }
       ],
       "key": ["受注番号", "行番号"], "connection": "DEVBI_DB" },
     { "name": "orders", "description": "受注の明細…", "params": ["from"], "parameters": [{ "name": "from", "type": "date", "label": "受注日（から）" }], "connection": "DEVBI_DB" },
@@ -1090,7 +1091,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 
 ```json
 { "name": "orders", "params": { "from": "2024-04-01" } }
-{ "name": "order_lines", "params": { "from": "2024-04-01", "to": null, "regions": ["関東", "近畿"] } }
+{ "name": "order_lines", "params": { "from": "2024-04-01", "to": null, "regions": ["関東", "近畿"], "customer": null } }
 ```
 
 - `params` の値は、文字・数値・`true` / `false`・`null` と、複数の値のパラメーター（`text[]` など）には配列です。本文は 256 KB まで（超えると `413`）。
