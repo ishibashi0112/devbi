@@ -141,9 +141,14 @@ describe("-- param: and -- key:", () => {
     expect(ok("-- param: a boolean default=false")).toMatchObject({ default: "false" });
     expect(ok("-- param: a  text   label=名前")).toMatchObject({ label: "名前" });
   });
-  it("only the comment lines at the top count, as for -- connection:", () => {
-    expect(parseDataset("x", "SELECT * FROM t WHERE a = :a\n-- param: a date").parameters).toEqual([{ name: "a" }]);
+  it("only the comment lines at the top count, as for -- connection:, and one further down is an error", () => {
     expect(parseDataset("x", "-- param: a date\n\n\n-- 説明\nSELECT * FROM t WHERE a = :a").parameters).toEqual([{ name: "a", type: "date" }]);
+    const late = "は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）";
+    expect(() => parseDataset("x", "SELECT * FROM t WHERE a = :a\n-- param: a date")).toThrow(`api/x.sql（2 行目）: -- param: ${late}`);
+    expect(() => parseDataset("x", "/* 受注 */\n-- param: a date\nSELECT * FROM t WHERE a = :a")).toThrow(`api/x.sql（2 行目）: -- param: ${late}`);
+    expect(() => parseDataset("x", "-- 説明\nSELECT * FROM t\n  -- KEY : id\nWHERE a = :a")).toThrow(`api/x.sql（3 行目）: -- key: ${late}`);
+    // not a line of its own, or not param / key
+    expect(parseDataset("x", "SELECT * FROM t WHERE a = :a -- param: a date\n-- keys: a").parameters).toEqual([{ name: "a" }]);
   });
 });
 

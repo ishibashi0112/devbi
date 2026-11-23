@@ -862,7 +862,8 @@ SELECT …
 - `-- param:` を書かないパラメーターは今までどおりです（型なし。文字・数値・真偽・null をそのまま渡す）。
 - 書き方が違うと、`api/order_lines.sql（3 行目）: 型 day は使えません。…` のように、何行目の何が違うかを出します（`api/schema` のそのデータセットの `error` と、`api/query` の `400`）。SQL にない名前、型のない行、同じ名前の 2 行目、知らないキー、型に合わない既定値はエラーです。
 - 名前が `user.` で始まるパラメーターは書けません（ログインした人の値のために取ってあります。大文字と小文字は問いません）。`user_id`、`username` などは使えます。
-- 0.1.1 までは、先頭のコメントの `-- param: …` や `-- key: …` で始まる行は説明の文でした。今は指示として読むので、説明に書いていたら言い方を変えてください。
+- `-- param:` と `-- key:` は、`-- connection:` と同じく、ファイルの先頭から続く `--` のコメント（空の行は入ってよい）の中に書きます。SQL や `/* … */` よりあとの行に書くと、何もしない代わりに「api/x.sql（5 行目）: -- param: は、ファイルの先頭から続く -- のコメントの中に書いてください…」のエラーになります。
+- 0.1.1 までは、`-- param: …` や `-- key: …` で始まる行は、先頭なら説明の文、SQL の中ならただのコメントでした。今は指示として読む（SQL の中ではエラーになる）ので、そう書いていたら言い方を変えてください。
 
 | 型 | 送る値 | 確かめること |
 | --- | --- | --- |
@@ -898,7 +899,7 @@ SELECT …
 | SQL Server | 日付は `CAST(@p1 AS date)`、日時は `CAST(@p1 AS datetime2)`。ほかは今までどおり |
 | Oracle | 日付は `TO_DATE(:p1, 'YYYY-MM-DD')`、日時は `TO_DATE(:p1, 'YYYY-MM-DD HH24:MI:SS')`（秒の小数があるときだけ `TO_TIMESTAMP`。DATE の列の索引が使えるように） |
 | MySQL / MariaDB | 日付は `CAST(? AS DATE)`、日時は `CAST(? AS DATETIME(6))` |
-| SQLite | 書き換えない（日付を文字で持つため）。文字どうしで比べるので、日付だけの列と日時のパラメーターは `'2024-04-03' < '2024-04-03 00:00:00'` になる |
+| SQLite | 書き換えない（日付を文字で持つため）。日時は `2024-04-01 09:00:00` の形（日付と時刻の間は空白。SQLite の `datetime()` や `CURRENT_TIMESTAMP` と同じ）で渡す。文字どうしで比べるので、列が `2024-04-01T08:00:00` のように `T` で持つときは `replace(ts, 'T', ' ') >= :since` と書くか、型を書かずに送られた文字のまま渡す。日付だけの列と日時のパラメーターは `'2024-04-03' < '2024-04-03 00:00:00'` になる |
 
 ### 行を見分ける列（`-- key:`）
 
@@ -1060,7 +1061,9 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
       ],
       "key": ["受注番号", "行番号"], "connection": "DEVBI_DB" },
     { "name": "orders", "description": "受注の明細…", "params": ["from"], "parameters": [{ "name": "from", "type": "date", "label": "受注日（から）" }], "connection": "DEVBI_DB" },
-    { "name": "sales_daily", "description": "…", "params": ["from"], "parameters": [{ "name": "from" }], "connection": "DEVBI_DB", "snapshot": ["06:00"] }
+    { "name": "regions", "description": "地域の一覧…", "params": [], "parameters": [], "connection": "DEVBI_DB" },
+    { "name": "sales_daily", "description": "…", "params": ["from"], "parameters": [{ "name": "from", "type": "date", "label": "受注日（から）" }],
+      "connection": "DEVBI_DB", "snapshot": ["06:00"] }
   ],
   "snapshots": [
     { "file": "sales_daily~9e979dd94c517434.arrows", "name": "sales_daily", "params": { "from": "2024-04-01" },

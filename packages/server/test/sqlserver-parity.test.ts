@@ -135,6 +135,10 @@ const datasets: { name: string; text: string }[] = [
   { name: "multi_not_in", text: "-- param: r text[]\nSELECT * FROM t WHERE r NOT IN(\n  :r\n) OR [x]IN (:r)" },
   { name: "multi_space", text: "-- param: r text[]\nSELECT * FROM t WHERE r\u3000In\u3000(\u3000:r )" },
   { name: "multi_dotless", text: "-- param: r text[]\nSELECT * FROM t WHERE r \u0131n (:r)" },
+  { name: "late_block", text: "/* 受注 */\n-- param: r text[]\nSELECT * FROM t WHERE r IN (:r)" },
+  { name: "late_key", text: "-- param: d date\nSELECT * FROM t\n-- key: id\nWHERE d = :d" },
+  { name: "late_in_sql", text: "SELECT * FROM t WHERE d = :d -- param: d date\n  -- Param : d" },
+  { name: "late_not", text: "-- 説明\nSELECT * FROM t WHERE d = :d -- the param: d\n-- keys: a" },
 ];
 
 const binds: { text: string; values: Record<string, unknown> }[] = [
@@ -209,6 +213,14 @@ const binds: { text: string; values: Record<string, unknown> }[] = [
     ];
     return patches.map((p) => ({ text: typed, values: { ...values, ...p } }));
   })(),
+  // the echoed value is cut at 40 characters, not between the two halves of 𠮷
+  { text: "-- param: n integer\nSELECT * FROM t WHERE a = :n", values: { n: `${"a".repeat(38)}\u{20BB7}bc` } },
+  { text: "-- param: n integer\nSELECT * FROM t WHERE a = :n", values: { n: `${"a".repeat(37)}\u{20BB7}bc` } },
+  { text: "-- param: n integer[]\nSELECT * FROM t WHERE a IN (:n)", values: { n: [`${"a".repeat(37)}\u{20BB7}bc`] } },
+  // the echoed value is written as JSON.stringify writes it
+  { text: "-- param: n integer\nSELECT * FROM t WHERE a = :n", values: { n: '😀\n"x\\\u0001\u2028<>&\'' } },
+  { text: "-- param: n integer[]\nSELECT * FROM t WHERE a IN (:n)", values: { n: [1, [2.5, "😀", null, true]] } },
+  { text: "-- param: n integer[]\nSELECT * FROM t WHERE a IN (:n)", values: { n: [{ "😀": "\t", b: 1e21, c: [] }] } },
   { text: "-- param: ids integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:ids)", values: { ids: Array.from({ length: 1000 }, (_, i) => i) } },
   {
     text: "-- param: ids integer[]\n-- param: more integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:more) OR c = :x",

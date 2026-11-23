@@ -266,7 +266,18 @@ export function headerDirectives(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const at = `${rel}（${i + 1} 行目）`;
-    if (line.trim() && !COMMENT_LINE.test(line)) break;
+    if (line.trim() && !COMMENT_LINE.test(line)) {
+      // a -- param: or -- key: past the header (after a /* */ or in the SQL) would do nothing: say so
+      for (let j = i; j < lines.length; j++) {
+        const late = PARAM_LINE.test(lines[j]!) ? "-- param:" : KEY_LINE.test(lines[j]!) ? "-- key:" : undefined;
+        if (late) {
+          throw new ParamLineError(
+            `${rel}（${j + 1} 行目）: ${late} は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）`,
+          );
+        }
+      }
+      break;
+    }
     try {
       const p = PARAM_LINE.exec(line);
       if (p) {
@@ -336,7 +347,10 @@ const WANTS: Record<ParamType, string> = {
 
 function shown(v: unknown): string {
   const s = JSON.stringify(v) ?? String(v);
-  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
+  if (s.length <= 40) return s;
+  // not between the two halves of a surrogate pair (𠮷, emoji)
+  const high = s.charCodeAt(39) >= 0xd800 && s.charCodeAt(39) <= 0xdbff;
+  return `${s.slice(0, high ? 39 : 40)}…`;
 }
 
 /**

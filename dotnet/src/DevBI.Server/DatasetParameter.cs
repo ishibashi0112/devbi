@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -358,7 +357,19 @@ namespace DevBI.Server
             for (var i = 0; i < lines.Length; i++)
             {
                 var line = lines[i];
-                if (SqlText.Trim(line).Length > 0 && !CommentLine.IsMatch(line)) break;
+                if (SqlText.Trim(line).Length > 0 && !CommentLine.IsMatch(line))
+                {
+                    // a -- param: or -- key: past the header (after a /* */ or in the SQL) would do nothing: say so
+                    for (var j = i; j < lines.Length; j++)
+                    {
+                        var late = ParamLine.IsMatch(lines[j]) ? "-- param:" : KeyLine.IsMatch(lines[j]) ? "-- key:" : null;
+                        if (late != null)
+                        {
+                            throw new DatasetException($"{rel}（{j + 1} 行目）: {late} は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）", 400);
+                        }
+                    }
+                    break;
+                }
                 try
                 {
                     var p = ParamLine.Match(line);
@@ -413,40 +424,71 @@ namespace DevBI.Server
             return $"{m.Groups[1].Value} {m.Groups[2].Value}:{m.Groups[3].Value}:{(m.Groups[4].Success ? m.Groups[4].Value : "00")}{(m.Groups[5].Success ? m.Groups[5].Value : "")}";
         }
 
-        private static readonly JsonSerializerOptions Relaxed = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-
         /// <summary>A value the way JavaScript's <c>JSON.stringify</c> writes it, cut at 40 characters.</summary>
         internal static string Shown(object? v)
         {
-            string s;
-            switch (v)
+            var s = Js(v);
+            if (s.Length <= 40) return s;
+            // not between the two halves of a surrogate pair (𠮷, emoji)
+            return s.Substring(0, char.IsHighSurrogate(s[39]) ? 39 : 40) + "…";
+        }
+
+        /// <summary>JavaScript's <c>JSON.stringify</c> of a value read from a request.</summary>
+        private static string Js(object? v) =>
+            v switch
             {
-                case null:
-                    s = "null";
-                    break;
-                case string t:
-                    s = JsonSerializer.Serialize(t, Relaxed);
-                    break;
-                case bool b:
-                    s = b ? "true" : "false";
-                    break;
-                case long l:
-                    s = l.ToString(CultureInfo.InvariantCulture);
-                    break;
-                case double d:
-                    s = JsNumber(d);
-                    break;
-                case JsonElement e:
-                    s = JsonSerializer.Serialize(e, Relaxed);
-                    break;
-                case IList list:
-                    s = "[" + string.Join(",", list.Cast<object?>().Select(Shown)) + "]";
-                    break;
-                default:
-                    s = v.ToString() ?? "";
-                    break;
+                null => "null",
+                string t => JsString(t),
+                bool b => b ? "true" : "false",
+                long l => l.ToString(CultureInfo.InvariantCulture),
+                double d => JsNumber(d),
+                JsonElement e => Js(e),
+                IList list => "[" + string.Join(",", list.Cast<object?>().Select(Js)) + "]",
+                _ => v.ToString() ?? "",
+            };
+
+        private static string Js(JsonElement e) =>
+            e.ValueKind switch
+            {
+                JsonValueKind.String => JsString(e.GetString()!),
+                // past the double range JavaScript reads Infinity, which JSON.stringify writes as null
+                JsonValueKind.Number => e.TryGetDouble(out var d) ? JsNumber(d) : "null",
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.Array => "[" + string.Join(",", e.EnumerateArray().Select(Js)) + "]",
+                JsonValueKind.Object => "{" + string.Join(",", e.EnumerateObject().Select(p => JsString(p.Name) + ":" + Js(p.Value))) + "}",
+                _ => "null",
+            };
+
+        /// <summary>A string as <c>JSON.stringify</c> writes it: only quotes, backslashes, control characters and lone surrogates escaped.</summary>
+        private static string JsString(string t)
+        {
+            var b = new StringBuilder(t.Length + 2).Append('"');
+            for (var i = 0; i < t.Length; i++)
+            {
+                var c = t[i];
+                switch (c)
+                {
+                    case '"': b.Append("\\\""); break;
+                    case '\\': b.Append("\\\\"); break;
+                    case '\b': b.Append("\\b"); break;
+                    case '\f': b.Append("\\f"); break;
+                    case '\n': b.Append("\\n"); break;
+                    case '\r': b.Append("\\r"); break;
+                    case '\t': b.Append("\\t"); break;
+                    default:
+                        if (c < 0x20 || (char.IsHighSurrogate(c) && !(i + 1 < t.Length && char.IsLowSurrogate(t[i + 1]))) || (char.IsLowSurrogate(c) && !(i > 0 && char.IsHighSurrogate(t[i - 1]))))
+                        {
+                            b.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            b.Append(c);
+                        }
+                        break;
+                }
             }
-            return s.Length > 40 ? s.Substring(0, 40) + "…" : s;
+            return b.Append('"').ToString();
         }
 
         /// <summary>JavaScript's way of writing a double: the shortest digits, with an exponent from 1e21 and below 1e-6.</summary>

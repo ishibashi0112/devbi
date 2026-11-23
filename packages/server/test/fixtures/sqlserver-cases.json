@@ -893,19 +893,8 @@
         "snapshot": null
       },
       "dataset": {
-        "description": "",
-        "connection": null,
-        "snapshot": null,
-        "sql": "SELECT * FROM t WHERE a = :a\n-- param: a date",
-        "params": [
-          "a"
-        ],
-        "parameters": [
-          {
-            "name": "a"
-          }
-        ],
-        "key": null
+        "error": "api/typed_late.sql（2 行目）: -- param: は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）",
+        "status": 400
       }
     },
     {
@@ -1521,6 +1510,65 @@
       "dataset": {
         "error": "api/multi_dotless.sql（2 行目）: :r は複数の値（text[]）なので、IN (:r) の形でだけ使えます",
         "status": 400
+      }
+    },
+    {
+      "name": "late_block",
+      "text": "/* 受注 */\n-- param: r text[]\nSELECT * FROM t WHERE r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/late_block.sql（2 行目）: -- param: は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）",
+        "status": 400
+      }
+    },
+    {
+      "name": "late_key",
+      "text": "-- param: d date\nSELECT * FROM t\n-- key: id\nWHERE d = :d",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/late_key.sql（3 行目）: -- key: は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）",
+        "status": 400
+      }
+    },
+    {
+      "name": "late_in_sql",
+      "text": "SELECT * FROM t WHERE d = :d -- param: d date\n  -- Param : d",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/late_in_sql.sql（2 行目）: -- param: は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）",
+        "status": 400
+      }
+    },
+    {
+      "name": "late_not",
+      "text": "-- 説明\nSELECT * FROM t WHERE d = :d -- the param: d\n-- keys: a",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "説明",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE d = :d -- the param: d\n-- keys: a",
+        "params": [
+          "d"
+        ],
+        "parameters": [
+          {
+            "name": "d"
+          }
+        ],
+        "key": null
       }
     }
   ],
@@ -2663,6 +2711,82 @@
       },
       "bound": {
         "error": "api/x.sql: パラメーター regions の値が 1,001 個あります。1 つのパラメーターに渡せるのは 1,000 個までです。候補を絞るか、すべてのときはこのパラメーターを使わない SQL にしてください",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: n integer\nSELECT * FROM t WHERE a = :n",
+      "values": {
+        "n": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa𠮷bc"
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa… が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: n integer\nSELECT * FROM t WHERE a = :n",
+      "values": {
+        "n": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa𠮷bc"
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa𠮷… が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: n integer[]\nSELECT * FROM t WHERE a IN (:n)",
+      "values": {
+        "n": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa𠮷bc"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa𠮷… が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: n integer\nSELECT * FROM t WHERE a = :n",
+      "values": {
+        "n": "😀\n\"x\\\u0001 <>&'"
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（\"😀\\n\\\"x\\\\\\u0001 <>&'\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: n integer[]\nSELECT * FROM t WHERE a IN (:n)",
+      "values": {
+        "n": [
+          1,
+          [
+            2.5,
+            "😀",
+            null,
+            true
+          ]
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（[2.5,\"😀\",null,true] が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: n integer[]\nSELECT * FROM t WHERE a IN (:n)",
+      "values": {
+        "n": [
+          {
+            "😀": "\t",
+            "b": 1e+21,
+            "c": []
+          }
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（{\"😀\":\"\\t\",\"b\":1e+21,\"c\":[]} が来ました）",
         "status": 400
       }
     },
