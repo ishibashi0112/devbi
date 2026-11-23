@@ -610,5 +610,73 @@ describe("devbi-serve --user-header: the user from the server in front", () => {
     expect(from("192.168.11.7")).toMatchObject({ ignored: "192.168.11.7 は --trusted-proxy にありません" });
     expect(from("127.0.0.1")).toMatchObject({ ignored: "127.0.0.1 は --trusted-proxy にありません" });
     await expect(serve({ dir: project(files), port: 0, env, schedule: false, userHeader: "X-DevBI-User", proxySecret: " " })).rejects.toThrow("合言葉（proxySecret）が空です");
+    // the options of the header without it
+    await expect(serve({ dir: project(files), port: 0, env, schedule: false, trustedProxies: ["10.0.0.1"], userLowercase: true })).rejects.toThrow(
+      "trustedProxies・userLowercase は userHeader と一緒に使います",
+    );
+    expect(() => proxyUser({ header: "X-DevBI-User", trustedProxies: [] })).toThrow("--trusted-proxy に IP アドレスがありません");
+  });
+
+  it("reads IPv4 as IPv4: ::ffff: ranges, and IPv6 ranges that would hold every IPv4 address are refused", async () => {
+    const { proxyUser, trustedList } = await import("../src/proxy-user.js");
+    const from = (trustedProxies: string[], remoteAddress: string) => {
+      const got = proxyUser({ header: "X-DevBI-User", trustedProxies })({ socket: { remoteAddress }, headersDistinct: { "x-devbi-user": ["a"] } } as never);
+      return "options" in got && got.options.user !== undefined;
+    };
+    expect(from(["::ffff:10.0.0.0/104"], "10.1.2.3")).toBe(true);
+    expect(from(["::ffff:10.0.0.0/104"], "::ffff:10.1.2.3")).toBe(true);
+    expect(from(["::ffff:10.0.0.0/104"], "11.0.0.1")).toBe(false);
+    expect(from(["::ffff:10.0.0.5"], "10.0.0.5")).toBe(true);
+    expect(from(["::ffff:10.0.0.5"], "10.0.0.6")).toBe(false);
+    for (const bad of ["::ffff:10.0.0.0/8", "::/8", "::/0", "::ffff:0:0/95"]) {
+      expect(() => trustedList([bad])).toThrow(`--trusted-proxy の ${bad} は、IPv4 のアドレスもすべて含んでしまいます`);
+    }
+    // a zone (fe80::1%eth0) is left out by the check: it would be fe80::1 on every network
+    expect(() => trustedList(["fe80::1%eth0"])).toThrow("--trusted-proxy の fe80::1%eth0 は IP アドレス");
+    expect(from(["fd00::/8"], "127.0.0.1")).toBe(false);
+  });
+
+  it("takes the value as it came: one with , (two joined), and with --user-lowercase a letter of another shape, are refused", async () => {
+    const { proxyUser } = await import("../src/proxy-user.js");
+    const got = (user: string, lowercase = false) =>
+      proxyUser({ header: "X-DevBI-User", lowercase })({ socket: { remoteAddress: "127.0.0.1" }, headersDistinct: { "x-devbi-user": [Buffer.from(user, "utf8").toString("latin1")] } } as never);
+    expect(got("mallory, alice")).toEqual({
+      refuse: "X-DevBI-User の値に , があります（2 つの値を 1 行にしたもののようです）。前のサーバーは、ブラウザから来た X-DevBI-User を上書きします（足しません）",
+    });
+    // only spaces and tabs around it are dropped: not U+3000, NBSP or a BOM
+    expect(got(" \talice\t ")).toEqual({ options: { user: { id: "alice" } } });
+    expect(got("alice\u3000")).toEqual({ options: { user: { id: "alice\u3000" } } });
+    expect(got("\u00a0alice")).toEqual({ options: { user: { id: "\u00a0alice" } } });
+    expect(got("\ufeffalice")).toEqual({ options: { user: { id: "\ufeffalice" } } });
+    expect(got("CORP\\Yamada", true)).toEqual({ options: { user: { id: "corp\\yamada" } } });
+    expect(got("\u212Aimura", true)).toMatchObject({ refuse: expect.stringMatching(/^X-DevBI-User の値に、全角の英字や記号のような、ふつうと違う形の文字があります/) });
+    expect(got("ｋimura", true)).toMatchObject({ refuse: expect.stringMatching(/ふつうと違う形の文字/) });
+    expect(got("\u212Aimura")).toEqual({ options: { user: { id: "\u212Aimura" } } });
+  });
+
+  it("takes a secret of visible ASCII only, and compares it byte for byte", async () => {
+    const { proxyUser } = await import("../src/proxy-user.js");
+    for (const bad of ["合言葉", "pässwörd", " s3cret", "s3\ncret", "\u0000s\u00003"]) {
+      expect(() => proxyUser({ header: "X-DevBI-User", secret: bad })).toThrow(/^合言葉は、半角の英数字と記号で書いてください/);
+    }
+    const check = proxyUser({ header: "X-DevBI-User", secret: "s3 cr#t" });
+    const ask = (secret: string) => check({ socket: { remoteAddress: "127.0.0.1" }, headersDistinct: { "x-devbi-user": ["a"], "x-devbi-proxy-secret": [secret] } } as never);
+    expect(ask("s3 cr#t")).toEqual({ options: { user: { id: "a" } } });
+    expect(ask("s3 cr#T")).toMatchObject({ ignored: "127.0.0.1 からの x-devbi-proxy-secret が合いません" });
+  });
+
+  it("writes the log line of a header not believed once a minute for each address, 10 lines a minute in all", async () => {
+    const { logGate } = await import("../src/proxy-user.js");
+    let now = 0;
+    const gate = logGate(10, () => now);
+    expect(gate("10.0.0.1")).toBe(true);
+    expect(gate("10.0.0.1")).toBe(false);
+    const written = Array.from({ length: 20 }, (_, i) => gate(`10.0.1.${i}`));
+    expect(written.filter((w) => w === true)).toHaveLength(8);
+    expect(written[8]).toBe("last");
+    expect(written.slice(9).every((w) => w === false)).toBe(true);
+    now += 60_000;
+    expect(gate("10.0.0.1")).toBe(true);
+    expect(gate("10.0.1.15")).toBe(true);
   });
 });

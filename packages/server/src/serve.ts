@@ -4,8 +4,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { isIP } from "node:net";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { createApiHandler, type ApiOptions, type RequestOptions } from "./handler.js";
-import { proxyUser } from "./proxy-user.js";
+import { apiPathPattern, createApiHandler, type ApiOptions, type RequestOptions } from "./handler.js";
+import { logGate, proxyUser } from "./proxy-user.js";
 
 export interface ServeOptions extends ApiOptions {
   /** The built site (`vite build` output) to serve. Default `<dir>/dist`. */
@@ -27,7 +27,7 @@ export interface ServeOptions extends ApiOptions {
    */
   schedule?: boolean;
   /**
-   * The header in which the server in front (IIS, nginx with oauth2-proxy) puts the signed-in user's name
+   * The header in which the server in front (nginx with oauth2-proxy, …) puts the signed-in user's name
    * (`X-DevBI-User`). It becomes `:user.id`; roles and attributes come from `access/user.sql`. Setting it also sets
    * `requireUser`. Believed only from `trustedProxies` (and with `proxySecret`). Default: no user from headers.
    */
@@ -188,6 +188,10 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
     throw new Error(`${root} に index.html がありません。先にビルドしてください（pnpm build）`);
   }
   const snapshotDir = options.snapshotDir ?? path.join(root, "snapshots");
+  if (options.userHeader === undefined) {
+    const without = (["trustedProxies", "proxySecret", "userLowercase"] as const).filter((k) => options[k] !== undefined && options[k] !== false);
+    if (without.length) throw new Error(`${without.join("・")} は userHeader と一緒に使います`);
+  }
   const fromHeader =
     options.userHeader === undefined
       ? undefined
@@ -197,19 +201,11 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
           ...(options.proxySecret !== undefined ? { secret: options.proxySecret } : {}),
           ...(options.userLowercase ? { lowercase: true } : {}),
         });
-  if (options.proxySecret !== undefined && !options.proxySecret.trim()) throw new Error("合言葉（proxySecret）が空です");
   const api = createApiHandler({ ...options, snapshotDir, ...(fromHeader ? { requireUser: true } : {}) });
-  // A header not believed goes in the log once a minute for each address (a client cannot fill the log with it).
-  const lastLogged = new Map<string, number>();
-  const quiet = (from: string) => {
-    const now = Date.now();
-    if ((lastLogged.get(from) ?? -Infinity) > now - 60_000) return false;
-    lastLogged.delete(from);
-    lastLogged.set(from, now);
-    if (lastLogged.size > 1000) lastLogged.delete(lastLogged.keys().next().value!);
-    return true;
-  };
-  const apiPath = options.describe ? /\/api\/(schema|query|describe)$|\/snapshots\/[^/]+\.arrows$/ : /\/api\/(schema|query)$|\/snapshots\/[^/]+\.arrows$/;
+  // A header not believed goes in the log once a minute for each address, and 10 lines a minute in all (a client
+  // cannot fill the log with it, from one address or from many).
+  const mayLog = logGate(10);
+  const apiPath = apiPathPattern(options.describe);
   // Snapshots are sent by the API only (`…/snapshots/<file>.arrows`), which checks who asks: never as plain files.
   const hidden = [...new Set([path.join(root, "snapshots"), path.resolve(snapshotDir)])];
   const host = options.host ?? "127.0.0.1";
@@ -234,8 +230,10 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
             res.end(JSON.stringify({ error: got.refuse }));
             return;
           }
-          if (got.ignored && quiet(req.socket.remoteAddress ?? "")) {
-            options.log?.(`${options.userHeader} を使いませんでした（${got.ignored}）。ログインしていない人として答えます（同じ相手は 1 分に 1 回だけ書きます）`);
+          const write = got.ignored ? mayLog(req.socket.remoteAddress ?? "") : false;
+          if (write) {
+            const limit = write === "last" ? "。ほかの相手のものも合わせて 1 分に 10 件までにするので、このあとしばらくは書きません" : "";
+            options.log?.(`${options.userHeader} を使いませんでした（${got.ignored}）。ログインしていない人として答えます（同じ相手は 1 分に 1 回だけ書きます${limit}）`);
           }
           asked = got.options;
         }

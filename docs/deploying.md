@@ -344,10 +344,10 @@ location /reports/ {
 npx devbi-serve --dir . --user-header X-DevBI-User --allowed-hosts reports.corp.local
 ```
 
-- **前のサーバーは、ブラウザから来た `X-DevBI-User` を必ず上書きするか消します。** そうしないと、利用者が自分でヘッダーを付けて、ほかの人になれます。同じヘッダーが 2 つ届いたリクエスト（上書きせずに足したとき）は、`devbi-serve` が `400` で断ります。
+- **前のサーバーは、ブラウザから来た `X-DevBI-User` を必ず上書きするか消します。** そうしないと、利用者が自分でヘッダーを付けて、ほかの人になれます。同じヘッダーが 2 つ届いたリクエストと、値に `,` があるリクエスト（上書きせずに足したとき）は、`devbi-serve` が `400` で断ります。nginx の `proxy_set_header` は、`location` の中に 1 つでも書くと外側（`server`）のものを引き継がないので、`devbi-serve` に送る `location` ごとに `X-DevBI-User` を書きます。
 - `devbi-serve` が信じるのは、`--trusted-proxy`（既定は `127.0.0.1` と `::1`）からつながってきたリクエストのヘッダーだけです。前のサーバーが別のコンピューターなら、その IP アドレスを書きます（`--trusted-proxy 10.0.0.5`）。`devbi-serve` には、前のサーバーからだけ届くようにします（`--host 127.0.0.1` か、ファイアウォール）。
-- 同じコンピューターでほかのプログラムも動く、リモート デスクトップでほかの人もログインするときは、合言葉を足します: `--proxy-secret-file C:\devbi\proxy-secret.txt` を付け、前のサーバーが同じ文字を `X-DevBI-Proxy-Secret` ヘッダーに入れます。ファイルは、サービスのアカウントと管理者だけが読めるようにします。
-- 属性（地域など）と役割は、`access/user.sql` で表から引きます（[リファレンス](reference.md#利用者の属性と役割を表から引くaccessusersql)）。
+- 同じコンピューターでほかのプログラムも動く、リモート デスクトップでほかの人もログインするときは、合言葉を足します: `--proxy-secret-file /etc/devbi/proxy-secret.txt` を付け、前のサーバーが同じ文字を `X-DevBI-Proxy-Secret` ヘッダーに入れます（`proxy_set_header X-DevBI-Proxy-Secret "…";`）。合言葉は半角の英数字と記号で書きます。合言葉のファイルと、合言葉を書いた nginx の設定ファイル（`/etc/nginx/conf.d/` のファイルは、ふつうだれでも読めます）は、サービスのアカウントと管理者だけが読めるようにします（`chmod 600` など）。
+- 属性（地域など）と役割は、`access/user.sql` で表から引きます（[リファレンス](reference.md#利用者の属性と役割を表から引くaccessusersql)）。`--user-lowercase` で名前を小文字にそろえるときは、表のログイン名も小文字で入れておきます。
 - 置いたあと、`pnpm exec devbi-check --url https://reports.corp.local/reports/` で、置いた先の API が行レベル制御を知っているかを確かめられます（サイトのログインの前で止まるときは確かめられません）。
 
 nginx と oauth2-proxy（Entra ID・Okta・Google・Keycloak などの OpenID Connect）の例:
@@ -366,6 +366,8 @@ location /reports/ {
 `X-Auth-Request-User` にどのクレームが入るかは、oauth2-proxy の設定で決まります。メールアドレスではなく、変わらない ID（Entra ID の `oid` など）が入るようにします。
 
 **IIS の Windows 認証で人ごとに行を変えるなら、[ASP.NET のアプリに埋め込む形](#3-社内のアプリに埋め込む)を勧めます**（C# の対応は、このあと足します）。IIS の URL Rewrite でログインした人の名前（`{LOGON_USER}`）をヘッダーに入れると空になるという報告があり、IIS から `devbi-serve` に Windows のユーザー名を渡す方法は、まだ確かめていません。
+
+**[前に IIS や nginx を置く](#前に-iis-や-nginx-を置く) の IIS（ARR）の例のまま、`--user-header` を付けてはいけません。** ARR はブラウザから来た `X-DevBI-User` をそのまま `devbi-serve` に渡し、そのリクエストは `127.0.0.1` から届くので、Windows 認証でログインした人ならだれでも、ヘッダーを足してほかの人になれます。
 
 ### 動かし続ける
 

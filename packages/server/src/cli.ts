@@ -59,10 +59,10 @@ const timeout = number(values!.timeout, "timeout");
 const maxRows = number(values!["max-rows"], "max-rows");
 const hosts = values!["allowed-hosts"];
 const allowedHosts = hosts === undefined ? undefined : hosts.trim() === "all" ? true : hosts.split(",").map((h) => h.trim()).filter(Boolean);
-// Row-level security: the signed-in user from the server in front (IIS, nginx with oauth2-proxy).
+// Row-level security: the signed-in user from the server in front (nginx with oauth2-proxy, …).
 const userHeader = values!["user-header"]?.trim();
 if (values!["user-header"] !== undefined && !userHeader) usage("--user-header のあとにヘッダーの名前を書いてください（X-DevBI-User）");
-for (const o of ["trusted-proxy", "proxy-secret-file", "user-lowercase"] as const) {
+for (const o of ["trusted-proxy", "proxy-secret-file", "user-lowercase", "user-cache"] as const) {
   if (values![o] !== undefined && values![o] !== false && !userHeader) usage(`--${o} は --user-header と一緒に使います`);
 }
 const trustedProxies = values!["trusted-proxy"]?.split(",").map((a) => a.trim()).filter(Boolean);
