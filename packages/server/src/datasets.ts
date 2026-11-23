@@ -353,10 +353,13 @@ export function bindParameters(dataset: Dataset, dialect: Dialect, values: Recor
   let last = 0;
   for (const p of parameters(dataset.sql, dialect)) {
     out += dataset.sql.slice(last, p.start);
-    const lower = p.name.toLowerCase();
+    // `user.` and the attribute lower-cased apart, as they were checked (`user.Σ` as a whole would end in ς).
+    const lower = isUserName(p.name) ? `user.${p.name.slice("user.".length).toLowerCase()}` : p.name.toLowerCase();
     let place = numbered ? written.get(lower) : undefined;
     if (place === undefined) {
-      const v = checked.get(lower)!;
+      const v = checked.get(lower);
+      // Never bound as nothing (a driver may take undefined for NULL, and `:user.x IS NULL OR …` would pass).
+      if (v === undefined) throw new DatasetError(`${rel}: :${p.name} の値がありません`, 500);
       const type = types.get(lower);
       place = (Array.isArray(v) ? v : [v]).map((x) => typedPlace(dialect, type, placeholder(dialect, params.push(driverValue(dialect, x))), x)).join(", ");
       if (numbered) written.set(lower, place);

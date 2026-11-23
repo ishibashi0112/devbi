@@ -128,9 +128,12 @@ describe("snapshots (SQLite)", () => {
       const [made] = await api.snapshots.make();
       expect(made).toMatchObject({ file: daily, ok: true, rows: 2 });
       const file = path.join(out, "snapshots", daily);
-      // A day in the past, so that "made again" (now) is later whatever the time of day the test runs at.
+      // A day in the past, so that "made again" (now) is later whatever the time of day the test runs at. The SQL
+      // file saved before it (a snapshot older than its SQL is made again).
       const today6 = new Date(2020, 0, 15, 6, 0, 0, 0);
       const after = new Date(today6.getTime() + 60 * 60_000);
+      const sqlSaved = new Date(2020, 0, 1);
+      utimesSync(path.join(dir, "api", "daily.sql"), sqlSaved, sqlSaved);
       // Made after today's 06:00: nothing to do.
       utimesSync(file, after, after);
       expect(await api.snapshots.catchUp(new Date(today6.getTime() + 2 * 60 * 60_000))).toEqual([]);
@@ -139,6 +142,14 @@ describe("snapshots (SQLite)", () => {
       utimesSync(file, before, before);
       expect(await api.snapshots.catchUp(new Date(today6.getTime() + 2 * 60 * 60_000))).toEqual([expect.objectContaining({ file: daily, ok: true })]);
       expect(statSync(file).mtime.getTime()).toBeGreaterThan(before.getTime());
+      // The SQL saved after the file was made (columns taken out, a WHERE added): made again, at once and when asked.
+      utimesSync(file, after, after);
+      const saved = new Date(after.getTime() + 60_000);
+      utimesSync(path.join(dir, "api", "daily.sql"), saved, saved);
+      expect(await api.snapshots.catchUp(new Date(today6.getTime() + 2 * 60 * 60_000))).toEqual([expect.objectContaining({ file: daily, ok: true })]);
+      utimesSync(file, after, after);
+      await api.snapshots.get(daily);
+      expect(statSync(file).mtime.getTime()).toBeGreaterThan(saved.getTime());
     } finally {
       await api.close();
     }

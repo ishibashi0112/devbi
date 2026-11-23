@@ -213,8 +213,9 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
   });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : options.port;
+  // Also without a schedule: the first look at the jobs tidies the folder (files no job makes any more go).
+  const jobs = await api.snapshots.jobs().catch(() => []);
   if (options.schedule !== false) {
-    const jobs = await api.snapshots.jobs().catch(() => []);
     if (jobs.length) {
       const names = [...new Map(jobs.map((j) => [j.name, `${j.name}（${j.times.join("、")}）`])).values()];
       options.log?.(`スナップショット: ${names.join("、")}`);

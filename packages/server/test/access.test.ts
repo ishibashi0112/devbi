@@ -55,8 +55,19 @@ describe("-- roles: and -- access:", () => {
     expect(error("SELECT 1\n-- roles: 経理")).toMatch(/^api\/x\.sql（2 行目）: roles: の行は、ファイルの先頭から続く -- のコメントの中に/);
     expect(error("/* roles: 経理 */\nSELECT 1")).toMatch(/（1 行目）: roles:/);
     expect(error("-- 説明\n/*\n  access: all\n*/\nSELECT 1")).toMatch(/（3 行目）: access:/);
-    // not near: a description, a connection line, a cast
+    // not right after the "--", or full-width: not read, so not left as it is
+    for (const line of ["--- roles: 経理", "-- @roles: 経理", "-- - roles: 経理", "-- ※roles: 経理", "-- 経理だけ。roles: 経理"]) {
+      expect(error(`${line}\n-- access: all\nSELECT 1`)).toMatch(/^api\/x\.sql（1 行目）: roles: の行は、-- roles: 経理 のように -- のすぐあとに書いてください/);
+    }
+    expect(error("-- ｒｏｌｅｓ: 経理\nSELECT 1")).toBe("api/x.sql（1 行目）: -- roles: は半角の英字と : で書いてください（このままでは読みません）");
+    expect(error("-- roles： 経理\nSELECT 1")).toMatch(/-- roles: は半角の英字と : で/);
+    expect(error("-- access：all\nSELECT 1")).toMatch(/-- access: は半角の英字と : で/);
+    expect(error("-- role： 経理\nSELECT 1")).toMatch(/-- role: は -- roles: の書き間違い/);
+    // a full-width space after the "--" is a space: read
+    expect(lines("--\u3000roles: 経理\nSELECT 1")).toEqual({ roles: ["経理"] });
+    // not near: a description, a connection line, a cast, "access" without ":" (a missing access: all only refuses more)
     expect(error("-- rules: 税抜き\n-- connection: erp\n-- 権限のある人だけ\nSELECT access::text, roles_count FROM t")).toBe("no error");
+    expect(error("-- Access log per day\n-- access-log の件数\nSELECT 1 -- access from intranet only")).toBe("no error");
   });
   it("cannot be both, and filtered SQL cannot be a snapshot", () => {
     expect(() => parseDataset("x", "-- access: all\nSELECT * FROM t WHERE r = :user.region")).toThrow(/-- access: all（全員に全部の行）と :user.region（人で絞る）が両方あります/);
@@ -67,9 +78,15 @@ describe("-- roles: and -- access:", () => {
   it("the text that puts a project in row-level mode: plain search, any doubt is yes", () => {
     expect(rowLevelSignal("SELECT * FROM t WHERE r = :User.region")).toBe(":user.");
     expect(rowLevelSignal("SELECT ':user.x' AS s")).toBe(":user.");
-    expect(rowLevelSignal("--roles: a\nSELECT 1")).toBe("-- roles");
-    expect(rowLevelSignal("SELECT 1 -- Access all")).toBe("-- access");
-    expect(rowLevelSignal("-- access_log の件数\nSELECT :user_id, :user")).toBeUndefined();
+    expect(rowLevelSignal("--roles: a\nSELECT 1")).toBe("-- roles:");
+    expect(rowLevelSignal("SELECT 1 -- Access: all")).toBe("-- access:");
+    // as accessLines reads or refuses them: a full-width space or colon, not right after the "--"
+    for (const text of ["--\u3000roles: 経理", "--\u00a0roles: 経理", "-- roles：経理", "--- roles: 経理", "-- @roles: 経理", "-- ｒｏｌｅｓ: 経理"]) {
+      expect(rowLevelSignal(`${text}\n-- access: all\nSELECT 1`.replace("\n-- access: all", ""))).toBe("-- roles:");
+    }
+    // a comment that only mentions the word: not the mode (a project without logins keeps working)
+    expect(rowLevelSignal("-- access_log の件数\n-- Access log per day\nSELECT :user_id, :user -- access from intranet only")).toBeUndefined();
+    expect(rowLevelSignal("SELECT access::text FROM t -- roles 経理")).toBeUndefined();
   });
 });
 
@@ -85,6 +102,10 @@ describe("binding the user's values", () => {
     expect(bindParameters(d, "mssql", { from: "x" }, { user }).sql).toBe("SELECT * FROM t WHERE r = @p1 AND d >= @p2 AND (r = @p1 OR s = @p3)");
     // a quote in a value stays a value
     expect(bindParameters(d, "postgres", { from: "x" }, { user: { id: "a", attrs: new Map([["region", "' OR 1=1 --"]]) } }).params).toEqual(["' OR 1=1 --", "x", "a"]);
+    // an attribute's name lower-cased on its own (`user.Σ` as a whole would end in ς), never bound as nothing
+    const sigma = parseDataset("s", "SELECT * FROM t WHERE (:user.Σ IS NULL OR r = :user.Σ)");
+    const v = viewerOf({ id: "a", attrs: { Σ: "関東" } })!;
+    expect(bindParameters(sigma, "postgres", {}, { user: v }).params).toEqual(["関東"]);
   });
   it("no user: 401; no such attribute, or an empty one: 403, nothing runs", () => {
     expect(() => bindParameters(d, "postgres", { from: "x" })).toThrow(expect.objectContaining({ status: 401, message: "ログインしていません（api/orders.sql は、ログインした人の :user.region で行を絞ります）" }));
@@ -108,7 +129,7 @@ describe("the user the host hands over", () => {
     expect(viewerOf(undefined)).toBeUndefined();
     expect(viewerOf(null)).toBeUndefined();
     expect(viewerOf({ id: "  " })).toBeUndefined();
-    const v = viewerOf({ id: " CORP\\yamada ", roles: ["営業", ""], attrs: { Region: "関東", dept: 10, admin: false, none: null, blank: " " } })!;
+    const v = viewerOf({ id: " CORP\\yamada ", roles: ["営業", ""], attrs: { Region: "関東", dept: 10, admin: false, none: null, blank: " ", notGiven: undefined } })!;
     expect(v.id).toBe("CORP\\yamada");
     expect([...v.roles]).toEqual(["営業"]);
     expect([...v.attrs]).toEqual([
@@ -207,7 +228,7 @@ describe("row-level security on SQLite", () => {
     expect(rowsOf((await api.run("payroll", {}, { user: suzuki })).bytes)).toEqual([{ total: 600n }]);
     expect(await error(await post({ name: "forgot" }, yamada))).toEqual([
       400,
-      "api/forgot.sql は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: api/bare.sql に -- access があるため）",
+      "api/forgot.sql は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: api/bare.sql に -- access: があるため）",
     ]);
     expect((await error(await post({ name: "bare" }, yamada)))[1]).toMatch(/^api\/bare\.sql: 行レベルのモードでは :user は使えません。ログインした人の ID なら :user\.id と書きます/);
   });
@@ -281,6 +302,8 @@ describe("access/user.sql: the user's attributes and roles from a table", () => 
       expect(rowsOf((await api.run("mine", {}, { user: { id: "CORP\\yamada" } })).bytes)).toEqual([{ id: 1n }, { id: 2n }]);
       expect(rowsOf((await api.run("mine", {}, { user: { id: "CORP\\yamada", attrs: { region: "近畿" } } })).bytes)).toEqual([{ id: 3n }]);
       await expect(api.run("mine", {}, { user: { id: "CORP\\yamada", attrs: { region: null } } })).rejects.toMatchObject({ status: 403 });
+      // undefined is not given (`{ region: claims.region }` without the claim): the table's value
+      expect((await api.run("mine", {}, { user: { id: "CORP\\yamada", attrs: { region: undefined } } })).rows).toBe(2);
       // roles from the table and the host both count
       expect((await api.run("payroll", {}, { user: { id: "CORP\\sato" } })).rows).toBe(1);
       expect((await api.run("payroll", {}, { user: { id: "CORP\\yamada", roles: ["経理"] } })).rows).toBe(1);
@@ -288,6 +311,24 @@ describe("access/user.sql: the user's attributes and roles from a table", () => 
       // not in the table: only what the host gives
       await expect(api.run("mine", {}, { user: { id: "CORP\\nobody" } })).rejects.toMatchObject({ status: 403, message: "利用者 CORP\\nobody に属性 region がありません（api/mine.sql の :user.region）" });
       await expect(api.run("mine", {}, { user: { id: "CORP\\twice" } })).rejects.toMatchObject({ status: 500, message: "access/user.sql が利用者 CORP\\twice の行を 2 行以上返しました。1 人につき 1 行（いなければ 0 行）にしてください" });
+    } finally {
+      await api.close();
+    }
+  });
+
+  it("writes one line to the log for each, whatever the id holds", async () => {
+    const dir = project(files);
+    const db = new DatabaseSync(path.join(dir, "db", "shop.sqlite"));
+    db.prepare("INSERT INTO devbi_users VALUES (?, 'a', NULL, NULL), (?, 'b', NULL, NULL)").run("CORP\\twice\n2026-11-23 ok", "CORP\\twice\n2026-11-23 ok");
+    db.close();
+    const lines: string[] = [];
+    const api = createApiHandler({ dir, env, log: (l) => lines.push(l) });
+    try {
+      const res = await api.fetch(new Request("http://x/api/query", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "mine" }) }), { user: { id: "CORP\\twice\n2026-11-23 ok" } });
+      expect(res?.status).toBe(500);
+      expect(lines.length).toBeGreaterThan(0);
+      for (const l of lines) expect(l).not.toMatch(/[\n\r]/);
+      expect(lines.join("|")).toContain("CORP\\twice?2026-11-23 ok");
     } finally {
       await api.close();
     }
@@ -348,6 +389,7 @@ describe("snapshots in row-level mode", () => {
     expect(jobs.map((j) => j.file)).toEqual(["regions.arrows"]);
     expect(snapshotting).toEqual(["regions"]);
     expect(problems).toEqual(["api/totals.sql: 行レベルのモードなので、-- access: all のない SQL のスナップショットは作りません"]);
+    expect((await snapshotJobs(dir, env, { rowLevel: true })).leftOut).toBe(1);
     const out = path.join(dir, "site", "snapshots");
     const api = createApiHandler({ dir, env, snapshotDir: out });
     try {
@@ -363,7 +405,8 @@ describe("snapshots in row-level mode", () => {
   });
 
   it("removes the files no job makes any more: none of everyone's rows is left behind", async () => {
-    const dir = project(files);
+    // models/bad.metrics.yaml cannot be read: its read_api calls may be jobs, so the files of SQL still made stay
+    const dir = project({ ...files, "models/bad.metrics.yaml": "measures: [" });
     const out = path.join(dir, "site", "snapshots");
     mkdirSync(out, { recursive: true });
     const old = new Date(Date.now() - 2 * 3_600_000);
@@ -383,7 +426,7 @@ describe("snapshots in row-level mode", () => {
     try {
       const made = await api.snapshots.make();
       expect(made.map((r) => [r.file, r.ok])).toEqual([["regions.arrows", true]]);
-      // a problem (totals.sql is not made) keeps the files of SQL that is still made (regions' old parameters)
+      // a file that cannot be read keeps the files of SQL that is still made (regions' old parameters)
       expect(readFileSync(path.join(out, snapshotFile("regions", { from: "2020-01-01" })), "utf8")).toBe("old");
       for (const f of ["totals.arrows", "mine.arrows", "regions.arrows.123-456.tmp"]) expect(existsSync(path.join(out, f))).toBe(false);
       for (const f of ["regions.arrows.124-457.tmp", "notes.txt", "regions.arrows"]) expect(existsSync(path.join(out, f))).toBe(true);
@@ -391,11 +434,12 @@ describe("snapshots in row-level mode", () => {
     } finally {
       await api.close();
     }
-    // without problems, every file no job makes goes
-    writeFileSync(path.join(dir, "api", "totals.sql"), "-- access: all\nSELECT region, SUM(amount) AS amount FROM orders GROUP BY region");
+    // SQL left out in row-level mode (totals.sql) leaves no doubt: every file no job makes goes, at the first look
+    // at the jobs (devbi-serve without a schedule, or a host that only answers snapshots/<file>)
+    rmSync(path.join(dir, "models", "bad.metrics.yaml"));
     const again = createApiHandler({ dir, env, snapshotDir: out });
     try {
-      await again.snapshots.catchUp();
+      expect((await again.snapshots.jobs()).map((j) => j.file)).toEqual(["regions.arrows"]);
       expect(existsSync(path.join(out, snapshotFile("regions", { from: "2020-01-01" })))).toBe(false);
       expect(existsSync(path.join(out, "regions.arrows"))).toBe(true);
     } finally {

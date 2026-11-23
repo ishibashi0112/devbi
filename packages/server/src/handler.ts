@@ -218,7 +218,8 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
   const maxRows = options.maxRows ?? 1_000_000;
   const timeoutMs = options.timeoutMs ?? 60_000;
   const userCacheMs = options.userCacheMs ?? 60_000;
-  const log = options.log ?? (() => undefined);
+  // One line each: a database's message, or a user's id (from a header, later), may hold line breaks.
+  const log = (line: string) => options.log?.(logSafe(line));
   const connections = new Map<string, Promise<Connection>>();
   let warnedNoMode = false;
 
@@ -308,7 +309,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       log(`${USER_FILE}: ${detail}`);
       throw new HttpError(500, options.exposeErrors ? `${USER_FILE}: ${detail}` : `${USER_FILE} を実行できませんでした（くわしくはサーバーのログにあります）`);
     }
-    if (result.rows.length > 1) throw new HttpError(500, `${USER_FILE} が利用者 ${id} の行を 2 行以上返しました。1 人につき 1 行（いなければ 0 行）にしてください`);
+    if (result.rows.length > 1) throw new HttpError(500, `${USER_FILE} が利用者 ${logSafe(id)} の行を 2 行以上返しました。1 人につき 1 行（いなければ 0 行）にしてください`);
     try {
       return tableUserOf(
         result.columns.map((c) => c.name),

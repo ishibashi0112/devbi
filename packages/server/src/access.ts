@@ -82,6 +82,8 @@ export function viewerOf(user: DevBIUser | null | undefined): Viewer | undefined
   if (user.attrs !== undefined && user.attrs !== null) {
     if (typeof user.attrs !== "object" || Array.isArray(user.attrs)) throw new TypeError("user.attrs は { 名前: 値 } のオブジェクトで渡してください");
     for (const [name, v] of Object.entries(user.attrs)) {
+      // undefined: not given (`{ region: claims.region }` without the claim), so access/user.sql's value counts.
+      if (v === undefined) continue;
       checkAttrName(name, () => `user.attrs の ${name}`);
       const lower = name.toLowerCase();
       if (attrs.has(lower)) throw new TypeError(`user.attrs に ${name} が 2 つあります（大文字と小文字は区別しません）`);
@@ -126,7 +128,8 @@ export function tableUserOf(columns: string[], row: unknown[] | undefined): Tabl
 
 /**
  * The host's user with what `access/user.sql` says (docs/design 5 章): the id is the host's; a role either gives counts;
- * an attribute is the host's when the host names it (even as null, which means none), otherwise the table's.
+ * an attribute is the host's when the host gives it (even as null, which means none; undefined is not given),
+ * otherwise the table's.
  */
 export function mergeViewer(viewer: Viewer, table: TableUser | undefined): Viewer {
   if (!table) return viewer;
@@ -214,22 +217,37 @@ export function accessLines(text: string, rel: string): AccessLines {
       out.access = "all";
       continue;
     }
-    const w = FIRST_WORD.exec(line);
-    if (!w) continue;
-    const word = w[1]!.toLowerCase();
-    if (word === "roles" || word === "access") {
+    // As a person may type it: full-width letters, colon and spaces (NFKC) read as half-width.
+    const plain = line.normalize("NFKC");
+    if (ROLES_LINE.test(plain) || ACCESS_LINE.test(plain)) {
+      const word = ROLES_LINE.test(plain) ? "roles" : "access";
+      throw new AccessLineError(`${at}: -- ${word}: は半角の英字と : で書いてください（このままでは読みません）`);
+    }
+    const w = FIRST_WORD.exec(plain);
+    const word = w?.[1]!.toLowerCase();
+    // Without the ":" (`-- roles 経理`): a rule that would do nothing. `-- access` alone is a description (`-- Access log`):
+    // a missing `-- access: all` only refuses more, so only `-- access all` is taken for one.
+    if (w && !w[2] && (word === "roles" || (word === "access" && /^\s*--\s*access\s+all(?![A-Za-z0-9_])/i.test(plain)))) {
       const example = word === "roles" ? "-- roles: 経理" : "-- access: all";
       throw new AccessLineError(`${at}: -- ${word} の行は ${example} のように : を付けて書きます（説明の文なら、言い回しを変えてください）`);
     }
-    if (w[2]) {
+    if (w?.[2]) {
       for (const [near, right] of [
         ["roles", "-- roles:"],
         ["access", "-- access:"],
       ] as const) {
-        if (word.slice(0, 2) === near.slice(0, 2) && oneEditAway(word, near)) {
+        if (word!.slice(0, 2) === near.slice(0, 2) && oneEditAway(word!, near)) {
           throw new AccessLineError(`${at}: -- ${w[1]}: は ${right} の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）`);
         }
       }
+    }
+    // `roles:` / `access:` not right after the `--` (`--- roles:`, `-- @roles:`, `-- ※roles:`): not read either.
+    const loose = LATE_LINE.exec(plain);
+    if (loose) {
+      const name = loose[1]!.toLowerCase();
+      throw new AccessLineError(
+        `${at}: ${name}: の行は、${name === "roles" ? "-- roles: 経理" : "-- access: all"} のように -- のすぐあとに書いてください（このままでは読みません。説明の文なら、言い回しを変えてください）`,
+      );
     }
   }
   return out;
@@ -238,8 +256,15 @@ export function accessLines(text: string, rel: string): AccessLines {
 /** Why the project files put it in row-level mode, or undefined: plain text search, not SQL parsing (any doubt → on). */
 export function rowLevelSignal(text: string): string | undefined {
   if (/:user\./i.test(text)) return ":user.";
-  const m = /--[ \t]*(roles|access)(?![A-Za-z0-9_])/i.exec(text);
-  return m ? `-- ${m[1]!.toLowerCase()}` : undefined;
+  // `roles:` / `access:` in a `--` comment, as accessLines reads (or refuses) them: full-width as half-width. Not a
+  // comment that only mentions the word (`-- Access log`), which would put a project without logins in the mode.
+  for (const line of text.split(/\r?\n|\r|\u2028|\u2029/)) {
+    const at = line.indexOf("--");
+    if (at < 0) continue;
+    const m = LATE_LINE.exec(line.slice(at + 2).normalize("NFKC"));
+    if (m) return `-- ${m[1]!.toLowerCase()}:`;
+  }
+  return undefined;
 }
 
 /** A user id (or anything a user sent) as it may go into one log line: control characters as `?`. */

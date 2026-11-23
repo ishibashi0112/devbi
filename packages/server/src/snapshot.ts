@@ -107,6 +107,11 @@ export interface SnapshotJobList {
   problems: string[];
   /** The SQL files whose snapshots are made (a `-- snapshot:` line that is used). Undefined: api/ could not be read. */
   snapshotting?: string[];
+  /**
+   * How many of `problems` are only SQL left out on purpose (row-level mode, no `-- access: all`): what is made is
+   * known all the same. The others leave it unsure (a file that cannot be read may be one with jobs).
+   */
+  leftOut?: number;
 }
 
 /**
@@ -123,6 +128,7 @@ export async function snapshotJobs(
   options: { rowLevel?: boolean } = {},
 ): Promise<SnapshotJobList> {
   const problems: string[] = [];
+  const leftOut: string[] = [];
   const times = new Map<string, string[]>();
   let names: string[];
   try {
@@ -146,7 +152,7 @@ export async function snapshotJobs(
       if (!t) continue;
       // Only SQL that may be a file everyone gets: it parses (no :user., no -- roles:), and says so in row-level mode.
       if (options.rowLevel && parse(name, text).access !== "all") {
-        problems.push(`api/${name}.sql: 行レベルのモードなので、-- access: all のない SQL のスナップショットは作りません`);
+        leftOut.push(`api/${name}.sql: 行レベルのモードなので、-- access: all のない SQL のスナップショットは作りません`);
         continue;
       }
       parse(name, text);
@@ -157,7 +163,8 @@ export async function snapshotJobs(
   }
   const jobs = new Map<string, SnapshotJob>();
   const snapshotting = [...times.keys()];
-  if (times.size === 0) return { jobs: [], problems, snapshotting };
+  const done = (list: SnapshotJob[]): SnapshotJobList => ({ jobs: list, problems: [...leftOut, ...problems], snapshotting, leftOut: leftOut.length });
+  if (times.size === 0) return done([]);
   const add = (name: string, params: Record<string, ApiParamValue>, from: { model?: string; dashboard?: string }) => {
     const t = times.get(name);
     if (!t) return;
@@ -210,7 +217,7 @@ export async function snapshotJobs(
       }
     }
   }
-  return { jobs: [...jobs.values()], problems, snapshotting };
+  return done([...jobs.values()]);
 }
 
 /** A snapshot's file name, and the SQL file it is of: `<name>.arrows` or `<name>~<16 hex>.arrows`. */
@@ -255,6 +262,7 @@ export function createSnapshots(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let reported = "";
+  let swept = false;
 
   const list = async () => {
     const found = await snapshotJobs(dir, options.env, { rowLevel: (await options.rowLevel?.()) ?? false });
@@ -262,6 +270,11 @@ export function createSnapshots(options: {
     const text = found.problems.join("\n");
     if (text && text !== reported) for (const p of found.problems) log(`スナップショット: ${p}`);
     reported = text;
+    // The folder tidied before the first answer, made on a schedule or not (a host that only calls get).
+    if (!swept) {
+      swept = true;
+      await sweep(found);
+    }
     return found;
   };
   const jobs = async () => (await list()).jobs;
@@ -281,6 +294,7 @@ export function createSnapshots(options: {
     }
     const made = new Set(found.jobs.map((j) => j.file));
     const still = new Set(found.snapshotting);
+    const unsure = found.problems.length > (found.leftOut ?? 0);
     for (const f of files) {
       const file = path.join(outDir, f);
       try {
@@ -290,7 +304,7 @@ export function createSnapshots(options: {
         }
         const m = SNAPSHOT_FILE.exec(f);
         if (!m || made.has(f) || making.has(f)) continue;
-        if (found.problems.length && still.has(m[1]!)) continue;
+        if (unsure && still.has(m[1]!)) continue;
         await rm(file, { force: true });
         errors.delete(f);
         rows.delete(f);
@@ -343,6 +357,15 @@ export function createSnapshots(options: {
     }
   };
 
+  /** Whether the SQL file was saved after the snapshot was made: its old rows (and columns) are not what it says now. */
+  const sqlNewer = async (job: SnapshotJob, made: Date) => {
+    try {
+      return (await stat(path.join(dir, "api", `${job.name}.sql`))).mtime > made;
+    } catch {
+      return false;
+    }
+  };
+
   const catchUp = async (now = new Date()) => {
     if (!outDir) return [];
     const found = await list();
@@ -351,7 +374,7 @@ export function createSnapshots(options: {
     for (const job of found.jobs) {
       const due = lastDue(job.times, now);
       const made = await mtime(job.file);
-      if (!made || (due && made < due)) results.push(await save(job));
+      if (!made || (due && made < due) || (await sqlNewer(job, made))) results.push(await save(job));
     }
     return results;
   };
@@ -384,7 +407,8 @@ export function createSnapshots(options: {
         const result = await run(job.name, job.params);
         return { at: new Date(), rows: result.rows, bytes: result.bytes };
       }
-      if (!(await mtime(file))) {
+      const made = await mtime(file);
+      if (!made || (await sqlNewer(job, made))) {
         const result = await save(job);
         if (!result.ok) throw new DatasetError(`スナップショット ${file} を作れませんでした: ${result.error}`, result.status ?? 500);
       }
