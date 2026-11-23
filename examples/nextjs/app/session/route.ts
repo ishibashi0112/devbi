@@ -6,7 +6,12 @@ export async function POST(request: Request): Promise<Response> {
   // Only this app's own pages may sign someone in or out (a form on another site cannot).
   const site = request.headers.get("sec-fetch-site");
   if (site !== null && site !== "same-origin") return Response.json({ error: "このページからはログインできません" }, { status: 403 });
-  const form = await request.formData();
+  let form: FormData;
+  try {
+    form = await request.formData();
+  } catch {
+    return Response.json({ error: "フォームで送ってください" }, { status: 400 });
+  }
   const person = form.get("person");
   let cookie: string;
   if (form.get("action") === "sign-out") {

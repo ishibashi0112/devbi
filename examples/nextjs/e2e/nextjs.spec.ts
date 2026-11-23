@@ -83,6 +83,10 @@ test("the route answers like devbi-serve: the SQL files, Japanese errors, and on
 // with the user of the app's session (lib/session.ts), and requireUser.
 test("「担当の売上」 shows each person who signs in only their own region's orders", async ({ page }) => {
   const { errors } = watch(page);
+  const requests: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/devbi-rls/") && !r.url().endsWith(".js") && !r.url().includes("/assets/")) requests.push(`${r.method()} ${new URL(r.url()).pathname}`);
+  });
   await page.goto("/");
   await page.getByRole("link", { name: "担当の売上（ログイン）" }).click();
   await expect(page.getByRole("button", { name: "山田（関東の担当）としてログイン" })).toBeVisible();
@@ -95,6 +99,7 @@ test("「担当の売上」 shows each person who signs in only their own region
   // region_totals (-- access: all) shows every region to everyone
   await expect(tile(page, "all-regions")).toContainText("中国・四国");
   await expect(tile(page, "all-regions")).toContainText("¥8,568,450");
+  expect([...new Set(requests)]).toEqual(["POST /devbi-rls/api/query"]);
 
   // Another person: a whole new page (the form's 303), with no rows of the one before.
   await page.getByRole("button", { name: "ログアウト" }).click();
@@ -102,6 +107,13 @@ test("「担当の売上」 shows each person who signs in only their own region
   await expect(kpi(page, "kpi-revenue")).toHaveText("¥42,290,840");
   await expect(tile(page, "region").locator("li")).toHaveCount(1);
   await expect(tile(page, "region").locator("li")).toContainText("近畿");
+
+  // 田中 is not in access/user.sql: the region is the one the app's session gives.
+  await page.getByRole("button", { name: "ログアウト" }).click();
+  await page.getByRole("button", { name: "田中（中部の担当）としてログイン" }).click();
+  await expect(kpi(page, "kpi-revenue")).toHaveText("¥33,850,780");
+  await expect(tile(page, "region").locator("li")).toHaveCount(1);
+  await expect(tile(page, "region").locator("li")).toContainText("中部");
   expect(errors).toEqual([]);
 });
 
@@ -115,12 +127,21 @@ test("「担当の売上」 refuses who has no region (403), and anyone without 
   // A cookie the server did not sign is nobody's.
   const forged = await request.get("/devbi-rls/api/schema", { headers: { Cookie: "portal_session=yamada.AAAA" } });
   expect(forged.status()).toBe(401);
-  // A form on another site cannot sign anyone in.
+  // A form on another site cannot sign anyone in; a POST that is not a form is not one.
   const crossSite = await request.post("/session", { form: { person: "yamada" }, headers: { "Sec-Fetch-Site": "cross-site" }, maxRedirects: 0 });
   expect(crossSite.status()).toBe(403);
+  expect((await request.post("/session", { data: { person: "yamada" }, maxRedirects: 0 })).status()).toBe(400);
 
   const signIn = await request.post("/session", { form: { person: "yamada" }, maxRedirects: 0 });
   expect([signIn.status(), signIn.headers()["location"]]).toEqual([303, "/my"]);
+  // yamada's signature does not make another person
+  const mac = /portal_session=yamada\.([^;]+)/.exec(signIn.headers()["set-cookie"] ?? "")?.[1];
+  expect(mac).toBeTruthy();
+  // (fetch: this request context now holds yamada's own cookie)
+  const swapped = await fetch(new URL("/devbi-rls/api/schema", test.info().project.use.baseURL), { headers: { Cookie: `portal_session=suzuki.${mac}` } });
+  expect(swapped.status).toBe(401);
+  // the same host names only, as the other route
+  expect((await request.get("/devbi-rls/api/schema", { headers: { Host: "elsewhere.example" } })).status()).toBe(403);
   const schema = await (await request.get("/devbi-rls/api/schema")).json();
   expect(schema.datasets.map((d: { name: string }) => d.name)).toEqual(["orders", "region_totals"]);
   expect([schema.access, schema.user]).toEqual([1, { id: "CORP\\yamada" }]);

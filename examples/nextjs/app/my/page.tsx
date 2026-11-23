@@ -32,7 +32,8 @@ export default async function Page() {
           ログアウト
         </button>
       </form>
-      <DevbiDashboard name="my-sales" script="/devbi-rls/devbi-embed.js" />
+      {/* api: the project's api/ is not next to the script (its build puts it under e2e/rls/, the folder in Vite's root) */}
+      <DevbiDashboard name="my-sales" script="/devbi-rls/devbi-embed.js" api="/devbi-rls/api/" />
     </>
   );
 }

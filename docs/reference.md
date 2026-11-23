@@ -1792,9 +1792,9 @@ async function answer(request: Request): Promise<Response> {
 ```
 
 - 利用者は、サーバーが確かめたセッションから作ります。ブラウザが送る値（パラメーター、ヘッダー、署名のない Cookie）から作ってはいけません。ログインしていなければ `null` を渡すと、`401` と「ログインしていません（`signInHint`）」が返ります。
-- 見本の `examples/nextjs` の「担当の売上」（`/my`）がこの形です。ログインは、パスワードなしで人を選ぶだけの見本のもの（`lib/session.ts`。サーバーが署名した Cookie）で、本物のアプリではアプリのログインに置き換えます。ダッシュボードは `examples/sales/e2e/rls`（`api/orders.sql` が `:user.region` で絞る）のビルドを `public/devbi-rls/` に写したもの、API は `app/devbi-rls/[...path]/route.ts` と `lib/devbi.ts` の `devbiRls`（`requireUser: true`）です。1 つのアプリに、行レベル制御を使うプロジェクトと使わないプロジェクトを並べるときは、このように別の handler と別の場所にします。
+- 見本の `examples/nextjs` の「担当の売上」（`/my`）がこの形です。ログインは、パスワードなしで人を選ぶだけの見本のもの（`lib/session.ts`。サーバーが署名した Cookie。期限も取り消しもないので、アプリには写しません）で、本物のアプリではアプリのログインに置き換えます。ダッシュボードの API の場所は `mount` の `apiUrl`（`/devbi-rls/api/`）で渡しています（`e2e/rls` は Vite の root の下のフォルダなので、ビルドの中では `api/` が `devbi-embed.js` の隣ではなく `e2e/rls/api/` になるため）。ダッシュボードは `examples/sales/e2e/rls`（`api/orders.sql` が `:user.region` で絞る）のビルドを `public/devbi-rls/` に写したもの、API は `app/devbi-rls/[...path]/route.ts` と `lib/devbi.ts` の `devbiRls`（`requireUser: true`）です。1 つのアプリに、行レベル制御を使うプロジェクトと使わないプロジェクトを並べるときは、このように別の handler と別の場所にします。
 - ログアウトしたときと、別の人でログインしたときは、ページを読み込み直します（見本は、ふつうのフォームの POST に `303` で答えて、新しいページにする）。`Link` で移るだけだと、前の人の行がページの中に残ります。
-- `public/devbi/` のファイル（`data/` の Excel や CSV）は、route を通らず、ログインした人のだれにでも同じものが配られます。人で絞る行は、`data/` に置かず、`api/*.sql` から読みます。スナップショットも、行レベルのモードでは `-- access: all` の SQL のものだけです。
+- `public/devbi/` のファイル（`data/` の Excel や CSV）は、route を通らず、URL を知っていればだれにでも同じものが配られます（`proxy.ts` で守らなければ、ログインしていない人にも）。人で絞る行は、`data/` に置かず、`api/*.sql` から読みます。スナップショットも、行レベルのモードでは `-- access: all` の SQL のものだけです。
 
 ## ほかのアプリの画面に埋め込む
 

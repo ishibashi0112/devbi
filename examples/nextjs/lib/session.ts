@@ -1,6 +1,9 @@
 // The app's sign-in, as simple as an example can be: pick a person (no password), and the server keeps who in a
 // signed cookie. In your app this is its real sign-in (Auth.js, Entra ID, the company's SSO): what DevBI needs is
 // only the user each request is from, made on the server (app/devbi-rls/[...path]/route.ts).
+// Do not copy this sign-in into an app: its cookie never expires and cannot be revoked (signing out only deletes the
+// browser's copy), the secret made at start does not work with several servers, and browsers that send no
+// Sec-Fetch-Site are not checked for forms on other sites (app/session/route.ts).
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import type { DevBIUser } from "@devbi/server";
@@ -9,6 +12,8 @@ import type { DevBIUser } from "@devbi/server";
 export const people: Record<string, { name: string; user: DevBIUser }> = {
   yamada: { name: "山田（関東の担当）", user: { id: "CORP\\yamada", roles: ["営業"], attrs: { region: "関東" } } },
   suzuki: { name: "鈴木（近畿の担当）", user: { id: "CORP\\suzuki", roles: ["営業"], attrs: { region: "近畿" } } },
+  // Not in access/user.sql (examples/sales/e2e/rls): the region is the app's alone.
+  tanaka: { name: "田中（中部の担当）", user: { id: "CORP\\tanaka", roles: ["営業"], attrs: { region: "中部" } } },
   // No region: api/orders.sql answers 403 (whom to show which rows is not known), rather than every row.
   sato: { name: "佐藤（担当の地域なし）", user: { id: "CORP\\sato", roles: ["営業"] } },
 };
