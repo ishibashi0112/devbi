@@ -20,24 +20,41 @@ import {
   type FieldInfo,
   type Filter,
   type MetricsView,
+  type ParamValue,
   type Query,
   type ResultColumn,
   type Row,
 } from "devbi";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ApiOptions, Engine } from "./engine.js";
+import { loadChunk } from "./chunk.js";
+import type { DatasetResult } from "./dataset.js";
 import { createEngine } from "./load-engine.js";
+import { DashboardParams, ParamsNeeded, ParamsWaiting } from "./param-store.js";
 import type { Project } from "./project.js";
 import { DashboardSelection } from "./selection.js";
 
 export interface DevbiContextValue {
   project: Project;
   dashboard: Dashboard & { path: string };
-  engine: Promise<Engine>;
+  /**
+   * The page's DuckDB engine (for the metrics files). Started the first time it is asked for: a dashboard whose tiles
+   * read only datasets never loads DuckDB-wasm.
+   */
+  readonly engine: Promise<Engine>;
   selection: DashboardSelection;
+  /** The dashboard's parameters (the bar above the tiles) and their values. */
+  params: DashboardParams;
+  /** The rows of a dataset (`api/<name>.sql`) with these parameter values: the last few are kept until 更新. */
+  readDataset(name: string, params: Record<string, ParamValue>): Promise<DatasetResult>;
+  /** 更新: read the datasets again (the tiles and the choices). */
+  refresh(): void;
   /** The metrics view a query uses (its own `metrics`, else the dashboard's, else the only one). */
   view(name?: string): MetricsView;
 }
+
+/** How many dataset results a dashboard keeps (a result may be a million rows). */
+const KEPT_RESULTS = 5;
 
 const Ctx = createContext<DevbiContextValue | null>(null);
 
@@ -77,15 +94,27 @@ function forDashboard(engine: Engine, project: Project): Engine {
   };
 }
 
+/** The API's folder for a project (`<apiUrl>query`), absolute. */
+function apiFolder(project: Project): { apiUrl: string; baseUrl: string } {
+  const base = new URL(project.baseUrl ?? "./", document.baseURI);
+  // A folder: "/reports/api" means "/reports/api/".
+  return { apiUrl: new URL((project.apiUrl ?? "api/").replace(/([^/])$/, "$1/"), base).href, baseUrl: base.href };
+}
+
 export function DevbiProvider({
   project,
   dashboard,
+  params,
   children,
 }: {
   project: Project;
   dashboard: Dashboard & { path: string };
+  /** The parameters' first values (the URL's, the embed's, React's `params`), checked against their types. */
+  params?: Record<string, ParamValue>;
   children: ReactNode;
 }) {
+  // Only the first values: later ones go to the store (Dashboard's effect), not into a new store.
+  const first = useRef(params);
   const value = useMemo<DevbiContextValue>(() => {
     const selection = new DashboardSelection();
     const view = (name?: string) => {
@@ -95,8 +124,52 @@ export function DevbiProvider({
       if (!v) throw new Error(`指標ファイル models/${n}.metrics.yaml がありません`);
       return v;
     };
-    return { project, dashboard, engine: getEngine(project).then((e) => forDashboard(e, project)), selection, view };
+    let engine: Promise<Engine> | undefined;
+    const results = new Map<string, Promise<DatasetResult>>();
+    const readDataset = (name: string, values: Record<string, ParamValue>): Promise<DatasetResult> => {
+      const k = JSON.stringify([name, values]);
+      let p = results.get(k);
+      if (p) {
+        // the most recent last
+        results.delete(k);
+        results.set(k, p);
+        return p;
+      }
+      const info = Object.hasOwn(project.datasets, name) ? project.datasets[name] : undefined;
+      p = loadChunk(() => import("./dataset.js")).then((m) =>
+        m.readDataset({
+          name,
+          params: values,
+          ...apiFolder(project),
+          fetch: project.fetch ?? fetch.bind(globalThis),
+          ...(info?.key ? { key: info.key } : {}),
+        }),
+      );
+      results.set(k, p);
+      p.catch(() => results.delete(k));
+      while (results.size > KEPT_RESULTS) results.delete(results.keys().next().value!);
+      return p;
+    };
+    const store = new DashboardParams(dashboard, project.datasets, readDataset, first.current ?? {});
+    return {
+      project,
+      dashboard,
+      get engine() {
+        return (engine ??= getEngine(project).then((e) => forDashboard(e, project)));
+      },
+      selection,
+      params: store,
+      readDataset,
+      refresh() {
+        results.clear();
+        store.refresh();
+      },
+      view,
+    };
   }, [project, dashboard]);
+  // The choices (and `default=all`) are read once the dashboard is on the page, with or without the bar (the GUI
+  // editor's preview has none).
+  useEffect(() => value.params.start(), [value]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
@@ -110,6 +183,29 @@ export function useDevbi(): DevbiContextValue {
 export function useSelectionVersion(): number {
   const { selection } = useDevbi();
   return useSyncExternalStore(selection.subscribe, selection.getVersion, selection.getVersion);
+}
+
+/** Re-render when a parameter's value or choices change. */
+export function useParamsVersion(): number {
+  const { params } = useDevbi();
+  return useSyncExternalStore(params.subscribe, params.getVersion, params.getVersion);
+}
+
+/** The dataset a query reads: its info, or an error that names the missing file. */
+function datasetOf(ctx: DevbiContextValue, name: string) {
+  const info = Object.hasOwn(ctx.project.datasets, name) ? ctx.project.datasets[name] : undefined;
+  if (!info) throw new QueryError(`データセット ${name} がありません（api/${name}.sql）`);
+  return info;
+}
+
+/** The rows of a dataset tile, with the dashboard's parameters. */
+async function runDataset(ctx: DevbiContextValue, query: Query): Promise<{ rows: Row[]; fields: FieldInfo[] }> {
+  const info = datasetOf(ctx, query.dataset!);
+  const req = ctx.params.request(query, info);
+  if ("missing" in req) throw new ParamsNeeded(req.missing);
+  if ("waiting" in req) throw new ParamsWaiting();
+  const { rows, fields } = await ctx.readDataset(query.dataset!, req.params);
+  return { rows, fields };
 }
 
 export interface QueryState {
@@ -128,6 +224,7 @@ function viewFields(view: MetricsView): Set<string> {
 
 /** The metrics views a query reads: its own (or the dashboard's); for Malloy or SQL, the ones it names. */
 function viewsOfQuery(ctx: DevbiContextValue, query: Query): MetricsView[] {
+  if (query.dataset !== undefined) return [];
   if (!customQuery(query)) return [ctx.view(query.metrics)];
   return customViews(query, Object.keys(ctx.project.metrics)).map((n) => ctx.project.metrics[n]!);
 }
@@ -137,6 +234,8 @@ function viewsOfQuery(ctx: DevbiContextValue, query: Query): MetricsView[] {
  * or SQL, its `metrics` or the only view it reads (none when it reads two or more without `metrics`).
  */
 export function queryView(ctx: DevbiContextValue, query: Query | null | undefined): MetricsView | undefined {
+  // A dataset's columns are its own (no metrics file's labels or formats).
+  if (query?.dataset !== undefined) return undefined;
   try {
     if (!customQuery(query)) return ctx.view(query?.metrics);
     const main = customMainView(query!, customViews(query!, Object.keys(ctx.project.metrics)));
@@ -170,6 +269,7 @@ export function crossFilters(ctx: DevbiContextValue, query: Query, tileId: strin
 
 /** Run a query on the dashboard's data with these filters (from {@link crossFilters}) besides its own. */
 export async function runQuery(ctx: DevbiContextValue, query: Query, filters: Filter[]): Promise<{ rows: Row[]; fields: FieldInfo[] }> {
+  if (query.dataset !== undefined) return runDataset(ctx, query);
   if (customQuery(query)) return runCustom(ctx, query, filters);
   const view = ctx.view(query.metrics);
   const engine = await ctx.engine;
@@ -263,7 +363,18 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [version, tileId, crossfilter, hasQuery, query?.metrics, query?.period, query?.malloy, query?.sql, ctx],
   );
-  const key = JSON.stringify([query ?? null, filters]);
+  // A dataset tile: what it sends with the parameters' values now (and 更新).
+  const paramsVersion = useParamsVersion();
+  const request = useMemo(() => {
+    if (query?.dataset === undefined) return null;
+    try {
+      return [ctx.params.request(query, datasetOf(ctx, query.dataset)), ctx.params.refreshes];
+    } catch (e) {
+      return (e as Error).message;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsVersion, query?.dataset, query?.params, ctx]);
+  const key = JSON.stringify([query ?? null, filters, request]);
   const [state, setState] = useState<QueryState>({ rows: [], fields: [], filters: [], loading: !!query, error: null });
   const seq = useRef(0);
   useEffect(() => {
@@ -279,7 +390,11 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
         if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null });
       },
       (e: unknown) => {
-        if (seq.current === mine) setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
+        if (seq.current !== mine) return;
+        // Waiting for the choices (default=all): still loading. Parameters to fill in: no rows (the tile says which).
+        if (e instanceof ParamsWaiting) return;
+        if (e instanceof ParamsNeeded) setState({ rows: [], fields: [], filters, loading: false, error: e });
+        else setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
       },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps

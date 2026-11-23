@@ -36,8 +36,20 @@ export function optionsFromAttributes(el: Element): MountOptions {
   const api = el.getAttribute("data-devbi-api");
   const name = el.getAttribute("data-devbi");
   const exports = el.getAttribute("data-devbi-exports");
+  const params = el.getAttribute("data-devbi-params");
+  let values: Record<string, unknown> | undefined;
+  if (params) {
+    try {
+      const parsed: unknown = JSON.parse(params);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) values = parsed as Record<string, unknown>;
+      else throw new Error("{ … } ではありません");
+    } catch (e) {
+      console.error(`DevBI: data-devbi-params を JSON（{"customer": 1024} の形）として読めません: ${(e as Error).message}`);
+    }
+  }
   return {
     ...(name ? { dashboard: name } : {}),
+    ...(values ? { params: values } : {}),
     ...(api ? { apiUrl: api } : {}),
     ...(THEMES.includes(theme) ? { theme: theme as Theme } : {}),
     ...(exports === "false" ? { exports: false } : {}),

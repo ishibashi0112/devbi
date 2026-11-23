@@ -1,17 +1,20 @@
-import type { TileSpec } from "devbi";
+import { checkParamValues, dashboardParams, datasetTiles, paramsFromSearch, paramsToSearch, type ParamValue, type TileSpec } from "devbi";
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { DevbiProvider, fieldInfo, useDevbi, useSelectionVersion } from "./context.js";
+import { DevbiProvider, fieldInfo, useDevbi, useParamsVersion, useSelectionVersion } from "./context.js";
 import { describeFilter, snapshotText } from "./describe.js";
 import type { DevServer, EditorModule, SavedDashboard } from "./dev.js";
 import type { SnapshotInfo } from "./engine.js";
 import { ExportButtons } from "./ExportButtons.js";
 import { formatTimesOfDay, loadProject, snapshotTimesOf, viewsOf, type Project, type ProjectInput } from "./project.js";
+import { ParamBar } from "./ParamBar.js";
 import { injectStyles } from "./styles.js";
 import { TileFrame } from "./TileFrame.js";
 
 function ActiveFilters() {
   const ctx = useDevbi();
   useSelectionVersion();
+  // Dataset tiles take no part in the selections: a dashboard of only those (and text) has none to show.
+  if (ctx.dashboard.tiles.every((t) => t.query?.dataset !== undefined || t.type === "markdown")) return null;
   const entries = ctx.selection.entries();
   let view: ReturnType<typeof ctx.view> | undefined;
   try {
@@ -56,8 +59,11 @@ function SnapshotNote() {
   const [info, setInfo] = useState<SnapshotInfo[]>([]);
   useEffect(() => {
     let alive = true;
+    const views = viewsOf(ctx.project, ctx.dashboard);
+    // Only a dashboard with metrics files starts the engine (DuckDB-wasm).
+    if (!views.length || !Object.keys(ctx.project.snapshots).length) return;
     void ctx.engine
-      .then((engine) => Promise.all(viewsOf(ctx.project, ctx.dashboard).map((v) => engine.snapshotsOf(v))))
+      .then((engine) => Promise.all(views.map((v) => engine.snapshotsOf(v))))
       .then(
         (all) => alive && setInfo(all.flat()),
         () => undefined, // the tiles show the error
@@ -73,6 +79,70 @@ function SnapshotNote() {
       {text}
     </p>
   );
+}
+
+/** 更新: read the datasets again (a dashboard with dataset tiles). */
+function RefreshButton() {
+  const ctx = useDevbi();
+  return (
+    <button type="button" className="devbi-button" title="データベースから読み直す" onClick={() => ctx.refresh()}>
+      更新
+    </button>
+  );
+}
+
+/**
+ * Keeps the parameters in step with the outside: values given later (React's `params`, the address bar), the
+ * `onParamsChange` callback, and the address (DevbiApp: `#/<name>?from=…`, values that are not their default).
+ */
+function ParamsSync({
+  given,
+  onChange,
+  url,
+}: {
+  given: Record<string, ParamValue> | undefined;
+  onChange: ((values: Record<string, ParamValue>) => void) | undefined;
+  url: string | undefined;
+}) {
+  const { params: store } = useDevbi();
+  const version = useParamsVersion();
+  const givenKey = JSON.stringify(given ?? null);
+  const firstGiven = useRef(givenKey);
+  useEffect(() => {
+    if (givenKey === firstGiven.current) return; // the store started with them
+    firstGiven.current = givenKey;
+    if (given) store.setValues(given);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [givenKey, store]);
+  // Another address typed in (or 戻る): its values.
+  useEffect(() => {
+    if (url === undefined) return;
+    const on = () => {
+      const [path = "", search = ""] = location.hash.replace(/^#\/?/, "").split("?");
+      if (decodeURIComponent(path) !== url && path !== "") return;
+      const problems: string[] = [];
+      store.setValues(paramsFromSearch(store.list, search, problems));
+      for (const p of problems) console.warn(`DevBI: ${p}`);
+    };
+    addEventListener("hashchange", on);
+    return () => removeEventListener("hashchange", on);
+  }, [url, store]);
+  const values = JSON.stringify(store.values());
+  const last = useRef<string | undefined>(undefined);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => {
+    if (values === last.current) return;
+    last.current = values;
+    onChangeRef.current?.(JSON.parse(values) as Record<string, ParamValue>);
+    if (url !== undefined && store.list.length) {
+      const search = paramsToSearch(store.list, store.changedValues());
+      const hash = `#/${encodeURIComponent(url)}${search ? `?${search}` : ""}`;
+      // Not a new history entry for each value (戻る goes to the page before), and no hashchange.
+      if (location.hash !== hash) history.replaceState(history.state, "", hash);
+    }
+  }, [values, version, url, store]);
+  return null;
 }
 
 function tileStyle(t: TileSpec, rowHeight: number): CSSProperties {
@@ -130,6 +200,9 @@ export function Dashboard({
   isolate,
   exports = true,
   actions,
+  params,
+  onParamsChange,
+  paramsInUrl,
 }: {
   project: Project;
   name: string;
@@ -140,6 +213,16 @@ export function Dashboard({
   exports?: boolean;
   /** Buttons at the end of the heading (DevbiApp's 編集 on the dev server). */
   actions?: ReactNode;
+  /**
+   * Values of the dashboard's parameters (the bar above the tiles), such as the customer chosen in the app around it:
+   * `{ customer: 1024, regions: ["関東"] }`. Changing them later sets them again. Values are not permissions: the
+   * person can change them (rows a person may see are decided on the server, by `:user.*`).
+   */
+  params?: Record<string, unknown>;
+  /** Called with every parameter's value when one changes (and once they are first known). */
+  onParamsChange?: (values: Record<string, ParamValue>) => void;
+  /** The parameters' values are in the address (`#/<name>?from=2026-04-01`): DevbiApp's. */
+  paramsInUrl?: boolean;
 }) {
   useInsertionEffect(injectStyles, []);
   // The element printed (印刷・PDF), and narrow layout by its width.
@@ -154,6 +237,26 @@ export function Dashboard({
   }, []);
   const root = { ...themeAttribute(theme), ...(isolate ? { "data-devbi-isolate": "" } : {}) };
   const dashboard = Object.hasOwn(project.dashboards, name) ? project.dashboards[name] : undefined;
+  // The values given (the address first, then `params`), checked against the parameters' types.
+  const paramsKey = JSON.stringify(params ?? null);
+  const checked = useMemo(() => {
+    if (!dashboard) return undefined;
+    const list = dashboardParams(dashboard, project.datasets).params;
+    if (!list.length) return undefined;
+    const { values, problems } = checkParamValues(list, (params ?? {}) as Record<string, unknown>);
+    for (const p of problems) console.warn(`DevBI: ${p}`);
+    return { list, values };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboard, project, paramsKey]);
+  const [fromUrl] = useState(() => {
+    if (!paramsInUrl || !checked || typeof location === "undefined") return {};
+    const problems: string[] = [];
+    const values = paramsFromSearch(checked.list, location.hash.split("?")[1] ?? "", problems);
+    for (const p of problems) console.warn(`DevBI: ${p}`);
+    return values;
+  });
+  const [given] = useState(() => ({ ...fromUrl, ...checked?.values }));
+  const givenLater = checked?.values;
   if (!dashboard) {
     const names = Object.keys(project.dashboards).sort();
     return (
@@ -163,8 +266,10 @@ export function Dashboard({
     );
   }
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
+  const readsDatasets = datasetTiles(dashboard.tiles).length > 0;
   return (
-    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard}>
+    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard} params={given}>
+      <ParamsSync given={givenLater} onChange={onParamsChange} url={paramsInUrl ? name : undefined} />
       <div className="devbi-root" ref={rootRef} {...root}>
         <div className="devbi-dashboard">
           {back && (
@@ -176,13 +281,15 @@ export function Dashboard({
             <h1>{dashboard.title}</h1>
             {dashboard.description && <p>{dashboard.description}</p>}
             <SnapshotNote />
-            {(exports || actions) && (
+            {(exports || actions || readsDatasets) && (
               <div className="devbi-actions">
+                {readsDatasets && <RefreshButton />}
                 {exports && <ExportButtons root={rootEl} />}
                 {actions}
               </div>
             )}
           </div>
+          <ParamBar />
           <ActiveFilters />
           <div
             className="devbi-grid"
@@ -282,7 +389,7 @@ export function DevbiApp({
   // The editor opens again after a reload only on the dashboard it was editing (not if the address changed since).
   const [editing, setEditingState] = useState<string | null>(() => {
     const name = dev ? readEditing() : null;
-    const here = typeof location === "undefined" ? "" : decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+    const here = typeof location === "undefined" ? "" : decodeURIComponent(location.hash.replace(/^#\/?/, "").split("?")[0]!);
     if (name !== null && here !== name && (here !== "" || Object.keys(input.dashboards).length !== 1)) {
       writeEditing(null);
       return null;
@@ -304,7 +411,8 @@ export function DevbiApp({
   }
   const project = loaded.project;
   const names = Object.keys(project.dashboards).sort();
-  const current = decodeURIComponent(hash.replace(/^#\/?/, ""));
+  // `#/<name>?from=…`: the dashboard, and its parameters' values (read by the Dashboard).
+  const current = decodeURIComponent(hash.replace(/^#\/?/, "").split("?")[0]!);
   const shown = current && Object.hasOwn(project.dashboards, current) ? current : names.length === 1 ? names[0]! : null;
 
   if (dev && creating) {
@@ -358,6 +466,7 @@ export function DevbiApp({
         theme={theme}
         exports={exports}
         actions={actions || undefined}
+        paramsInUrl
         {...(names.length > 1 ? { back: "#/" } : {})}
       />
     );

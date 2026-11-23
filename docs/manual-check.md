@@ -33,6 +33,7 @@ pnpm example:dev
 | 売上・件数・前年比などの計算の定義 | 利用者が YAML で書く。SQL への変換と集計は DevBI | `models/sales.metrics.yaml` |
 | 「明細を自由に集計」のダッシュボードの「明細」（行・列・集計を見る人が選ぶ表とグラフ） | DevBI の組み込みタイル `explore`。中身は [Perspective](https://perspective.finos.org/)（オープンソース、Apache-2.0）で、DevBI は明細の行を期間と選択で絞って渡す | `dashboards/sales-explore.dash.json` |
 | 「Malloy と SQL で集計」のダッシュボードの各タイル（指標と軸の名前では言えない集計） | 利用者が Malloy か SQL で書く。[Malloy](https://www.malloydata.dev/)（オープンソース、MIT）から SQL への変換、明細の行を期間と選択で絞ること、列の名前を指標ファイルの名前・書式にそろえること、描画は DevBI | `dashboards/sales-malloy.dash.json` |
+| 「受注明細レポート」（SQL の結果をそのまま表に、見出しの下にパラメーターの欄） | 利用者が SQL（`api/order_lines.sql`）と、その先頭の `-- param:` の行を書く。欄、値を変えたときの読み直し、表、URL への値の読み書きは DevBI。集計はしない（DuckDB-wasm を読まない） | `dashboards/sales-report.dash.json` |
 | 「上位顧客（自作タイル）」 | **自作**。React で 60 行ほど。データの取得と絞り込みは DevBI が渡す | `dashboards/sales/TopCustomers.tsx` |
 | アプリの入口 | `<DevbiApp>` を置くだけ（10 行） | `src/main.tsx`、`src/app.css` |
 
@@ -137,7 +138,7 @@ pnpm example:dev
 | 35 | `pnpm example:serve` を実行して <http://localhost:8080/embed-demo.html> を開く | 紺色のヘッダーと左のメニューの中に「売上ダッシュボード（DB から）」が出る。ページの見出し「売上の集計」は赤のまま、ダッシュボードの中の見出しやタイルの見出しは DevBI の見た目のまま（ページの CSS が入り込まない） |
 | 36 | OS（またはブラウザ）をダークモードにして開き直す | ダッシュボードは明るいまま（`data-devbi-theme="light"`）。同じ状態で <http://localhost:8080/#/sales-db> を開くと、こちらはダークになる |
 | 37 | 「レポート」で「売上ダッシュボード」を選ぶ | 同じ場所が Excel 版のダッシュボードに切り替わり、「上位顧客（自作タイル）」も出る（ページの JavaScript が `mount()` を呼んでいる） |
-| 38 | 開発者ツールのコンソールで `DevBI.dashboards` と打つ | `sales`、`sales-daily`、`sales-db`、`sales-explore`、`sales-malloy` の 5 つが、タイトルつきで出る |
+| 38 | 開発者ツールのコンソールで `DevBI.dashboards` と打つ | `sales`、`sales-daily`、`sales-db`、`sales-explore`、`sales-malloy`、`sales-report` の 6 つが、タイトルつきで出る |
 | 39 | 開発者ツールの「ネットワーク」で `devbi-embed.js` を見る | 4KB ほど。残りは `assets/` のファイルを読んでいる（`_` で始まるファイルはない） |
 | 40 | ブラウザの窓を 900px くらいまで狭くする | 左のメニューのぶん、ダッシュボードの幅は 720px より狭くなり、タイルが 1 列に並ぶ（窓はスマートフォンより広いまま） |
 | 41 | 「地域別売上」の地域を 1 つクリックしてから、コンソールで `DevBI.mount("#report-area", { theme: "dark" })` | ダッシュボードがダークになり、上の絞り込みのチップは残る |
@@ -378,6 +379,25 @@ curl -s -X POST -H "Content-Type: application/json" -d '{"name":"order_lines","p
 | 154 | `order_lines.sql` の `-- param: to date` を `-- param: to day` に変えて保存し、<http://localhost:8080/api/schema> を開く。150 のコマンドも実行する | `order_lines` は `error` だけになり「api/order_lines.sql（4 行目）: 型 day は使えません。text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）」。curl も `400`。`date` に戻すと直る |
 
 ASP.NET（C#）の見本（55）でも、アドレスを `http://127.0.0.1:4179/api/query` にして 150〜153 が同じ結果になります。Next.js の見本（61）では `http://127.0.0.1:3000/devbi/api/query` です。SQL Server・Oracle・MySQL（50〜53）でも同じ行数です。
+
+### レポート（パラメーターの欄と SQL の結果の表）
+
+「受注明細レポート」（`examples/sales/dashboards/sales-report.dash.json`）は、`api/order_lines.sql` の結果をそのまま表に出します。見出しの下の欄は、SQL の `-- param:` の行から作られます（書き方は[リファレンス](reference.md#レポートパラメーターの欄とsql-の結果の表)）。`pnpm example:serve` を動かして、<http://localhost:8080/#/sales-report> を開きます。行数は、ターミナルの `api/order_lines.sql: … 行` の行で見ます。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 155 | 開く | 見出しの下に「受注日（から）」（今年度の始まり。2027 年 3 月までは 2026/04/01）、「受注日（まで）」（空）、「地域」（「すべて（6）」）の 3 つの欄。表は 2026/4/1 からの明細で、`1,532 行` |
+| 156 | 開発者ツールの「ネットワーク」を見る | `query` は 2 つだけ: `{"name":"regions","params":{}}`（地域の候補）と、`{"name":"order_lines","params":{"from":"2026-04-01","to":null,"regions":[…6 つ]}}`。`duckdb` や `.wasm` のファイルは読んでいない |
+| 157 | 「地域」を押し、「すべて外す」を押して「関東」にチェックし、欄の外を押す | 欄が「関東」になり、表を読み直す（`595 行`）。アドレスが `#/sales-report?regions=…`（関東）になる |
+| 158 | 「受注日（から）」を 2024/04/01、「受注日（まで）」を 2024/04/30 にし、「地域」で「近畿」にもチェックする | `95 行`。アドレスは `from=2024-04-01&to=2024-04-30&regions=近畿&regions=関東`。このアドレスを新しいタブで開くと、同じ値の欄と表で開く |
+| 159 | 「Excel」を押す | 「受注明細」のシートの 2 行目が「パラメーター: 受注日（から） 2024-04-01、受注日（まで） 2024-04-30、地域 近畿・関東」。「概要」のシートにも同じ値の行。受注日の列は Excel の日付 |
+| 160 | 「更新」を押す | 同じ値でもう一度読む（ターミナルに `95 行` がもう 1 行）。「地域」を一度「関東」だけにしてから戻したときは、読み直さない（覚えている） |
+| 161 | 「受注日（から）」を消して、欄の外を押す | 表に「受注日（から）を入れてください」と出て、`query` は増えない。日付を入れると戻る |
+| 162 | アドレスの `from=2024-04-01` を `from=2024/04/01` にして開き直す | 「受注日（から）」は今年度の始まりで開く。コンソールに「アドレスのパラメーター from の値 "2024/04/01" は日付（2024-04-01 の形）ではないので使いません」 |
+| 163 | 埋め込みのページ <http://localhost:8080/embed-demo.html> のコンソールで `DevBI.mount("#report-area", { dashboard: "sales-report", params: { from: "2024-04-01", regions: ["九州・沖縄"] } })` | 受注明細レポートに替わり、地域が「九州・沖縄」、表はその地域だけ。ページのアドレスは変わらない |
+| 164 | `pnpm example:dev` で <http://localhost:5173/#/sales-report> を開き、`dashboards/sales-report.dash.json` の `"fiscalYearStart": 4,` の下に `"apply": "button",` を足して保存 | 欄の右に「表示」のボタン。値を変えても表は変わらず、「表示」を押すと読み直す。戻す |
+| 165 | 同じく、`api/order_lines.sql` の `label=受注日（から）` を `label=開始日` に変えて保存 | ページが読み込み直され、欄の名前が「開始日」になる。戻す |
+| 166 | `pnpm example:check` | `dashboards/sales-report.dash.json: タイル 2（クエリを実行 0）` と `lines: データセット order_lines（api/order_lines.sql）を読むタイル（データベースから読むため行は数えていません）`。最後は「問題はありません」 |
 
 ## 4. 自分の Excel で試す
 

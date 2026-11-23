@@ -212,6 +212,9 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `metrics` | タイルが使う指標ファイルの名前（`models/<名前>.metrics.yaml`）。指標ファイルが 1 つだけなら省略可 |
 | `columns` | グリッドの列数。既定は 12 |
 | `rowHeight` | 1 行の高さ（px）。既定は 80 |
+| `params` | パラメーターの欄の設定（[レポート](#dashjson-の-params)） |
+| `fiscalYearStart` | パラメーターの既定値の `fiscal_year_start`（年度の始まり）の月。1〜12。既定は 1 |
+| `apply` | `"auto"`（既定。欄の値が決まるとすぐ表を読み直す）か `"button"`（「表示」を押したときに読み直す） |
 | `$schema` | エディタの補完用（[下記](#エディタでの補完と型pnpm-gen)）。DevBI は中身を見ない |
 
 ### タイル
@@ -243,8 +246,9 @@ revenue_fytd: { of: revenue, running: fiscal_year }   # 年度の始まりで戻
 | `period` | `false` で、期間（`date-range` で選んだ期間と、時間のグラフでクリックした期間）で絞らない。「いま対応中のすべて」「全期間の累計」のように、期間に関係なく出すタイルに。ほかの選択（地域のクリックなど）はかかる |
 | `metrics` | ダッシュボードとは別の指標ファイルを使うとき |
 | `malloy` / `sql` | 指標と軸の名前で言えない集計を、Malloy か SQL で書く（[下記](#malloy-と-sql-で書く)） |
+| `dataset` / `params` | サーバーの `api/<名前>.sql` の結果を、そのまま出す（[レポート](#データセットを読むタイルquerydataset)）。表（`table`）と自作タイルだけ |
 
-`measures` か `dimensions` か `time` のどれかが要ります（`malloy` か `sql` を書くときは要らない）（[`explore`](#探索explore) は別で、`metrics`・`filters`・`limit`・`period` だけを使い、`query` は書かなくてもよい）。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
+`measures` か `dimensions` か `time` のどれかが要ります（`malloy` か `sql` か `dataset` を書くときは要らない）（[`explore`](#探索explore) は別で、`metrics`・`filters`・`limit`・`period` だけを使い、`query` は書かなくてもよい）。`sort` を書かないときは、`time` があれば時間の順、軸と指標があれば最初の指標の大きい順、軸だけなら軸の順です。`sort` を書いたときも書かないときも、同じ値の行は時間、軸の順に並べるので、どの PC でも同じ順になり、`limit` で残る行も変わりません。
 
 絞り込み（`filters` の要素。クリックでの選択も同じ形）:
 
@@ -500,7 +504,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 確かめること:
 
-1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか
+1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか。[データセットのタイル](#データセットを読むタイルquerydataset)の `api/` の SQL があって読めるか、`query.params` の名前、パラメーターの欄にまとめられるか（型の違い、候補の輪など）
 2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
 3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。`date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じく、その `time` の列を持つ指標ファイルのタイルをその期間で流す（比較の指標にも値が出る）。`"period": false` のタイルは期間なしで流す。画面が使わない `default`（ない期間の名前や、`fiscal_year_start` のない指標ファイルでの年度）は注意。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す。`explore` は明細の行を読む SQL を流し、行数を出す（`limit` を超えるときと、`query` に使わないキー（`measures` など）があるときは注意。`--values` では最初の行を `model` の列のまま出す）
 
@@ -525,6 +529,7 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 9、date-range の
 - 一つの間違いは一つのエラーにします。エラーのある指標を使う指標（`revenue / orders` や `of: revenue`）、エラーのある time の列を使う比較・累計の指標、それらを使うタイルは、「… のエラーのため確かめていません」とだけ出します。`model` が 0 行のときの注意も、指標ファイルに 1 つだけです
 - DuckDB のエラー（`Binder Error` など）は DuckDB の英語のままです。`Candidate bindings` は、近い名前の列の候補です
 - 期間は `date-range` の最初の期間だけです（`default` がない・`all` なら全期間）。ほかの期間を選んだときの数字と、ほかのタイルのクリックでの絞り込みは確かめません
+- データセットのタイル（`query.dataset`）は、パラメーターの値でデータベースから読むので、流しません（行数の代わりに「データセット … を読むタイル」と出します）。`api/` と `dashboards/` があれば、`models/` のないプロジェクトでも動きます
 - 確かめないもの: 接続先がないときの `read_api`（注意）、URL のデータ、DuckDB の拡張（Parquet、JSON、`current_date` の icu など）をインターネットから取ってこられないときのその SQL（注意）、Node で読み込めない自作タイル（`window` を読むなど。プロジェクトの vite.config も使わないので、そこでの設定が要るものも。注意）、自作タイルが `query` の外で読むデータ、見た目（色・幅・高さ）
 
 `--values` を付けると、タイルごとに、結果の最初の行を画面と同じ書式で出します。作ったダッシュボードの数字を、人が知っている数字や `devbi-inspect --sql` で別に数えた数字と比べるときに使います。
@@ -882,7 +887,7 @@ SELECT …
 | `optional` | 空でもよい（`null` を受け付け、データベースには NULL を渡す）。書かなければ `null` は `400` |
 | `hidden` | 入力欄を出さない |
 
-`label`・`default`・`values`・`hidden` は、ダッシュボードの入力欄のためのものです（サーバーは `api/schema` に出すだけで、既定値を入れることはしません。値はいつも送る側が渡します）。入力欄は次の版で入ります。
+`label`・`default`・`values`・`hidden` は、ダッシュボードの入力欄（[パラメーターの欄](#パラメーターの欄)）のためのものです（サーバーは `api/schema` に出すだけで、既定値を入れることはしません。値はいつも送る側が渡します）。
 
 **複数の値**: 型に `[]` を付ける（`text[]`、`integer[]` など）と、値を配列で受け取ります（1 つの値だけ送ると、1 つの値の配列として読みます）。SQL では `IN (:regions)`（`NOT IN` も）の形でだけ使えます（ほかの場所に書くとエラー）。サーバーは値の数だけプレースホルダーを並べ（`IN (?, ?, ?)`）、値はすべてパラメーターで渡します。
 
@@ -1103,6 +1108,101 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 
 `createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。`run(name, params)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
+## レポート（パラメーターの欄と、SQL の結果の表）
+
+SSRS のレポートのように、`api/<名前>.sql`（データセット）の結果を、そのまま表のタイルに出します。ダッシュボードの見出しの下に、SQL の `-- param:` の行から作った入力欄（パラメーターの欄）が並び、値を変えると、サーバーがその値で SQL を実行し直します。ブラウザで集計はしないので、DuckDB-wasm を読みません（指標ファイルのタイルがないダッシュボードは、そのぶん軽く開きます）。サンプルは `examples/sales/dashboards/sales-report.dash.json`（「受注明細レポート」）と `api/order_lines.sql` です。
+
+```json
+{
+  "$schema": "../.devbi/dash.schema.json",
+  "title": "受注明細レポート",
+  "fiscalYearStart": 4,
+  "tiles": [
+    { "id": "lines", "x": 0, "y": 0, "w": 12, "h": 9, "type": "table", "title": "受注明細",
+      "query": { "dataset": "order_lines" } }
+  ]
+}
+```
+
+指標ファイル（`models/`）がなくても動きます。API は `read_api` と同じもの（`devbi-serve`、開発サーバー、[C# の見本](#aspnetcで-api-を出す)、[Next.js](#nextjs-に置く)）です。パラメーターの定義は、ビルドのときに `@devbi/vite` が `api/*.sql` から読んでページに入れます（SQL は入れません。`api/schema` に出るものと同じ、パラメーターと `-- key:` だけ）。ビルドのあとにサーバーの SQL ファイルの `-- param:` を書きかえたときは、ビルドし直すまで欄は前のままです（合わない値はサーバーが `400` で断ります）。
+
+### データセットを読むタイル（`query.dataset`）
+
+- `query.dataset` に `api/` のファイル名（`.sql` なし）を書きます。今は表（`table`）と自作タイルだけです。
+- `query` には `dataset` と `params` だけを書きます。`measures`・`filters`・`sort`・`limit` などとは一緒に書けません（並べ替えと件数は SQL の中に書きます）。
+- 列は SQL の結果のとおりの順と名前です。数の列は右寄せで 3 桁区切り、日付と日時の列は `2026/4/1` の形です。`-- key:` の列は、数でも区切りません。
+- 期間（`date-range`）とほかのタイルのクリックでの選択は、データセットのタイルにはかかりません。データセットのタイルの行をクリックしても、ほかのタイルは絞りません。値で絞るのはパラメーターです。指標ファイルのタイルと同じダッシュボードに並べられます。
+- 同じ値で読んだ結果は 5 組まで覚えておき、値を戻したときはデータベースへ行きません。見出しの右の「更新」で、表と候補をデータベースから読み直します。
+- データセットのタイルは、`-- snapshot:` の行があっても API から読みます（スナップショットは、`read_api` で読む指標ファイルのためのものです）。
+- 「Excel」では、表のシートの 2 行目に `パラメーター: 受注日（から） 2024-04-01、…` が、「概要」のシートにも同じ行が入ります。「印刷・PDF」は、欄を今の値のまま印刷します（「表示」のボタンは出しません）。
+
+`query.params` は、データセットのパラメーターに何を入れるかです。書かなければ、パラメーターと同じ名前の欄の値です。
+
+```json
+"query": {
+  "dataset": "order_lines",
+  "params": { "from": { "param": "since" }, "regions": ["関東"] }
+}
+```
+
+- `{ "param": "since" }`: ダッシュボードのパラメーター `since` の値です。2 つのデータセットの、名前の違うパラメーターを 1 つの欄にまとめるときに使います。
+- 値（`"2024-04-01"`、`10`、`["関東"]`、`null`）: このタイルだけの決まった値です。欄は出ません。
+- データセットにない名前はエラーです。
+
+自作タイル（`component`）の `export const query` に `dataset` を書くこともできますが、欄は dash.json のタイルからだけ作ります。自作タイルが使うパラメーターは、dash.json のそのタイルの `query` に `dataset` を書くか、`params` に `type` を書いて欄を作ってください（ないと「パラメーター x の欄がありません」のエラーです）。
+
+### パラメーターの欄
+
+- 欄は、データセットのタイルが使うパラメーターごとに 1 つです。並びは、dash.json の `params` に書いた順、そのあとタイルの順（上から、左から）に、SQL の `-- param:` の順です。
+- 同じ名前のパラメーター（大文字と小文字は区別しない）は、データセットが違っても 1 つの欄です。型が違うとエラーです。表示名（`label`）や既定値が違うときは、dash.json の `params` でどちらかに決めます。
+- 候補（`values`）のデータセットのパラメーターも欄になります。地域を選ぶと、その地域の顧客だけが候補になる、のような連動です。上の欄の値を変えて、下の欄の値が新しい候補にないときは、下の欄は既定値に戻ります（既定値がなければ空）。候補は 10,000 件まで出します。
+
+| パラメーター | 欄 |
+| --- | --- |
+| `date` / `datetime` | ブラウザの日付（日時）の入力。選ぶか、打って Enter か、欄を離れると決まる |
+| `text`・`integer`・`number` | 文字の入力。Enter か、欄を離れると決まる。型に合わない値は、欄の横に「整数を入れてください」など |
+| `boolean` | はい / いいえ |
+| 候補（`values`）あり | 一覧から選ぶ。`optional` なら「（指定なし）」もある |
+| 複数の値で候補あり | チェックの一覧（「すべて選ぶ」「すべて外す」）。閉じたときに決まる。全部なら「すべて（6）」 |
+| 複数の値で候補なし | `,` 区切りで打つ |
+| `hidden` | 欄を出さない（値は既定値、URL、埋め込みから） |
+
+- 既定値の日付の言葉（`today`、`month_start`、`fiscal_year_start` など）は、見ている人の PC の日付で決めます。`fiscal_year_start`（年度の始まり）の月は、dash.json の `fiscalYearStart`（既定は 1）です。
+- `default=all`（候補の全部）は、候補を読み終えてから表を読みます。
+- 値がないパラメーター（`optional` でなく、既定値もない）があると、表は読まずに「受注日（から）を入れてください」と出します。
+- 値は、欄で決まるとすぐに表を読み直します。dash.json に `"apply": "button"` と書くと、欄の右に「表示」のボタンが出て、押したときに読み直します（いくつも変えてから 1 回だけ読むとき）。候補の連動は、「表示」を押す前の欄の値で動きます。
+- 欄の値は、見る人が選べる絞り込みです。見てよい行の制限（権限）ではありません。人によって見てはいけない行があるなら、SQL の側で絞る仕組みが要ります（[行レベル制御の設計](design/row-level-security.md)）。値は、サーバーでも型を確かめます。
+
+### dash.json の `params`
+
+欄の表示名や既定値を、このダッシュボードだけ変えるときに書きます。
+
+```json
+"params": {
+  "from": { "label": "いつから", "default": "year_start" },
+  "since": { "type": "date", "label": "いつから" },
+  "customer": { "hidden": true }
+}
+```
+
+- キーは `-- param:` の行と同じ（`type`・`label`・`default`・`values`・`optional`・`hidden`）で、SQL の行より優先します。`type` は `"date"` や `"text[]"` のように書き、SQL の行の型と違うとエラーです。
+- どのデータセットのパラメーターでもない名前（`query.params` の `{ "param": … }` でだけ使う名前）には、`type` が要ります。
+- `default` は値（複数の値なら配列）か、`-- param:` と同じ言葉（`"fiscal_year_start"`、`"today-30"`、`"all"`）です。
+- `user` と、`user.` で始まる名前は使えません（ログインした人の値のために取ってあります）。
+- 書いた順に欄が並びます。
+
+### URL・埋め込み・React から値を渡す
+
+- アプリ（`<DevbiApp>`）では、URL の `#/` のあとに値が入ります: `#/sales-report?from=2024-04-01&regions=関東&regions=近畿`。欄の値を変えると URL も変わる（ブラウザの履歴は増えない）ので、そのままリンクにして渡せます。既定値のままの値は入りません（`today` のような既定値は、リンクを開いた日の値になります）。空にした `optional` の値は `to=` です。型に合わない値は使わず、既定値で開きます（開発者ツールのコンソールに注意が出ます）。
+- 埋め込み: `<div data-devbi="sales-report" data-devbi-params='{"from": "2024-04-01", "regions": ["関東"]}'>`（[属性](#2-画面に-2-行を足す)）。JavaScript からは `mount(el, { params, onParamsChange })`。埋め込みと React の部品は、置いたページの URL を変えません。
+- React: `<Dashboard>` の `params` と `onParamsChange`（下の例）。`params` を変えると、その欄の値も変わります（ほかの欄はそのまま）。`onParamsChange` は、どれかの値が変わるたびに、全部の値で呼ばれます。
+
+  ```tsx
+  <Dashboard project={project} name="sales-report" params={{ customer: 1024 }} onParamsChange={(values) => setValues(values)} />
+  ```
+
+- 渡した値も型で確かめ、合わない値は使いません（コンソールに注意が出ます）。日付は `"2024-04-01"`、日時は `"2024-04-01T09:00"`、複数の値は配列です。
+
 ## ASP.NET（C#）で API を出す
 
 `devbi-serve` を別に動かさず、ASP.NET のアプリに同じ API（[API の形](#api-の形)）を足す見本です（`dotnet/`）。データベースは SQL Server だけです。アプリのログイン（Windows 認証など）がそのまま API にもかかります。
@@ -1304,6 +1404,7 @@ export default { base: "./", plugins: [react(), devbi({ embed: true })] };
 | `data-devbi` | ダッシュボードの名前（`dashboards/<名前>.dash.json`）。ダッシュボードが 1 つだけなら空でよい |
 | `data-devbi-theme` | `light`、`dark`、`auto`（既定。OS の設定に合わせる）。明るい画面に置くときは `light` |
 | `data-devbi-exports` | `false` で、「Excel」「印刷・PDF」のボタンを出さない（[書き出し](#excel-と-pdf-に書き出す)） |
+| `data-devbi-params` | パラメーターの値の JSON（`'{"from": "2024-04-01", "regions": ["関東"]}'`）。[レポート](#url埋め込みreact-から値を渡す)の欄の値になる。JSON として読めないときはコンソールにエラーを出して使わない |
 | `data-devbi-api` | 読み取り API の場所（`read_api` を使うとき）。既定は `devbi-embed.js` と同じ場所の `api/`。アプリに API を足したときは、その場所（例: `/MyApp/devbi/api/`）。相対パス（`api2/`）は、ページではなく `devbi-embed.js` のある場所からです。ページとも `devbi-embed.js` とも違うサーバーは使いません（要るときは JavaScript の `mount` に `apiUrl` で渡します） |
 
 - `<script type="module">` は、ページを読み終わってから動きます。`<head>` に書いても、div より前に書いてもかまいません。
@@ -1329,7 +1430,7 @@ export default { base: "./", plugins: [react(), devbi({ embed: true })] };
 | 名前 | 中身 |
 | --- | --- |
 | `dashboards` | ダッシュボードの一覧（`name`、`title`、`description`）。画面のメニューを作るとき |
-| `mount(要素かセレクタ, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports? })` | ダッシュボードを出す。書かなかったものは要素の `data-devbi…` 属性から取る。`isolate: false` で、ページの CSS を打ち消さない（既定は `true`）。`exports: false` で「Excel」「印刷・PDF」のボタンを出さない。同じ要素にもう一度呼ぶと切り替わる（ダッシュボード・API・`fetch` が変わると最初から、`theme` だけなら絞り込みはそのまま）。戻り値の `unmount()` は、そのあと同じ要素に `mount` し直していたら何もしない。`fetch` は API を呼ぶときに使う関数（ヘッダーを足すとき） |
+| `mount(要素かセレクタ, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports?, params?, onParamsChange? })` | ダッシュボードを出す。`params` はパラメーターの値（同じ要素にもう一度呼ぶと、ほかはそのままで値だけ変わる）、`onParamsChange` は値が変わったときに全部の値で呼ばれる関数（[レポート](#url埋め込みreact-から値を渡す)）。書かなかったものは要素の `data-devbi…` 属性から取る。`isolate: false` で、ページの CSS を打ち消さない（既定は `true`）。`exports: false` で「Excel」「印刷・PDF」のボタンを出さない。同じ要素にもう一度呼ぶと切り替わる（ダッシュボード・API・`fetch` が変わると最初から、`theme` だけなら絞り込みはそのまま）。戻り値の `unmount()` は、そのあと同じ要素に `mount` し直していたら何もしない。`fetch` は API を呼ぶときに使う関数（ヘッダーを足すとき） |
 | `mountAll(root?)` | `data-devbi` の付いた要素のうち、まだ出していないものに出す。ページから消えた要素のものは片付ける。`unmount` で消した要素には出さない。ページにほかのプロジェクトの `devbi-embed.js` があれば、そちらのダッシュボードもそちらが出す。戻り値は新しく出した数 |
 | `unmount(要素かセレクタ)` | ダッシュボードを消す（ページのどの `devbi-embed.js` が出したものでも）。もう一度出すときは `mount` |
 
@@ -1412,15 +1513,15 @@ function DevbiDashboard({ name }: { name: string }) {
 | 名前 | 中身 |
 | --- | --- |
 | `<DevbiApp project={…} theme? exports? />` | アプリ全体。`#/<名前>` でダッシュボード、複数あれば一覧を出す。開発サーバーで `@devbi/editor` が入っていると、「編集」と「＋ 新しいダッシュボード」を出す（[GUI エディタ](#gui-エディタdevbieditor)）。`exports={false}` で「Excel」「印刷・PDF」のボタンを出さない |
-| `<Dashboard project={…} name="sales" back?="#/" theme? isolate? exports? actions? />` | ダッシュボード 1 つ。見出しの右に「Excel」「印刷・PDF」のボタン（[書き出し](#excel-と-pdf-に書き出す)。`exports={false}` で出さない）。`actions` はその右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
-| `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
+| `<Dashboard project={…} name="sales" back?="#/" theme? isolate? exports? actions? params? onParamsChange? paramsInUrl? />` | ダッシュボード 1 つ。`params` と `onParamsChange` は[パラメーターの値](#url埋め込みreact-から値を渡す)を渡す口と聞く口。`paramsInUrl` で値を URL（`#/<名前>?from=…`）に読み書きする（`<DevbiApp>` が付ける）。見出しの右に「Excel」「印刷・PDF」のボタン（[書き出し](#excel-と-pdf-に書き出す)。`exports={false}` で出さない）。`actions` はその右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
+| `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports?, params?, onParamsChange? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
 | `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
-| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.perspective` は Perspective の WebAssembly の URL（`{ server, client }`。`explore` が使う。`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`。型は `DevServer`） |
+| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.datasets` は、`api/*.sql` ごとのパラメーターと `-- key:`（`{ parameters, key? }`。`@devbi/vite` が入れる）。`ProjectInput.perspective` は Perspective の WebAssembly の URL（`{ server, client }`。`explore` が使う。`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`。型は `DevServer`） |
 | `themeAttribute(theme)` / `injectStyles()` | `.devbi-root` に付ける `data-theme` / DevBI の CSS をページに入れる（`<Dashboard>` は自分で入れる）。GUI エディタが使う |
 | `snapshotTimesOf(project, dashboard)` | そのダッシュボードが読むスナップショットの時刻（`["06:00"]` など。なければ空）。一覧の「毎日 6:00 の時点のデータ」に使っている |
 | `useDevbiQuery`、`useTileSize`、`useTimeExtent` | [自作タイル](#自作タイルjsx)を参照 |
 | `useDevbiRows(query, { tileId? })` | `model` の行をそのまま読む（`explore` のタイルが使う）。期間とほかのタイルの選択（`tileId` のタイルのもの以外）で絞る。戻り値は `{ table, limit, truncated, newest, filters, loading, error }`（`table` は Apache Arrow の表で、新しいほうから `limit` 行まで。`truncated` は、それより多かったか） |
-| `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`） |
+| `useDevbi()` | ダッシュボードの文脈（`project`、`dashboard`、`engine`、`selection`、`view(name?)`、`params`（パラメーターの欄の値）、`readDataset(name, values)`、`refresh()`（「更新」））。`engine` は、はじめて読んだときに DuckDB-wasm を立ち上げる（データセットだけのダッシュボードは立ち上げない） |
 | `DevbiProvider` | `<Dashboard>` の中で使っている文脈。自分でタイルを並べるとき用 |
 | `createEngine({ bundle, baseUrl?, apiUrl?, fetch?, snapshots?, extensionRepository?, debug? })` | DuckDB-wasm を立ち上げる。`apiUrl` は `read_api` の API の場所（既定は `baseUrl` の下の `api/`。最後の `/` はなくてもよい）、`fetch` は API を呼ぶときに使う関数（ヘッダーを足すときなど）。`query(sql)`（結果はキャッシュする）、`table(sql)`（Arrow の表だけ。キャッシュしない。多い行用）と `loadView(view, { apiUrl?, fetch? })` を持つ（`loadView` に渡すと、そのビューだけほかの API から読む。同じエンジンで、API ごとに別の表になる。`useDevbi().engine` の `loadView(view)` は、そのダッシュボードの API と `fetch` で読む）。`snapshots` は[スナップショット](#毎朝のスナップショット)から読む SQL の名前と時刻で、`snapshotsOf(view)` はそのビューが読んだスナップショットと、作られた時刻を返す。ふつうは `<DevbiApp>` が自動で作る。エンジンのコード（DuckDB-wasm の JS と Apache Arrow）は最初の呼び出しで別のファイルとして読む |
 | `DashboardSelection` | クロスフィルタの状態（`set`、`clear`、`own`、`filtersFor`、`entries`、`subscribe`） |

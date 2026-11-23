@@ -139,6 +139,7 @@ test("from JavaScript: the list of dashboards, mount to switch, mountAll for ele
     "sales-db",
     "sales-explore",
     "sales-malloy",
+    "sales-report",
   ]);
 
   // The page's own menu calls mount() with another dashboard: the Excel one, with the JSX tile.
@@ -158,7 +159,7 @@ test("from JavaScript: the list of dashboards, mount to switch, mountAll for ele
     return devbi.mountAll();
   });
   expect(added).toBe(1);
-  await expect(page.locator("#later .devbi-error")).toHaveText("ダッシュボード nope がありません（あるのは sales, sales-daily, sales-db, sales-explore, sales-malloy）");
+  await expect(page.locator("#later .devbi-error")).toHaveText("ダッシュボード nope がありません（あるのは sales, sales-daily, sales-db, sales-explore, sales-malloy, sales-report）");
   await page.evaluate(() => (window as unknown as { DevBI: Devbi }).DevBI.unmount("#later"));
   await expect(page.locator("#later")).toBeEmpty();
   expect(errors).toEqual([]);

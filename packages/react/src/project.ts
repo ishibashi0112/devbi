@@ -4,6 +4,7 @@ import {
   defineDashboard,
   defineMetricsView,
   type Dashboard,
+  type DatasetInfo,
   type MetricsView,
   type Query,
   type TileProps,
@@ -24,6 +25,11 @@ export interface ProjectInput {
   dashboards: Record<string, { path: string; spec: unknown }>;
   /** Metrics views by name, as parsed from `models/<name>.metrics.yaml`. */
   metrics: Record<string, { path: string; spec: unknown }>;
+  /**
+   * The datasets the dashboards read (`api/<name>.sql` on the server): their parameters (`-- param:`) and key
+   * columns, as `api/schema` lists them. The SQL stays on the server.
+   */
+  datasets?: Record<string, DatasetInfo>;
   /** Promoted tile modules by path from the project root, such as `/dashboards/sales/TopCustomers.tsx`. */
   components?: Record<string, () => Promise<TileModule>>;
   /** Base URL for data files. */
@@ -57,6 +63,7 @@ export interface PerspectiveBundle {
 export interface Project {
   dashboards: Record<string, Dashboard & { path: string }>;
   metrics: Record<string, MetricsView>;
+  datasets: Record<string, DatasetInfo>;
   components: Record<string, () => Promise<TileModule>>;
   baseUrl: string;
   apiUrl?: string;
@@ -79,6 +86,7 @@ export function loadProject(input: ProjectInput): Project {
   return {
     dashboards,
     metrics,
+    datasets: input.datasets ?? {},
     components: input.components ?? {},
     baseUrl: input.baseUrl ?? "./",
     ...(input.apiUrl ? { apiUrl: input.apiUrl } : {}),

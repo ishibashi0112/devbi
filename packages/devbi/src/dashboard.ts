@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { DashboardParamSpec } from "./params.js";
 import { GRAINS, type Grain, type TileSpec } from "./types.js";
 
 /** Names known from the project's metrics files, for a stricter schema (editor completion). */
@@ -8,6 +9,8 @@ export interface SchemaNames {
   dimensions: string[];
   /** Dimension names and time column names: what filters and sort can refer to. */
   fields: string[];
+  /** The datasets (`api/<name>.sql`). */
+  datasets?: string[];
 }
 
 const nonEmpty = <T extends string>(list: readonly T[] | undefined) => (list && list.length ? (list as [T, ...T[]]) : undefined);
@@ -19,6 +22,27 @@ export function dashboardSchemas(names?: SchemaNames) {
     return (known ? z.enum(known) : z.string().min(1)).describe(what);
   };
   const scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+  const paramValue = z.union([scalar, z.array(z.union([z.string(), z.number(), z.boolean()]))]);
+  const binding = z.union([z.strictObject({ param: z.string().min(1).describe("ダッシュボードのパラメーターの名前") }), paramValue], {
+    error: '{ "param": "ダッシュボードのパラメーターの名前" } か、値（文字・数・真偽・null・配列）で書いてください',
+  });
+  const reserved = (name: string) => /^user(\.|$)/i.test(name);
+  const paramSpec = z
+    .strictObject({
+      type: z
+        .string()
+        .regex(/^(text|integer|number|date|datetime|boolean)(\[\])?$/, "text・integer・number・date・datetime・boolean のどれか（複数の値は text[] のように）")
+        .optional()
+        .describe("型。text・integer・number・date・datetime・boolean。複数の値は text[] のように。-- param: と違うとエラー"),
+      label: z.string().optional().describe("欄の見出し。既定は -- param: の label か名前"),
+      default: paramValue
+        .optional()
+        .describe("最初の値。日付は today・month_start・fiscal_year_start（-30 のように日数をずらせる）、候補の全部は all、複数の値は配列"),
+      values: z.string().min(1).optional().describe("候補にするデータセット（api/<名前>.sql）の名前。1 列目が値、2 列目が表示"),
+      optional: z.boolean().optional().describe("空（NULL）でもよい"),
+      hidden: z.boolean().optional().describe("欄に出さない（URL・埋め込み・React からは入る）"),
+    })
+    .describe("ダッシュボードのパラメーター。-- param: の行より勝つ");
   const field = nameOf(names?.fields, "軸の名前か、time の列名");
   const filter = z.union(
     [
@@ -68,8 +92,22 @@ export function dashboardSchemas(names?: SchemaNames) {
         .describe(
           "指標と軸の名前で言えない集計を SQL（DuckDB）で書く（SELECT 地域, SUM(金額) AS 売上 FROM sales GROUP BY 1）。FROM の指標ファイルの名前が、その明細の行（期間と選択で絞ったもの）。measures・dimensions・time・sort・limit とは一緒に使えない",
         ),
+      dataset: nameOf(names?.datasets, "データセット（サーバーの api/<名前>.sql）の名前。その結果の行をそのまま出す。パラメーターは見出しの下の欄から")
+        .optional(),
+      params: z
+        .record(z.string().min(1), binding)
+        .optional()
+        .describe('データセットのパラメーターに入れるもの。{ "param": "ダッシュボードのパラメーター" } か値。書かなければ同じ名前のダッシュボードのパラメーター'),
     })
     .superRefine((q, ctx) => {
+      if (q.dataset !== undefined) {
+        for (const k of ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit", "period", "malloy", "sql"] as const) {
+          if (q[k] !== undefined)
+            ctx.addIssue({ code: "custom", message: `dataset のクエリでは ${k} は使えません（並べ替えと件数は SQL か表の操作で）`, path: [k] });
+        }
+        return;
+      }
+      if (q.params !== undefined) ctx.addIssue({ code: "custom", message: "params は dataset と一緒に書きます", path: ["params"] });
       if (q.malloy !== undefined && q.sql !== undefined)
         ctx.addIssue({ code: "custom", message: "malloy と sql はどちらか一つにしてください", path: ["sql"] });
       if (q.malloy === undefined && q.sql === undefined) return;
@@ -102,7 +140,11 @@ export function dashboardSchemas(names?: SchemaNames) {
       query: query.optional(),
       options: z.record(z.string(), z.unknown()).optional().describe("タイルの種類ごとの設定"),
     })
-    .refine((t) => !!t.type !== !!t.component, { message: "type か component のどちらか一つを書いてください" });
+    .refine((t) => !!t.type !== !!t.component, { message: "type か component のどちらか一つを書いてください" })
+    .refine((t) => t.query?.dataset === undefined || !t.type || t.type === "table", {
+      message: "データセット（query.dataset）を読めるのは、今は表（table）と自作タイルです",
+      path: ["type"],
+    });
   const dashboard = z
     .strictObject({
       $schema: z.string().optional().describe("エディタ用の JSON Schema の場所"),
@@ -111,7 +153,22 @@ export function dashboardSchemas(names?: SchemaNames) {
       metrics: nameOf(names?.metrics, "タイルが使う指標ファイルの名前（models/<名前>.metrics.yaml）。1 つだけなら省略可").optional(),
       columns: z.number().int().positive().optional().describe("グリッドの列数。既定は 12"),
       rowHeight: z.number().int().positive().optional().describe("1 行の高さ（px）。既定は 80"),
+      params: z
+        .record(z.string().min(1), paramSpec)
+        .optional()
+        .describe("パラメーター（見出しの下の欄）。キーはパラメーターの名前。書いた順に並ぶ"),
+      fiscalYearStart: z.number().int().min(1).max(12).optional().describe("既定値の fiscal_year_start が使う、年度の始まりの月（1〜12）。既定は 1"),
+      apply: z
+        .enum(["auto", "button"])
+        .optional()
+        .describe("auto（既定）: 値が決まったらすぐ読み直す。button: 「表示」を押したときに読む（重い SQL のダッシュボード向け）"),
       tiles: z.array(tile).describe("タイルの並び"),
+    })
+    .superRefine((d, ctx) => {
+      for (const name of Object.keys(d.params ?? {})) {
+        if (reserved(name))
+          ctx.addIssue({ code: "custom", message: "user で始まる名前（user.region など）は、ログインした人の値のために取ってあります", path: ["params", name] });
+      }
     })
     .meta({ title: "DevBI ダッシュボード（*.dash.json）" });
   return { query, tile, dashboard };
@@ -127,6 +184,12 @@ export interface Dashboard {
   metrics?: string;
   columns: number;
   rowHeight: number;
+  /** dash.json's `params`: settings of the parameters (the bar above the tiles), in their order. */
+  params?: Record<string, DashboardParamSpec>;
+  /** The first month of the fiscal year, for the default `fiscal_year_start` (1–12). */
+  fiscalYearStart?: number;
+  /** `button`: the dataset tiles read again when 表示 is pressed, not as soon as a value is set. */
+  apply?: "auto" | "button";
   tiles: TileSpec[];
 }
 
@@ -172,6 +235,9 @@ export function defineDashboard(data: unknown, name: string, source = `${name}.d
     ...(d.metrics ? { metrics: d.metrics } : {}),
     columns,
     rowHeight: d.rowHeight ?? 80,
+    ...(d.params ? { params: d.params as Record<string, DashboardParamSpec> } : {}),
+    ...(d.fiscalYearStart !== undefined ? { fiscalYearStart: d.fiscalYearStart } : {}),
+    ...(d.apply ? { apply: d.apply } : {}),
     tiles: d.tiles as TileSpec[],
   };
 }

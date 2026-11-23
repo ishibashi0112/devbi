@@ -12,6 +12,7 @@ import {
   resultCell,
   sheetRef,
   TABLE_STYLES,
+  tileBindings,
   TILE_TYPES,
   Workbook,
   type BuiltinTileType,
@@ -20,6 +21,7 @@ import {
   type FieldInfo,
   type Filter,
   type MetricsView,
+  type ParamValue,
   type Query,
   type Row,
   type Sheet,
@@ -67,6 +69,26 @@ export function exportFileName(title: string, now: Date, ext: string): string {
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** A parameter's value as the sheets note it: `2026/4/1`, `関東・近畿`, `（指定なし）`. */
+function paramValueText(v: ParamValue | undefined, choices?: Map<string, string>): string {
+  if (v === undefined) return "（未入力）";
+  if (v === null) return "（指定なし）";
+  const one = (x: Exclude<ParamValue, null | unknown[]>) =>
+    choices?.get(String(x)) ?? (typeof x === "boolean" ? (x ? "はい" : "いいえ") : String(x).replace("T", " "));
+  return Array.isArray(v) ? v.map(one).join("・") : one(v);
+}
+
+/** `受注日（から） 2026-04-01、地域 関東・近畿`: the values of the given parameters (all when none given). */
+function paramsText(ctx: DevbiContextValue, names?: string[]): string {
+  const list = ctx.params.list.filter((p) => !names || names.some((n) => n.toLowerCase() === p.name.toLowerCase()));
+  return list
+    .map((p) => {
+      const choices = new Map((ctx.params.choicesOf(p.name)?.items ?? []).map((c) => [String(c.value), c.label]));
+      return `${p.label} ${paramValueText(ctx.params.value(p.name), choices)}`;
+    })
+    .join("、");
+}
 
 /** The tile's query as TileFrame runs it. `skip`: a tile that reads no data (markdown, date-range). */
 async function queryOf(ctx: DevbiContextValue, tile: TileSpec): Promise<Query | null | "skip"> {
@@ -201,7 +223,16 @@ async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
   const name = tile.title ?? tile.id;
   const sheet = book.sheet(name);
   sheet.add({ v: name, s: S.heading, noWidth: true });
-  sheet.add({ v: `絞り込み: ${filtersText(view, result.fields, [...(query.filters ?? []), ...filters])}`, s: S.note, noWidth: true });
+  if (query.dataset !== undefined) {
+    // A dataset's rows: the parameters it ran with (its own values and the dashboard's).
+    const info = ctx.project.datasets[query.dataset];
+    const bound = info ? tileBindings(tile, info) : [];
+    const own = bound.filter((b) => b.param === undefined).map((b) => `${b.name} ${paramValueText(b.value)}`);
+    const fromBar = paramsText(ctx, bound.flatMap((b) => (b.param === undefined ? [] : [b.param])));
+    sheet.add({ v: `パラメーター: ${[fromBar, ...own].filter(Boolean).join("、") || "なし"}`, s: S.note, noWidth: true });
+  } else {
+    sheet.add({ v: `絞り込み: ${filtersText(view, result.fields, [...(query.filters ?? []), ...filters])}`, s: S.note, noWidth: true });
+  }
   sheet.skip();
   if (pivot) pivot.write(sheet);
   else addResultTable(sheet, result.rows, result.fields, { fiscalYearStart: fy });
@@ -237,10 +268,14 @@ export async function dashboardWorkbook(ctx: DevbiContextValue, now = new Date()
   } catch {
     view = undefined;
   }
-  const snapshots = await ctx.engine
-    .then((engine) => Promise.all(viewsOf(ctx.project, dashboard).map((v) => engine.snapshotsOf(v))))
-    .then((all) => snapshotText(all.flat()))
-    .catch(() => undefined);
+  // Only a dashboard with metrics files asks the engine (it would start DuckDB-wasm).
+  const views = viewsOf(ctx.project, dashboard);
+  const snapshots = !views.length
+    ? undefined
+    : await ctx.engine
+        .then((engine) => Promise.all(views.map((v) => engine.snapshotsOf(v))))
+        .then((all) => snapshotText(all.flat()))
+        .catch(() => undefined);
 
   summary.add({ v: dashboard.title, s: S.title, noWidth: true });
   if (dashboard.description) summary.add({ v: dashboard.description, s: S.note, noWidth: true });
@@ -248,7 +283,9 @@ export async function dashboardWorkbook(ctx: DevbiContextValue, now = new Date()
   const info = (key: string, value: string) => summary.add({ v: key, s: S.key }, { v: value, noWidth: true });
   info("書き出した日時", localTime(now));
   if (snapshots) info("データ", snapshots);
-  info("絞り込み", filtersText(view, [], ctx.selection.entries().flatMap((e) => e.filters)));
+  if (ctx.params.list.length) info("パラメーター", paramsText(ctx));
+  if (dashboard.tiles.some((t) => t.query?.dataset === undefined && t.type !== "markdown"))
+    info("絞り込み", filtersText(view, [], ctx.selection.entries().flatMap((e) => e.filters)));
   summary.skip();
   const header = summary.add({ v: "タイル", s: S.header }, { v: "行数", s: S.header }, { v: "メモ", s: S.header });
   for (const r of results) {

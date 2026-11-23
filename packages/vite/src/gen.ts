@@ -36,14 +36,15 @@ export function envDts(views: MetricsView[]): string {
   return `${HEADER}\nimport "devbi";\n\ndeclare module "devbi" {\n  interface MetricsRegistry {\n${body}\n  }\n}\n`;
 }
 
-/** Names for the project's dash.json schema. */
-export function schemaNames(views: MetricsView[]): SchemaNames {
+/** Names for the project's dash.json schema. `datasets`: the names of the SQL files in `api/` (for `query.dataset`). */
+export function schemaNames(views: MetricsView[], datasets?: string[]): SchemaNames {
   const uniq = (list: string[]) => [...new Set(list)].sort();
   return {
     metrics: uniq(views.map((v) => v.name)),
     measures: uniq(views.flatMap((v) => Object.keys(v.measures))),
     dimensions: uniq(views.flatMap((v) => Object.keys(v.dimensions))),
     fields: uniq(views.flatMap((v) => [...Object.keys(v.dimensions), ...(v.time ? [v.time.name] : [])])),
+    ...(datasets ? { datasets: uniq(datasets) } : {}),
   };
 }
 
@@ -69,10 +70,15 @@ export async function generate(dir: string, options: { check?: boolean } = {}): 
       if (previous) views.push(previous);
     }
   }
+  // The datasets by their file names (as the API lists them): a file that does not parse is still a name.
+  const apiDir = path.join(dir, "api");
+  const datasets = existsSync(apiDir)
+    ? (await readdir(apiDir)).filter((f) => f.endsWith(".sql") && !f.startsWith(".")).map((f) => f.slice(0, -".sql".length))
+    : [];
   const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`;
   const outputs: [string, string][] = [
     ["env.d.ts", envDts(views)],
-    ["dash.schema.json", json(dashboardJsonSchema(schemaNames(views)))],
+    ["dash.schema.json", json(dashboardJsonSchema(schemaNames(views, datasets)))],
     ["metrics.schema.json", json(metricsJsonSchema())],
   ];
   const outDir = path.join(dir, ".devbi");

@@ -29,6 +29,80 @@
       "type": "integer",
       "exclusiveMinimum": 0
     },
+    "params": {
+      "description": "パラメーター（見出しの下の欄）。キーはパラメーターの名前。書いた順に並ぶ",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "description": "型。text・integer・number・date・datetime・boolean。複数の値は text[] のように。-- param: と違うとエラー",
+            "type": "string",
+            "pattern": "^(text|integer|number|date|datetime|boolean)(\\[\\])?$"
+          },
+          "label": {
+            "description": "欄の見出し。既定は -- param: の label か名前",
+            "type": "string"
+          },
+          "default": {
+            "description": "最初の値。日付は today・month_start・fiscal_year_start（-30 のように日数をずらせる）、候補の全部は all、複数の値は配列",
+            "anyOf": [
+              {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              }
+            ]
+          },
+          "values": {
+            "description": "候補にするデータセット（api/<名前>.sql）の名前。1 列目が値、2 列目が表示",
+            "type": "string",
+            "minLength": 1
+          },
+          "optional": {
+            "description": "空（NULL）でもよい",
+            "type": "boolean"
+          },
+          "hidden": {
+            "description": "欄に出さない（URL・埋め込み・React からは入る）",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false,
+        "description": "ダッシュボードのパラメーター。-- param: の行より勝つ"
+      }
+    },
+    "fiscalYearStart": {
+      "description": "既定値の fiscal_year_start が使う、年度の始まりの月（1〜12）。既定は 1",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 12
+    },
+    "apply": {
+      "description": "auto（既定）: 値が決まったらすぐ読み直す。button: 「表示」を押したときに読む（重い SQL のダッシュボード向け）",
+      "type": "string",
+      "enum": [
+        "auto",
+        "button"
+      ]
+    },
     "tiles": {
       "type": "array",
       "items": {
@@ -272,6 +346,59 @@
                 "description": "指標と軸の名前で言えない集計を SQL（DuckDB）で書く（SELECT 地域, SUM(金額) AS 売上 FROM sales GROUP BY 1）。FROM の指標ファイルの名前が、その明細の行（期間と選択で絞ったもの）。measures・dimensions・time・sort・limit とは一緒に使えない",
                 "type": "string",
                 "minLength": 1
+              },
+              "dataset": {
+                "type": "string",
+                "minLength": 1,
+                "description": "データセット（サーバーの api/<名前>.sql）の名前。その結果の行をそのまま出す。パラメーターは見出しの下の欄から"
+              },
+              "params": {
+                "description": "データセットのパラメーターに入れるもの。{ \"param\": \"ダッシュボードのパラメーター\" } か値。書かなければ同じ名前のダッシュボードのパラメーター",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "param": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "ダッシュボードのパラメーターの名前"
+                        }
+                      },
+                      "required": [
+                        "param"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "anyOf": [
+                        {
+                          "type": [
+                            "string",
+                            "number",
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean"
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
               }
             },
             "additionalProperties": false,

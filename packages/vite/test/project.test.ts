@@ -23,6 +23,23 @@ describe("readProject and read_api", () => {
   });
 });
 
+describe("datasets", () => {
+  it("gives the page each dataset's parameters and key, not the SQL; a broken file only matters to the dashboards that read it", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-datasets-"));
+    for (const d of ["api", "dashboards"]) mkdirSync(path.join(dir, d));
+    writeFileSync(path.join(dir, "api", "lines.sql"), "-- param: from date label=いつから default=month_start\n-- key: no\nSELECT no FROM t WHERE d >= :from");
+    writeFileSync(path.join(dir, "api", "broken.sql"), "UPDATE t SET a = 1");
+    const report = (dataset: string) =>
+      JSON.stringify({ title: "r", tiles: [{ id: "t", x: 0, y: 0, w: 12, h: 4, type: "table", query: { dataset } }] });
+    writeFileSync(path.join(dir, "dashboards", "r.dash.json"), report("lines"));
+    const p = await readProject(dir, {});
+    expect(p.datasets).toEqual({ lines: { parameters: [{ name: "from", type: "date", label: "いつから", default: "month_start" }], key: ["no"] } });
+    expect(JSON.stringify(p)).not.toContain("SELECT");
+    writeFileSync(path.join(dir, "dashboards", "r.dash.json"), report("broken"));
+    await expect(readProject(dir, {})).rejects.toThrow(/^dashboards\/r\.dash\.json: タイル t: api\/broken\.sql: SELECT か WITH で始まる文だけ使えます/);
+  });
+});
+
 describe("the dev server", () => {
   it("does not hand out the API's SQL or the SQLite database", async () => {
     const { createServer } = await import("vite");

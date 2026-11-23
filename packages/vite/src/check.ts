@@ -17,6 +17,8 @@ import {
   ROWS_CUSTOM,
   customTable,
   customViews,
+  dashboardParams,
+  tileBindings,
   sqlColumns,
   withSources,
   componentProblem,
@@ -40,7 +42,7 @@ import {
   type TileTypeInfo,
 } from "devbi";
 import type { ViteDevServer } from "vite";
-import { dashboardProblems, modelSources } from "./index.js";
+import { dashboardProblems, datasetProblems, modelSources, readDatasets } from "./index.js";
 import { createNodeEngine, duckdbMessage, fileHint, missingExtension, NotChecked, type NodeEngine } from "./node-engine.js";
 
 export type Level = "error" | "warning";
@@ -217,6 +219,8 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
       addIssues(file, e);
     }
   }
+  // The datasets (api/*.sql) as the page knows them: their parameters, read with each database's quoting rules.
+  const datasetFiles = await readDatasets(dir, options.env ?? (await import("@devbi/server")).loadEnv(dir));
   const dashboards: { dashboard: Dashboard; file: string }[] = [];
   for (const f of await list(path.join(dir, "dashboards"), ".dash.json")) {
     const file = `dashboards/${f}`;
@@ -224,7 +228,7 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
     try {
       text = await readFile(path.join(dir, file), "utf8");
       const dashboard = parseDashboardJson(text, f.slice(0, -".dash.json".length), file);
-      for (const p of dashboardProblems(dir, file, dashboard)) addIssues(file, p);
+      for (const p of [...dashboardProblems(dir, file, dashboard), ...datasetProblems(file, dashboard, datasetFiles)]) addIssues(file, p);
       dashboards.push({ dashboard, file });
     } catch (e) {
       let ids: unknown[] = [];
@@ -237,7 +241,9 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
       addIssues(file, e, ids);
     }
   }
-  if (!modelFiles.length) add("error", "models/", "指標ファイル（models/<名前>.metrics.yaml）がありません");
+  // A project of datasets only (api/*.sql, SSRS-like reports) needs no metrics file.
+  const hasDatasets = Object.keys(datasetFiles.datasets).length + Object.keys(datasetFiles.errors).length > 0;
+  if (!modelFiles.length && !hasDatasets) add("error", "models/", "指標ファイル（models/<名前>.metrics.yaml）がありません");
   if (!dashboards.length && !findings.some((f) => f.file.startsWith("dashboards/"))) {
     add("warning", "dashboards/", "ダッシュボード（dashboards/<名前>.dash.json）がありません");
   }
@@ -413,6 +419,8 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
       // The periods that filter a view's tiles: those on its time column or a dimension of that name.
       const periodsOf = (view: MetricsView) =>
         shown.filter((p) => view.time?.name === p.field || Object.hasOwn(view.dimensions, p.field)).map((p) => p.text);
+      // The parameter bar, as the page makes it (its problems are reported with the files).
+      const bar = dashboardParams(dashboard, datasetFiles.datasets).params;
 
       for (const t of dashboard.tiles) {
         const tile: TileReport = { dashboard: dashboard.name, id: t.id };
@@ -490,6 +498,30 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
           }
         }
         if (!query) continue;
+
+        if (query.dataset !== undefined) {
+          // Rows from the database with the parameters' values: not run here (the API runs them, devbi-serve checks).
+          const name = query.dataset;
+          const info = Object.hasOwn(datasetFiles.datasets, name) ? datasetFiles.datasets[name]! : undefined;
+          if (t.query?.dataset === undefined) {
+            // A promoted tile's own query: dash.json's checks (datasetProblems) did not see it.
+            if (Object.hasOwn(datasetFiles.errors, name)) fail(datasetFiles.errors[name]!);
+            else if (!info) fail(`${t.component} の query: データセット ${name} がありません（api/${name}.sql）`);
+            else {
+              const lost = tileBindings({ ...t, query }, info).filter(
+                (b) => b.param !== undefined && !bar.some((p) => p.name.toLowerCase() === b.param!.toLowerCase()),
+              );
+              if (lost.length)
+                fail(
+                  `${t.component} の query: パラメーター ${lost.map((b) => b.param).join("・")} の欄がありません（dash.json のタイルの query に dataset を書くか、params に type を書いてください）`,
+                );
+            }
+          }
+          tile.note ??= info
+            ? `データセット ${name}（api/${name}.sql）を読むタイル（データベースから読むため行は数えていません）`
+            : "エラー";
+          continue;
+        }
 
         const custom = customQuery(query);
         if (custom) {

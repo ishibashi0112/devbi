@@ -2,7 +2,20 @@ import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { DashboardError, MetricsError, componentProblem, defineDashboard, defineMetricsView, hasUrlScheme, resolveComponent, scanSources, type Dashboard, type MetricsView } from "devbi";
+import {
+  DashboardError,
+  MetricsError,
+  componentProblem,
+  dashboardParams,
+  defineDashboard,
+  defineMetricsView,
+  hasUrlScheme,
+  resolveComponent,
+  scanSources,
+  type Dashboard,
+  type DatasetInfo,
+  type MetricsView,
+} from "devbi";
 import { loadEnv, version as viteVersion, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type UserConfig, type ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
 import { createEditorHandler, versionOf } from "./editor.js";
@@ -116,9 +129,52 @@ export async function readSnapshots(dir: string): Promise<Record<string, string[
   return out;
 }
 
+/** The datasets (api/*.sql) as the page knows them, and the files that do not parse (name → message). */
+export interface DatasetFiles {
+  datasets: Record<string, DatasetInfo>;
+  errors: Record<string, string>;
+}
+
+/**
+ * What the page knows of each dataset (api/<name>.sql): its parameters (`-- param:`) and key (`-- key:`), not the SQL.
+ * The same as the API's `api/schema` lists. Each file is read with the quoting rules of its database when `env` names
+ * its URL (DEVBI_DB…), and of all of them otherwise. A file that does not parse is in `errors`: a problem only for the
+ * dashboards that read it (the API reports it too).
+ */
+export async function readDatasets(dir: string, env: Record<string, string | undefined> = process.env): Promise<DatasetFiles> {
+  const out: DatasetFiles = { datasets: {}, errors: {} };
+  if (!existsSync(path.join(dir, "api"))) return out;
+  const { listDatasets, readDatasetText, parseDataset, connectionOf, connectionVariable, dialectOf } = await import("@devbi/server");
+  for (const name of await listDatasets(dir)) {
+    try {
+      const text = await readDatasetText(dir, name);
+      const d = parseDataset(name, text, dialectOf(env[connectionVariable(connectionOf(text))] ?? ""));
+      out.datasets[name] = { parameters: d.parameters, ...(d.key ? { key: d.key } : {}) };
+    } catch (e) {
+      out.errors[name] = (e as Error).message;
+    }
+  }
+  return out;
+}
+
+/**
+ * Problems with a dashboard's datasets and parameters: a tile's `query.dataset` with no file (or one that does not
+ * parse), `query.params` the dataset does not have, and parameters that do not merge (`dashboardParams`).
+ */
+export function datasetProblems(rel: string, d: Dashboard, files: DatasetFiles): string[] {
+  const out = new Set<string>();
+  for (const p of dashboardParams(d, files.datasets).problems) {
+    // A file that is there but does not parse: its own message, not "がありません".
+    out.add(`${rel}: ${p.replace(/データセット (\S+) がありません（api\/\S+\.sql）/, (all, n: string) => (Object.hasOwn(files.errors, n) ? files.errors[n]! : all))}`);
+  }
+  return [...out];
+}
+
 interface ProjectFiles {
   dashboards: Record<string, { path: string; spec: unknown }>;
   metrics: Record<string, { path: string; spec: unknown }>;
+  /** Every dataset's parameters and key (for the parameter bar and the dataset tiles). */
+  datasets: Record<string, DatasetInfo>;
   /** Data files read by model SQL, relative to the project dir. */
   data: string[];
   watched: string[];
@@ -174,10 +230,14 @@ export function modelSources(dir: string, rel: string, view: MetricsView): { dat
   return { data, problems };
 }
 
-/** Read and validate every dashboard and metrics file. Throws one error listing all problems. */
-export async function readProject(dir: string): Promise<ProjectFiles> {
+/**
+ * Read and validate every dashboard and metrics file, and the datasets' parameters. Throws one error listing all
+ * problems. `env`: where the datasets' connection URLs are (to read each SQL file with its database's rules).
+ */
+export async function readProject(dir: string, env?: Record<string, string | undefined>): Promise<ProjectFiles> {
   const problems: string[] = [];
-  const out: ProjectFiles = { dashboards: {}, metrics: {}, data: [], watched: [] };
+  const files = await readDatasets(dir, env);
+  const out: ProjectFiles = { dashboards: {}, metrics: {}, datasets: files.datasets, data: [], watched: [] };
   const modelsDir = path.join(dir, "models");
   for (const f of await list(modelsDir, ".metrics.yaml")) {
     const file = path.join(modelsDir, f);
@@ -204,7 +264,7 @@ export async function readProject(dir: string): Promise<ProjectFiles> {
     try {
       const spec = JSON.parse(await readFile(file, "utf8"));
       const d = defineDashboard(spec, name, rel);
-      problems.push(...dashboardProblems(dir, rel, d));
+      problems.push(...dashboardProblems(dir, rel, d), ...datasetProblems(rel, d, files));
       out.dashboards[name] = { path: `/${rel}`, spec };
     } catch (e) {
       problems.push(e instanceof DashboardError ? e.message : `${rel}: ${(e as Error).message}`);
@@ -344,7 +404,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
   };
   /** virtual:devbi is read again on the next load; .devbi/ follows models/. */
   const invalidate = (graph: { getModuleById(id: string): unknown; invalidateModule(mod: never): void }, rel: string) => {
-    if (rel.endsWith(".metrics.yaml")) void generate(dir).catch(() => undefined);
+    // .devbi/'s names: the metrics files', and the datasets' (api/*.sql) for query.dataset.
+    if (rel.endsWith(".metrics.yaml") || /^api\/[^/]+\.sql$/.test(rel)) void generate(dir).catch(() => undefined);
     const mod = graph.getModuleById(RESOLVED);
     if (mod) graph.invalidateModule(mod as never);
   };
@@ -419,7 +480,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
         ].join("\n");
       }
       if (id !== RESOLVED) return;
-      const project = await readProject(dir);
+      const project = await readProject(dir, { ...process.env, ...loadEnv(config.mode, config.envDir || config.root, "DEVBI_") });
       lastData = project.data;
       for (const f of project.watched) this.addWatchFile(f);
       const duck = resolveDuckdb(config.root);
@@ -451,6 +512,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
         `export default {`,
         `  dashboards: ${JSON.stringify(project.dashboards)},`,
         `  metrics: ${JSON.stringify(project.metrics)},`,
+        Object.keys(project.datasets).length ? `  datasets: ${JSON.stringify(project.datasets)},` : "",
         `  components: Object.fromEntries(Object.entries(components).map(([k, v]) => [k.slice(${prefix.length}), v])),`,
         `  baseUrl: import.meta.env.BASE_URL + ${JSON.stringify(base)},`,
         Object.keys(snapshots).length ? `  snapshots: ${JSON.stringify(snapshots)},` : "",
