@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { connect, createApiHandler, type ApiHandler, type Connection } from "../src/index.js";
 import { createServer, type Server } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { SAMPLE_DB, typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
+import { SAMPLE_DB, typedParameterTests, userFilterTests, writeTypedDatasets } from "./typed-cases.js";
 
 // A PostgreSQL to write test tables into, e.g. postgres://postgres@127.0.0.1:5432/postgres (CI's service container).
 const url = process.env.DEVBI_TEST_PG;
@@ -93,6 +93,7 @@ describe.skipIf(!url)("PostgreSQL", () => {
   });
 
   typedParameterTests(() => api);
+  userFilterTests((d) => createApiHandler({ dir: d, env: { DEVBI_DB: url }, exposeErrors: true }), "devbi_sample.");
 
   it("reads $$ … $$ text with PostgreSQL's rules", async () => {
     const res = await fetch(new URL("api/query", base), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "dollar" }) });

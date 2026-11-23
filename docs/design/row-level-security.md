@@ -1,6 +1,6 @@
 # 設計: 利用者ごとに見える行を変える（行レベル制御）
 
-- 状態: **設計（まだ作っていません）**。2026-11-23。内容が決まったら、下の [作る順番](#10-作る順番pr-の分け方) で PR に分けて作ります。作るときに、決まった形を [reference.md](../reference.md) と [deploying.md](../deploying.md) に書きます。
+- 状態: **作っています**。2026-11-23 に設計。下の [作る順番](#10-作る順番pr-の分け方) で PR に分けて作り、決まった形を [reference.md](../reference.md#利用者ごとに見える行を変える行レベル制御) と [deploying.md](../deploying.md) に書きます。1（サーバーの中心）を作りました。11 章の決めることは、この設計書の勧めのとおりにしています。
 - このフォルダ（`docs/design/`）のファイルは、ドキュメントのサイトのページになりません。
 - 関係する設計: [SQL のデータセットを表に繋ぐ（SSRS 風）](sql-datasets.md)（別のスレッドで設計中）。
 
@@ -455,7 +455,7 @@ devbi({
 
 ## 10. 作る順番（PR の分け方）
 
-1. **サーバーの中心（Node）**: 利用者の形、`:user.` の読み方と束縛（ブラウザのパラメーターと利用者を分けて受け取る）、`-- roles:`、`-- access: all` と書き間違いのエラー、行レベルのモード（`requireUser` とファイルの文字の検索）、`401` / `403`、`api/schema` の絞り込みと `"access": 1`、`handle` / `fetch` / `run` の `{ user }`、`access/user.sql`、スナップショットのジョブとログインの順番、古いスナップショットの片付け、`devbi-serve` の静的なファイルで `snapshots/` を配らないこと、ログ。reference の「データベースから読む」に節を足す。
+1. **サーバーの中心（Node）**: 利用者の形、`:user.` の読み方と束縛（ブラウザのパラメーターと利用者を分けて受け取る）、`-- roles:`、`-- access: all` と書き間違いのエラー、行レベルのモード（`requireUser` とファイルの文字の検索）、`401` / `403`、`api/schema` の絞り込みと `"access": 1`、`handle` / `fetch` / `run` の `{ user }`、`access/user.sql`、スナップショットのジョブとログインの順番、古いスナップショットの片付け、`devbi-serve` の静的なファイルで `snapshots/` を配らないこと、ログ。reference の「データベースから読む」に節を足す。**作りました。** 作るときに変えたこと: `snapshots/` の下は、行レベルのモードでなくても静的には配らない（API の口だけ。ずっと安全側で、困ることがないため）。2 の `server.fs.deny` の `access/**` も、`access/user.sql` と一緒にここで足した。`describe`（列を聞くだけで行は読まない）は、ツールからは利用者なしで呼べる（`:user.` には `"1"` を入れる）。`DevBI.reset()` はまだ。
 2. **開発サーバーと検査**: `devUsers` と「この人として見る」（このパソコンからだけ）、`server.fs.deny` に `access/**`、`devbi-check` の検査と `--as`・`--url`、`devbi-inspect --as`。サンプル（`examples/sales`）に、地域で絞る SQL と 2 人の開発用の利用者を足し、e2e で 2 人の合計が違うことを確かめる（ダッシュボードの数を数えている e2e と manual-check の項目に気をつける）。
 3. **`devbi-serve`**: `--user-header`、`--trusted-proxy`、`--proxy-secret-file`、`--user-lowercase`、`--user-cache`、`--require-user`。deploying.md に nginx・oauth2-proxy の例。
 4. **C#**: `DevBIUser`、`ApiRequest.User`、`DevBIOptions.RequireUser`、`MapDevBIApi` と `DevBIHttpHandler` が `HttpContext.User` から作る形、`access/user.sql`、パリティのテスト（`:user.` の読み方、`user` の名前の断り方、空の値）。IIS 用のヘッダーのモジュールは、IIS で確かめられたら足す。

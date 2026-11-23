@@ -1,5 +1,5 @@
 import { createReadStream, existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import path from "node:path";
@@ -91,15 +91,35 @@ export function isHostAllowed(header: string | undefined, allowed: string[] | tr
   });
 }
 
-/** Serve one file, with HEAD and single byte ranges (DuckDB reads Parquet and CSV in ranges). */
-async function sendFile(req: IncomingMessage, res: ServerResponse, root: string, pathname: string): Promise<void> {
+/** Windows and macOS find `Snapshots\\X.ARROWS` for `snapshots/x.arrows`: compare paths there without regard to case. */
+const FOLDS_CASE = process.platform === "win32" || process.platform === "darwin";
+
+/** Whether `file` is `dir` or inside it, both as real paths (links, short names, `.` and spaces Windows drops). */
+async function isInside(file: string, dir: string): Promise<boolean> {
+  const real = await realpath(dir).catch(() => path.resolve(dir));
+  const norm = (p: string) => (FOLDS_CASE ? p.toLowerCase() : p);
+  const f = norm(file);
+  const d = norm(real);
+  return f === d || f.startsWith(d.endsWith(path.sep) ? d : d + path.sep);
+}
+
+/**
+ * Serve one file, with HEAD and single byte ranges (DuckDB reads Parquet and CSV in ranges). Never one in `hidden`
+ * (the snapshots folders: those go through the API, which checks who asks).
+ */
+async function sendFile(req: IncomingMessage, res: ServerResponse, root: string, pathname: string, hidden: string[] = []): Promise<void> {
   let file = fileFor(root, pathname);
   let info = file ? await stat(file).catch(() => undefined) : undefined;
   if (file && info?.isDirectory()) {
     file = path.join(file, "index.html");
     info = await stat(file).catch(() => undefined);
   }
-  if (!file || !info?.isFile()) {
+  // The file's real path: `/snapshots//x.arrows`, `/Snapshots/x.arrows`, `/snapshots./x.arrows` (Windows) and links
+  // all find the same file as the API's `/snapshots/x.arrows`.
+  const real = file && info?.isFile() ? await realpath(file).catch(() => undefined) : undefined;
+  let refused = !real;
+  for (const dir of hidden) if (!refused && (await isInside(real!, dir))) refused = true;
+  if (!file || !info?.isFile() || refused) {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("見つかりません");
     return;
@@ -154,7 +174,10 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
   if (!existsSync(path.join(root, "index.html"))) {
     throw new Error(`${root} に index.html がありません。先にビルドしてください（pnpm build）`);
   }
-  const api = createApiHandler({ ...options, snapshotDir: options.snapshotDir ?? path.join(root, "snapshots") });
+  const snapshotDir = options.snapshotDir ?? path.join(root, "snapshots");
+  const api = createApiHandler({ ...options, snapshotDir });
+  // Snapshots are sent by the API only (`…/snapshots/<file>.arrows`), which checks who asks: never as plain files.
+  const hidden = [...new Set([path.join(root, "snapshots"), path.resolve(snapshotDir)])];
   const host = options.host ?? "127.0.0.1";
   const listening = host === "0.0.0.0" || host === "::" ? undefined : host;
   const server = createServer((req, res) => {
@@ -173,7 +196,7 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
           res.end();
           return;
         }
-        await sendFile(req, res, root, new URL(req.url ?? "/", "http://localhost").pathname);
+        await sendFile(req, res, root, new URL(req.url ?? "/", "http://localhost").pathname, hidden);
       } catch (e) {
         options.log?.((e as Error).message);
         if (!res.headersSent) res.writeHead(500);

@@ -340,8 +340,8 @@ function realPath(p: string): string {
 
 /** Vite's server.fs.deny when a project sets none (it is replaced, not added to, when one is given). */
 const VITE_DENY = [".env", ".env.*", "*.{crt,pem}", "**/.git/**"];
-/** Files the read-only API reads, which the browser must not get from the dev server. */
-const SERVER_ONLY = ["**/api/**/*.sql", "*.{sqlite,sqlite3,db}", "*.{sqlite,sqlite3,db}-{wal,shm,journal}"];
+/** Files the read-only API reads, which the browser must not get from the dev server (access/: row-level security). */
+const SERVER_ONLY = ["**/api/**/*.sql", "**/access/**", "*.{sqlite,sqlite3,db}", "*.{sqlite,sqlite3,db}-{wal,shm,journal}"];
 
 /**
  * The DevBI Vite plugin. Provides `virtual:devbi` (the project: dashboards, metrics, promoted tiles, DuckDB bundle),

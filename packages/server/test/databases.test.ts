@@ -12,7 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC, type Table } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { connect, createApiHandler, toArrowTable, type ApiHandler, type Connection, type Dialect } from "../src/index.js";
-import { typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
+import { typedParameterTests, userFilterTests, writeTypedDatasets } from "./typed-cases.js";
 
 const SAMPLE = path.resolve(import.meta.dirname, "../../../examples/sales");
 
@@ -231,6 +231,7 @@ for (const c of CASES) {
     });
 
     typedParameterTests(() => api);
+    userFilterTests((d) => createApiHandler({ dir: d, env: { DEVBI_DB: c.url }, exposeErrors: true }));
 
     it("sends parameters as values, and leaves quoted text alone", async () => {
       const t = tableFromIPC((await api.run("text", { id: 2 })).bytes);

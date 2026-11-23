@@ -258,8 +258,8 @@ export function headerDirectives(
   text: string,
   name: string,
   sqlParams: string[],
+  rel = `api/${name}.sql`,
 ): { parameters: (DatasetParameter & { type: ParamType })[]; key?: string[] } {
-  const rel = `api/${name}.sql`;
   const parameters: (DatasetParameter & { type: ParamType; line: number })[] = [];
   let key: { columns: string[]; line: number } | undefined;
   const lines = text.replace(/^﻿/, "").split(/\r?\n/);

@@ -288,10 +288,15 @@ export interface Parameter {
   end: number;
 }
 
+/** The characters of a parameter's name after the `:` (and of a user attribute's after `:user.`). */
+const PARAM_NAME = /^[A-Za-z_\u0080-\uffff][A-Za-z0-9_\u0080-\uffff]*/;
+
 /**
  * The `:name` parameters outside quotes and comments, in order (a name may appear more than once).
  * Not PostgreSQL's casts (`x::date`), not `:=`, and not a colon right after a name (`arr[a:b]` reads as a
- * parameter `b` only when a space or `[` comes before the colon).
+ * parameter `b` only when a space or `[` comes before the colon). `:user.region` is one name with its dot
+ * (`user.region`, the signed-in user's value: row-level security); `user` matches in ASCII letters only, so
+ * `:USER.id` is one too. Other dots end the name (`:a.b` is `a`).
  */
 export function parameters(sql: string, dialect?: string): Parameter[] {
   const syntax = syntaxes(dialect)[0]!;
@@ -313,8 +318,13 @@ export function parameters(sql: string, dialect?: string): Parameter[] {
         i += 2;
         continue;
       }
-      const name = /^[A-Za-z_\u0080-\uffff][A-Za-z0-9_\u0080-\uffff]*/.exec(sql.slice(i + 1, i + 129))?.[0];
+      let name = PARAM_NAME.exec(sql.slice(i + 1, i + 129))?.[0];
       if (name && !isNameChar(sql[i - 1])) {
+        // RegExp's i without u: ASCII letters only (the C# reference is to read it the same way: docs/design/row-level-security.md 10 章の 4)
+        if (/^user$/i.test(name) && sql[i + 5] === ".") {
+          const attr = PARAM_NAME.exec(sql.slice(i + 6, i + 134))?.[0];
+          if (attr) name = `${name}.${attr}`;
+        }
         out.push({ name, start: i, end: i + 1 + name.length });
         i += 1 + name.length;
         continue;

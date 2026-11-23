@@ -41,15 +41,16 @@ describe("datasets", () => {
 });
 
 describe("the dev server", () => {
-  it("does not hand out the API's SQL or the SQLite database", async () => {
+  it("does not hand out the API's SQL, access/ or the SQLite database", async () => {
     const { createServer } = await import("vite");
     const devbi = (await import("../src/index.js")).default;
     // Through a link, as on macOS (where the temporary folder /var/… is really /private/var/…).
     const real = mkdtempSync(path.join(tmpdir(), "devbi-dev-"));
     const dir = `${real}-link`;
     symlinkSync(real, dir, "junction");
-    for (const d of ["api", "db", "data"]) mkdirSync(path.join(dir, d));
+    for (const d of ["api", "db", "data", "access"]) mkdirSync(path.join(dir, d));
     writeFileSync(path.join(dir, "api", "orders.sql"), "SELECT 1 AS one");
+    writeFileSync(path.join(dir, "access", "user.sql"), "SELECT region FROM devbi_users WHERE login = :user.id");
     writeFileSync(path.join(dir, "db", "shop.data"), "not for the browser");
     writeFileSync(path.join(dir, "db", "other.sqlite"), "not for the browser");
     writeFileSync(path.join(dir, "data", "sales.csv"), "a\n1\n");
@@ -62,6 +63,8 @@ describe("the dev server", () => {
       expect(await status("data/sales.csv")).toBe(200);
       expect(await status("api/orders.sql")).toBe(403);
       expect(await status("api/orders.sql?raw")).toBe(403);
+      expect(await status("access/user.sql")).toBe(403);
+      expect(await status("access/user.sql?raw")).toBe(403);
       expect(await status("db/shop.data")).toBe(403);
       expect(await status("db/other.sqlite")).toBe(403);
       expect(await status(".env")).toBe(403);
