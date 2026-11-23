@@ -222,6 +222,16 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 - Oracle の桁の指定のない `NUMBER` や SQLite の計算した列のように、型が中身で決まる列は「実行するまで分からない」として扱う。
 - 列の名前の照らし方（`-- key:`、`options.columns`、`click`、ブラウザから来る列の名前）: まず同じ名前、なければ大文字と小文字を区別せずに 1 つだけ当たる名前。Oracle の `AS amount` は `AMOUNT` で返るので、`amount` と書いても当たる。2 つ以上に当たるときはエラー。
 
+### 4.8 参考: reylo
+
+[reylo](https://github.com/reylosql/reylo)（MIT）は、`.sql` ファイルを TypeScript から import し、開発用の DB に SQL を prepare させて（実行はしない）、列とパラメーターの型と NULL になりうるかを読み取る道具（2026-11-23 に利用者が共有）。「SQL を自前で読まず DB に聞く」という [4.7](#47-sql-を読み取る列とパラメーターの型) の考え方は同じなので、裏付けとして参考にする。依存はしない。
+
+- 依存しない理由: 対応する DB が PostgreSQL・MySQL（8.0.22 以上）・SQLite だけで、社内で多い SQL Server と Oracle がない。Node 24 以上と TypeScript 7.1（ベータ）の content mapper が要る（DevBI は Node 22 から）。使い方も、アプリの TypeScript から SQL を呼ぶ形で、DevBI の「サーバーが名前で SQL ファイルを実行し、ブラウザは名前と値だけ送る」形と違う。複数の値（`IN` の一覧）もない。
+- 取り入れること:
+  - **`-- param:` を DB から書き足す**: パラメーターの型を DB が教えてくれるとき（PostgreSQL・SQL Server）は、`devbi-check --write-params`（と GUI エディタのボタン）で、足りない `-- param:` の行を SQL ファイルに書き足す。型は実行のたびに DB に聞くのではなく、書いた行が決める（ビルドする環境に DB がなくても同じ動きになるように）。手で書く手間を減らしつつ、ファイルが正本で git の差分に出る、という今の約束を保つ。
+  - **NULL になりうる列**: `describe` で、列が NULL になりうるかも聞く（SQL Server の `is_nullable`、Oracle と MySQL の列の情報、PostgreSQL は元の表の列の `NOT NULL`。外部結合や式は「なりうる」とする）。`pnpm gen` の行の型（`string | null`）と、表の絞り込みに「(空白)」を出すかに使う。
+- 同じ SQL ファイルを両方で使えるように、データセットの本体には SQL として正しい書き方だけを使う（パラメーターは reylo と同じ `:名前`。DevBI の指示はコメントの行だけ）。ただし複数の値の `IN (:regions)` は DevBI だけの広げ方。
+
 ## 5. ダッシュボードのパラメーター（dash.json の `params`）
 
 ### 5.1 書かなくても出る
