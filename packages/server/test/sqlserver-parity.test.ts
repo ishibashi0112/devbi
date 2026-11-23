@@ -3,7 +3,20 @@
 // (dotnet/test/DevBI.Server.Tests/ParityTests.cs) read it and compare. When a change here alters an answer,
 // `pnpm test -u` rewrites the file, and the C# tests then say whether the C# code still agrees.
 import { describe, expect, it } from "vitest";
-import { bindParameters, connectionOf, parameters, parseDataset, readOnlyProblem, snapshotOf, splitStatements, type Dataset } from "../src/index.js";
+import {
+  accessLines,
+  bindParameters,
+  connectionOf,
+  parameters,
+  parseDataset,
+  readOnlyProblem,
+  rowLevelSignal,
+  snapshotOf,
+  splitStatements,
+  viewerOf,
+  type Dataset,
+  type DevBIUser,
+} from "../src/index.js";
 
 const texts = [
   "SELECT 1",
@@ -60,6 +73,12 @@ const sqls = [
   "SELECT o.[into], [o].exec FROM o",
   "SELECT a FROM t\nWHERE a = N'x'''';DROP TABLE t--'",
   `SELECT ${"a".repeat(300)}, update_x, x_update, "${"b".repeat(10)}" FROM t`,
+  // :user.<attribute>, the signed-in user's values (docs/design/row-level-security.md 6.1): `user` in ASCII letters only
+  "SELECT * FROM t WHERE r = :user.region AND s = :USER.Region AND o = :User.id AND x = :user.地域 AND y = :user_id",
+  "SELECT :user., :user..x, :user.1x, :userx.y, :user .x, x:user.y, :user.a.b, ':user.q', [:user.w], \"q:user.e\" FROM t",
+  "SELECT :ｕｓｅｒ.x, :uſer.x, :user.ſ, :user, :user.region::text, ::user.x FROM t -- :user.c",
+  `SELECT :user.${"a".repeat(130)}, :${"u".repeat(125)}ser.x FROM t`,
+  "SELECT :user.update, :user.into, :user.delete FROM t",
 ];
 
 const datasets: { name: string; text: string }[] = [
@@ -77,6 +96,21 @@ const datasets: { name: string; text: string }[] = [
   { name: "several", text: "SELECT 'a' + 'b;' FROM t WHERE x = ']'; DROP TABLE t" },
   { name: "not_select", text: "-- 説明\n(SELECT 1)" },
   { name: "spaces", text: "　-- connection:　erp　\n -- snapshot:　07:00　08:00\nSELECT 1" },
+  // -- roles:, -- access: and :user.<attribute> (docs/design/row-level-security.md 6 章)
+  {
+    name: "rls",
+    text: "-- 地域で絞る\n-- roles: 経理, CORP\\Managers、 経理\n\n-- 説明の 2 行目\nSELECT * FROM t WHERE r = :user.Region AND d >= :from AND o = :USER.id AND r2 = :user.region",
+  },
+  { name: "rls_all", text: "-- 全員\n-- Access : ALL\nSELECT * FROM t WHERE d >= :from" },
+  { name: "rls_both", text: "-- access: all\nSELECT * FROM t WHERE r = :user.region" },
+  { name: "rls_snapshot_user", text: "-- snapshot: 06:00\nSELECT * FROM t WHERE r = :user.region" },
+  { name: "rls_snapshot_roles", text: "-- snapshot: 06:00\n-- roles: a\n-- access: all\nSELECT * FROM t" },
+  { name: "rls_snapshot_all", text: "-- snapshot: 06:00\n-- access: all\nSELECT * FROM t" },
+  { name: "rls_param_user", text: "-- param: user.region text\nSELECT * FROM t WHERE r = :user.region" },
+  { name: "rls_typed", text: "-- param: r text[]\nSELECT * FROM t WHERE r IN (:r) AND o = :user.id AND x IN (:user.id)" },
+  { name: "rls_bare", text: "SELECT * FROM t WHERE r = :user AND s = :User" },
+  { name: "rls_late", text: "-- 説明\nSELECT * FROM t WHERE r = :user.region\n-- roles: a" },
+  { name: "rls_typo", text: "-- role: 経理\nSELECT * FROM t" },
   // -- param: and -- key: (docs/design/sql-datasets.md 4 章)
   {
     name: "typed",
@@ -141,7 +175,67 @@ const datasets: { name: string; text: string }[] = [
   { name: "late_not", text: "-- 説明\nSELECT * FROM t WHERE d = :d -- the param: d\n-- keys: a" },
 ];
 
-const binds: { text: string; values: Record<string, unknown> }[] = [
+// The -- roles: and -- access: lines (accessLines), and the text search for row-level mode (rowLevelSignal).
+const accessTexts = [
+  "-- roles: 経理, CORP\\Managers\nSELECT 1",
+  "-- roles: 経理、経理 , ,b\n-- access: all\nSELECT 1",
+  "\uFEFF-- 説明\r\n\r\n  --ROLES:a\r\nSELECT 1",
+  "-- roles:\nSELECT 1",
+  "-- roles: ,、 \nSELECT 1",
+  "-- roles: a\n-- roles: b\nSELECT 1",
+  "-- access: all\n-- 説明\n-- access: all\nSELECT 1",
+  "-- access: some\nSELECT 1",
+  "-- access:\nSELECT 1",
+  "-- access: all rows\nSELECT 1",
+  "-- Access: All\nSELECT 1",
+  "-- ｒｏｌｅｓ： 経理\nSELECT 1",
+  "-- roles：経理\nSELECT 1",
+  "-- roleſ: 経理\nSELECT 1",
+  "\u3000-- access:\u3000all\u3000\nSELECT 1",
+  "-- roles 経理\nSELECT 1",
+  "-- access all\nSELECT 1",
+  "-- x\n-- access\tall\nSELECT 1",
+  "-- access all_rows\nSELECT 1",
+  "-- accessall\nSELECT 1",
+  "-- Access log の SQL\nSELECT 1",
+  "-- access\nSELECT 1",
+  "-- role: 経理\nSELECT 1",
+  "-- rolse: 経理\nSELECT 1",
+  "-- Roels : 経理\nSELECT 1",
+  "-- acess: all\nSELECT 1",
+  "-- accesss: all\nSELECT 1",
+  "-- rules: a\nSELECT 1",
+  "-- roads: a\nSELECT 1",
+  "-- ro: a\nSELECT 1",
+  "-- myroles: x\nSELECT 1",
+  "--- roles: a\nSELECT 1",
+  "-- @roles: a\nSELECT 1",
+  "-- ※access: all\nSELECT 1",
+  "-- see roles: below\nSELECT 1",
+  "-- access::text\nSELECT 1",
+  "-- roles:: a\nSELECT 1",
+  "-- roles: a\rb\nSELECT 1",
+  "-- roles: a\u2028b\nSELECT 1",
+  "-- ROLES: Ｃｏｒｐ\\ｘ\nSELECT 1",
+  "-- connection: erp\n-- roles: a\n-- snapshot: 06:00\nSELECT 1",
+  "-- only comments\n-- roles: a",
+  "",
+  "SELECT 1\n-- roles: a",
+  "SELECT 1 -- access: all",
+  "/* roles: a */\nSELECT 1",
+  "-- roles: a\n\nSELECT :user.id FROM t /* access: */",
+  "SELECT a::text, access::int FROM t",
+  "SELECT 'roles: x' FROM t",
+  "SELECT access FROM t\nWHERE x = :USER.x",
+  "SELECT 1 FROM t -- ｒｏｌｅｓ：",
+  "SELECT '--' || 'access:' FROM t",
+  "SELECT 1\r-- roles: a",
+  "SELECT 1\u2028-- access: all",
+  "SELECT 1\n-- Access log",
+];
+
+type BindCase = { text: string; values: Record<string, unknown>; user?: DevBIUser | null; rowLevel?: boolean };
+const binds: BindCase[] = [
   { text: "SELECT * FROM t WHERE d >= :from AND d < :to AND x = :FROM", values: { to: "2024-05-01", from: "2024-04-01" } },
   { text: "SELECT * FROM t WHERE a = :a", values: { A: 1 } },
   { text: "SELECT * FROM t WHERE a = :a", values: { a: 1.5 } },
@@ -226,6 +320,40 @@ const binds: { text: string; values: Record<string, unknown> }[] = [
     text: "-- param: ids integer[]\n-- param: more integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:more) OR c = :x",
     values: { ids: Array.from({ length: 1000 }, (_, i) => i), more: Array.from({ length: 1000 }, (_, i) => i), x: 1 },
   },
+  // The signed-in user's values (:user.<attribute>): from the user only, never from the values the browser sends
+  ...((): BindCase[] => {
+    const text = "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION";
+    const values = { from: "2024-04-01" };
+    return [
+      { text, values, user: { id: " CORP\\yamada ", attrs: { Region: "関東" } } },
+      { text, values, user: { id: "u", attrs: { region: " 関東 ", dept: "営業" } } },
+      { text, values, user: { id: "u", attrs: { REGION: 0 } } },
+      { text, values, user: { id: "u", attrs: { region: false } } },
+      { text, values, user: { id: "u", attrs: { region: 1.5 } } },
+      { text, values, user: { id: "u", attrs: { region: 2 ** 60 } } },
+      { text, values, user: { id: "u", attrs: {} } },
+      { text, values, user: { id: "u" } },
+      { text, values, user: { id: "u", attrs: { region: "" } } },
+      { text, values, user: { id: "u", attrs: { region: " \u3000" } } },
+      { text, values, user: { id: "u", attrs: { region: null } } },
+      { text, values, user: { id: "" } },
+      { text, values, user: { id: " \t" } },
+      { text, values, user: null },
+      { text, values },
+      { text, values: { ...values, "user.region": "近畿" }, user: { id: "u", attrs: { region: "関東" } } },
+      { text, values: { "USER.Region": "近畿", ...values }, user: { id: "u", attrs: { region: "関東" } } },
+      { text, values: { ...values, "user.": "x" }, user: { id: "u", attrs: { region: "関東" } } },
+      { text: "SELECT * FROM t WHERE o = :user.id", values: { "uſer.id": "x" }, user: { id: "u" } },
+      { text: "SELECT * FROM t WHERE o = :user.id", values: { user_id: "x" }, user: { id: "u" } },
+      { text: "SELECT * FROM t WHERE a = :user", values: { user: "x" }, rowLevel: true },
+      { text: "SELECT * FROM t WHERE a = :user", values: { USER: "x" }, rowLevel: false },
+      { text: "SELECT * FROM t WHERE a = :User", values: { User: "x" }, user: { id: "u" }, rowLevel: true },
+      { text: "SELECT * FROM t WHERE a = :user_id", values: { user_id: "x" }, user: { id: "u" }, rowLevel: true },
+      { text: "-- param: r text[]\nSELECT * FROM t WHERE r IN (:r) AND o = :user.id AND x IN (:user.id)", values: { r: ["a", "b"] }, user: { id: "u" } },
+      { text: "SELECT * FROM t WHERE r = :user.地域 AND o = :user.id", values: {}, user: { id: "CORP\\鈴木", attrs: { 地域: "近畿" } } },
+      { text: "SELECT * FROM t WHERE r = :user.id", values: {}, user: { id: "u", attrs: { region: "x" } }, rowLevel: true },
+    ];
+  })(),
 ];
 
 const errorOf = (e: unknown) => ({ error: (e as Error).message, ...((e as { status?: number }).status ? { status: (e as { status: number }).status } : {}) });
@@ -238,6 +366,9 @@ const datasetOf = (d: Dataset) => ({
   params: d.params,
   parameters: d.parameters,
   key: d.key ?? null,
+  user: d.user ?? null,
+  roles: d.roles ?? null,
+  access: d.access ?? null,
 });
 
 describe("the SQL Server cases the C# reference checks against", () => {
@@ -257,12 +388,25 @@ describe("the SQL Server cases the C# reference checks against", () => {
           return { name, text, header, dataset: errorOf(e) };
         }
       }),
-      binds: binds.map(({ text, values }) => {
+      access: accessTexts.map((text) => {
+        let lines;
         try {
-          const { sql, params } = bindParameters(parseDataset("x", text, "mssql"), "mssql", values);
-          return { text, values, bound: { sql, values: params } };
+          const l = accessLines(text, "api/x.sql");
+          lines = { roles: l.roles ?? null, access: l.access ?? null };
         } catch (e) {
-          return { text, values, bound: errorOf(e) };
+          lines = errorOf(e);
+        }
+        return { text, lines, signal: rowLevelSignal(text) ?? null };
+      }),
+      // the user as the host hands it over (viewerOf: the id trimmed, empty attributes as none)
+      binds: binds.map(({ text, values, user, rowLevel }) => {
+        const asked = { text, values, ...(user !== undefined ? { user } : {}), ...(rowLevel !== undefined ? { rowLevel } : {}) };
+        try {
+          const viewer = viewerOf(user);
+          const { sql, params } = bindParameters(parseDataset("x", text, "mssql"), "mssql", values, { ...(viewer ? { user: viewer } : {}), rowLevel: rowLevel ?? false });
+          return { ...asked, bound: { sql, values: params } };
+        } catch (e) {
+          return { ...asked, bound: errorOf(e) };
         }
       }),
     };

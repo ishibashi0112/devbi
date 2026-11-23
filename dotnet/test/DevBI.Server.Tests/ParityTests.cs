@@ -118,6 +118,9 @@ namespace DevBI.Server.Tests
                         ["params"] = Strings(d.Params),
                         ["parameters"] = new JsonArray(d.Parameters.Select(p => (JsonNode?)ParameterJson(p)).ToArray()),
                         ["key"] = d.Key == null ? null : Strings(d.Key),
+                        ["user"] = d.User == null ? null : Strings(d.User),
+                        ["roles"] = d.Roles == null ? null : Strings(d.Roles),
+                        ["access"] = d.Access,
                     };
                 }
                 catch (DatasetException e)
@@ -131,17 +134,53 @@ namespace DevBI.Server.Tests
         }
 
         [Fact]
+        public void ReadsTheLinesThatSayWhoMayRead()
+        {
+            Compare("access", c =>
+            {
+                var text = c["text"]!.GetValue<string>();
+                JsonNode lines;
+                try
+                {
+                    var l = Access.Read(text, "api/x.sql");
+                    lines = new JsonObject { ["roles"] = l.Roles == null ? null : Strings(l.Roles), ["access"] = l.Access };
+                }
+                catch (AccessLineException e)
+                {
+                    lines = new JsonObject { ["error"] = e.Message };
+                }
+                var expected = new JsonObject { ["lines"] = c["lines"]!.DeepClone(), ["signal"] = c["signal"]?.DeepClone() };
+                var actual = new JsonObject { ["lines"] = lines, ["signal"] = Access.RowLevelSignal(text) };
+                return (JsonSerializer.Serialize(text), expected, actual);
+            });
+        }
+
+        /// <summary>A JSON value as the API reads it from a request.</summary>
+        private static object? ValueOf(JsonNode? v) => DevBIApi.ValueOf(JsonDocument.Parse(v?.ToJsonString() ?? "null").RootElement);
+
+        [Fact]
         public void BindsParameters()
         {
             Compare("binds", c =>
             {
                 var text = c["text"]!.GetValue<string>();
                 // the values as the API reads them from a request's JSON
-                var values = c["values"]!.AsObject().Select(p => new KeyValuePair<string, object?>(p.Key, DevBIApi.ValueOf(JsonDocument.Parse(p.Value?.ToJsonString() ?? "null").RootElement))).ToList();
+                var values = c["values"]!.AsObject().Select(p => new KeyValuePair<string, object?>(p.Key, ValueOf(p.Value))).ToList();
+                // the user as the host hands it over
+                DevBIUser? user = null;
+                if (c["user"] is JsonObject u)
+                {
+                    user = new DevBIUser { Id = u["id"]!.GetValue<string>() };
+                    if (u["attrs"] is JsonObject attrs)
+                    {
+                        foreach (var a in attrs) user.Attributes[a.Key] = ValueOf(a.Value);
+                    }
+                }
+                var rowLevel = c["rowLevel"]?.GetValue<bool>() ?? false;
                 JsonNode bound;
                 try
                 {
-                    var b = Dataset.Parse("x", text).Bind(values);
+                    var b = Dataset.Parse("x", text).Bind(values, user, rowLevel);
                     bound = new JsonObject { ["sql"] = b.Sql, ["values"] = new JsonArray(b.Values.Select(Value).ToArray()) };
                 }
                 catch (DatasetException e)

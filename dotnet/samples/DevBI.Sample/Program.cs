@@ -23,6 +23,11 @@ var api = new DevBIApi(new DevBIOptions
     // the environment variable ConnectionStrings__DEVBI_DB). Give it a login that may only SELECT.
     Connect = name => app.Configuration.GetConnectionString(name) is { Length: > 0 } text ? new SqlConnection(text) : null,
     Log = line => app.Logger.LogInformation("{Line}", line),
+    // Rows by who signed in (api/*.sql with :user.<attr>, docs/reference.md): RequireUser = true, a sign-in
+    // (Windows: builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate()), and
+    // app.MapDevBIApi("/", api).RequireAuthorization(). HttpContext.User is then the user the SQL sees. This sample
+    // has no sign-in: with DevBI__RequireUser=true (docs/manual-check.md) every request is 401, nobody's rows go out.
+    RequireUser = app.Configuration.GetValue<bool>("DevBI:RequireUser"),
 });
 app.MapDevBIApi("/", api);
 
