@@ -68,7 +68,7 @@ npm run build      # dist/ ができる（npm run preview で http://localhost:4
 - `data/` の Excel や CSV、スナップショット（`snapshots/*.arrows`）は、URL を知っていれば直接ダウンロードできます。
 - 読み取り API（`api/query`）に届く人は、`api/` の**どの SQL でも**、名前とパラメーターを自分で送って読めます（`api/schema` が一覧を返します）。ダッシュボードに出していない SQL も同じです。
 - パラメーター（`read_api('orders', from = '…')` の値）はブラウザが送るので、利用者が書き換えられます。見せてはいけない行を、パラメーターや絞り込みで隠さないでください。
-- 人によって見せる行を変えるには、ホストがログインした人を API に渡し、`api/*.sql` の中を `:user.region` のように絞ります（[行レベル制御](reference.md#利用者ごとに見える行を変える行レベル制御)）。今は Node のサーバー（`@devbi/server` を自分のアプリに組み込む形）、`devbi-serve`（前に置いたサーバーからユーザー名を受け取る。[ログインした人ごとに見える行を変える](#ログインした人ごとに見える行を変える)）、ASP.NET（C#。[ASP.NET Core](#aspnet-core)、[WebForms・MVC 5](#webformsmvc-5net-framework-472-以降)）で使えます。Next.js の見本はこのあと足します。使わないあいだは、API はだれが開いても同じ行を返します。
+- 人によって見せる行を変えるには、ホストがログインした人を API に渡し、`api/*.sql` の中を `:user.region` のように絞ります（[行レベル制御](reference.md#利用者ごとに見える行を変える行レベル制御)）。今は Node のサーバー（`@devbi/server` を自分のアプリに組み込む形）、`devbi-serve`（前に置いたサーバーからユーザー名を受け取る。[ログインした人ごとに見える行を変える](#ログインした人ごとに見える行を変える)）、ASP.NET（C#。[ASP.NET Core](#aspnet-core)、[WebForms・MVC 5](#webformsmvc-5net-framework-472-以降)）、Next.js（[Next.js](#nextjs)）で使えます。使わないあいだは、API はだれが開いても同じ行を返します。
 
 なので、守るのは「サイト（と API）に入れる人」です。
 
@@ -465,6 +465,7 @@ API は `app/devbi/[...path]/route.ts` 1 つで、`@devbi/server` の `createApi
 - `public/devbi/` のファイルは route を通らずに配られます。`data/` のファイルもログインで守るときは、`proxy.ts` の `matcher` に `/devbi/:path*` を入れます。
 - `next start` のサーバーが動き続けるなら、`instrumentation.ts` でスナップショットを毎朝作れます。そうでないときは、`devbi-snapshot --dir <プロジェクト> --out <フォルダ>` をタスクスケジューラや cron で動かし、`lib/devbi.ts` の `snapshotDir` を `<フォルダ>/snapshots` にします（`public/devbi/` には作りません。`next start` は動き始めたあとに `public/` に足したファイルを配らず、`public/` の古いファイルが route より先に配られるため）。
 - 行が多いときは、前に置く IIS や nginx で、Arrow（`application/vnd.apache.arrow.stream`）も圧縮させます（`route.ts` の答えは gzip になりません）。
+- 人ごとに見える行を変えるときは、`lib/devbi.ts` に `requireUser: true` を足し、`route.ts` でアプリのセッションから利用者を作って `devbi.fetch(request, { user })` に渡します（[Next.js でログインした人を渡す](reference.md#nextjs-でログインした人を渡す)、見本は `examples/nextjs` の「担当の売上」）。`devbi-snapshot` を使うなら、`--require-user` も付けます。
 
 ### ほかのアプリ（Java、PHP、Python など）
 

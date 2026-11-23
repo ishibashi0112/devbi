@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --config e2e/rls.vite.config.ts",
     "preview": "vite preview",
     "typecheck": "devbi-gen && tsc -p tsconfig.json",
     "gen:data": "node scripts/generate-data.mjs",
@@ -12,7 +12,7 @@
     "gen": "devbi-gen",
     "check": "devbi-check",
     "inspect": "devbi-inspect",
-    "e2e": "vite build && playwright test --trace off",
+    "e2e": "pnpm run build && playwright test --trace off",
     "serve": "devbi-serve",
     "gen:db": "node scripts/generate-db.mjs",
     "copy-db": "node scripts/copy-db.mjs"

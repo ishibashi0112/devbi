@@ -7,3 +7,5 @@ main { max-width: 1280px; margin: 0 auto; padding: 16px 24px 48px; }
 h1 { color: #8a1c1c; font-size: 22px; }
 p { line-height: 1.7; }
 .report { margin-top: 16px; }
+.sign-in { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.sign-in button { padding: 6px 14px; border: 1px solid #1f3a5f; border-radius: 4px; background: #fff; color: #1f3a5f; font: inherit; cursor: pointer; }

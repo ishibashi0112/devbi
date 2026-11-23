@@ -78,3 +78,53 @@ test("the route answers like devbi-serve: the SQL files, Japanese errors, and on
   const other = await request.get("/devbi/api/schema", { headers: { Host: "elsewhere.example" } });
   expect(other.status()).toBe(403);
 });
+
+// 「担当の売上」: the row-level security example (examples/sales/e2e/rls), its API in app/devbi-rls/[...path]/route.ts
+// with the user of the app's session (lib/session.ts), and requireUser.
+test("「担当の売上」 shows each person who signs in only their own region's orders", async ({ page }) => {
+  const { errors } = watch(page);
+  await page.goto("/");
+  await page.getByRole("link", { name: "担当の売上（ログイン）" }).click();
+  await expect(page.getByRole("button", { name: "山田（関東の担当）としてログイン" })).toBeVisible();
+  await expect(page.locator(".devbi-root")).toHaveCount(0);
+  await page.getByRole("button", { name: "山田（関東の担当）としてログイン" }).click();
+  await expect(page.getByTestId("signed-in")).toHaveText("山田（関東の担当）（CORP\\yamada）でログインしています");
+  await expect(kpi(page, "kpi-revenue")).toHaveText("¥72,393,280");
+  await expect(tile(page, "region").locator("li")).toHaveCount(1);
+  await expect(tile(page, "region").locator("li")).toContainText("関東");
+  // region_totals (-- access: all) shows every region to everyone
+  await expect(tile(page, "all-regions")).toContainText("中国・四国");
+  await expect(tile(page, "all-regions")).toContainText("¥8,568,450");
+
+  // Another person: a whole new page (the form's 303), with no rows of the one before.
+  await page.getByRole("button", { name: "ログアウト" }).click();
+  await page.getByRole("button", { name: "鈴木（近畿の担当）としてログイン" }).click();
+  await expect(kpi(page, "kpi-revenue")).toHaveText("¥42,290,840");
+  await expect(tile(page, "region").locator("li")).toHaveCount(1);
+  await expect(tile(page, "region").locator("li")).toContainText("近畿");
+  expect(errors).toEqual([]);
+});
+
+test("「担当の売上」 refuses who has no region (403), and anyone without the app's session (401)", async ({ page, request }) => {
+  await page.goto("/my");
+  await page.getByRole("button", { name: "佐藤（担当の地域なし）としてログイン" }).click();
+  await expect(tile(page, "kpi-revenue")).toContainText("API の orders を読めません（403）: 利用者 CORP\\sato に属性 region がありません（api/orders.sql の :user.region）");
+
+  const nobody = await request.get("/devbi-rls/api/schema");
+  expect([nobody.status(), await nobody.json()]).toEqual([401, { error: "ログインしていません（ポータルの「担当の売上（ログイン）」からログインします）", access: 1 }]);
+  // A cookie the server did not sign is nobody's.
+  const forged = await request.get("/devbi-rls/api/schema", { headers: { Cookie: "portal_session=yamada.AAAA" } });
+  expect(forged.status()).toBe(401);
+  // A form on another site cannot sign anyone in.
+  const crossSite = await request.post("/session", { form: { person: "yamada" }, headers: { "Sec-Fetch-Site": "cross-site" }, maxRedirects: 0 });
+  expect(crossSite.status()).toBe(403);
+
+  const signIn = await request.post("/session", { form: { person: "yamada" }, maxRedirects: 0 });
+  expect([signIn.status(), signIn.headers()["location"]]).toEqual([303, "/my"]);
+  const schema = await (await request.get("/devbi-rls/api/schema")).json();
+  expect(schema.datasets.map((d: { name: string }) => d.name)).toEqual(["orders", "region_totals"]);
+  expect([schema.access, schema.user]).toEqual([1, { id: "CORP\\yamada" }]);
+  // The browser's parameters cannot be the user's: user.region is not a parameter.
+  const asOther = await request.post("/devbi-rls/api/query", { data: { name: "orders", params: { from: "2024-04-01", "user.region": "近畿" } } });
+  expect(asOther.status()).toBe(400);
+});
