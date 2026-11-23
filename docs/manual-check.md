@@ -537,7 +537,7 @@ ASP.NET Core と WebForms の API が、ログインした人（`HttpContext.Use
 
 | # | すること | 期待する結果 |
 | --- | --- | --- |
-| 221 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln --filter "FullyQualifiedName~User"` | `Passed!` と出て、`Failed: 0, Passed: 8`（SQL Server で人ごとの行と `access/user.sql`、ASP.NET Core の `HttpContext.User` と `user:`、形の違う利用者の断り方など、名前に User を含むテスト）。`:user.`・`-- roles:`・`-- access:` の読み方が Node と同じことは、59 の `ParityTests` が確かめる |
+| 221 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln --filter "FullyQualifiedName~User"` | `Passed!` と出て、`Failed: 0, Passed: 10`（SQL Server で人ごとの行と `access/user.sql`（日付の列も）、ASP.NET Core の `HttpContext.User` と `user:`、形の違う利用者の断り方など、名前に User を含むテスト）。`:user.`・`-- roles:`・`-- access:` の読み方が Node と同じことは、59 の `ParityTests` が確かめる |
 | 222 | 55 のコマンドの前に `DevBI__RequireUser=true` を足して起動し（PowerShell では `$env:DevBI__RequireUser="true"`）、<http://127.0.0.1:4179/api/schema> と <http://127.0.0.1:4179/#/sales-db> を開く | `{"error":"ログインしていません","access":1}`。タイルにも「API の orders を読めません（401）: ログインしていません」。見本にはログインがないので、行レベルのモードではだれにも行を返さない |
 | 223 | （Windows の IIS があるとき）WebForms のアプリで `RequireUser = true` にし、IIS で Windows 認証をかけて、`~/App_Data/devbi/api/` に `SELECT :user.id AS 見ている人` だけの `whoami.sql` を置く。ダッシュボードのページを開いたまま、ブラウザの開発者ツールのコンソールで `(await fetch("Scripts/devbi/api/query", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name: "whoami"})})).status` | `200`（ログインした人として読めた）。`DevBIOptions.Log` に渡したログに `CORP\<自分> api/whoami.sql: 1 行、… ms`。IIS の Windows 認証を外して匿名認証にすると `401` |
 

@@ -17,6 +17,8 @@ import {
   type Dataset,
   type DevBIUser,
 } from "../src/index.js";
+import { tableUserOf } from "../src/access.js";
+import type { ColumnType } from "../src/result.js";
 
 const texts = [
   "SELECT 1",
@@ -173,6 +175,7 @@ const datasets: { name: string; text: string }[] = [
   { name: "late_key", text: "-- param: d date\nSELECT * FROM t\n-- key: id\nWHERE d = :d" },
   { name: "late_in_sql", text: "SELECT * FROM t WHERE d = :d -- param: d date\n  -- Param : d" },
   { name: "late_not", text: "-- 説明\nSELECT * FROM t WHERE d = :d -- the param: d\n-- keys: a" },
+  { name: "nonchar", text: "-- 受注\uFFFE\n-- roles: ａ\uFFFE\nSELECT * FROM t WHERE r = :user.region" },
 ];
 
 // The -- roles: and -- access: lines (accessLines), and the text search for row-level mode (rowLevelSignal).
@@ -232,6 +235,27 @@ const accessTexts = [
   "SELECT 1\r-- roles: a",
   "SELECT 1\u2028-- access: all",
   "SELECT 1\n-- Access log",
+  // noncharacters, which .NET's normalization refuses (JavaScript keeps them)
+  "SELECT 1 -- x\uFFFE",
+  "-- 説明\uFFFE\n-- ｒｏｌｅｓ：\uFFFF経理\nSELECT 1",
+  "-- \uFDD0access: all\nSELECT 1",
+  "-- ａｃｃｅｓｓ：ａｌｌ\uFFFE\nSELECT 1",
+];
+
+// The row access/user.sql returns (tableUserOf), as the drivers hand it over: dates and timestamps as text.
+const tableUsers: { columns: { name: string; type: ColumnType }[]; row: unknown[] | null }[] = [
+  { columns: [{ name: "region", type: "string" }, { name: "roles", type: "string" }], row: ["関東", "営業、 経理 ,営業,, "] },
+  { columns: [{ name: "Region", type: "string" }, { name: "ROLES", type: "string" }], row: [null, null] },
+  { columns: [{ name: "region", type: "string" }, { name: "roles", type: "string" }], row: null },
+  { columns: [{ name: "n", type: "int" }, { name: "f", type: "float" }, { name: "ok", type: "bool" }, { name: "blank", type: "string" }], row: [3, 1.5, false, " \u3000"] },
+  { columns: [{ name: "since", type: "date" }, { name: "at", type: "timestamp" }, { name: "before", type: "timestamp" }], row: ["2024-01-02", "2024-01-02 03:04:05.123", "1969-12-31 23:59:59"] },
+  { columns: [{ name: "id", type: "string" }], row: ["x"] },
+  { columns: [{ name: "region", type: "string" }, { name: "REGION", type: "string" }], row: ["a", "b"] },
+  { columns: [{ name: "roles", type: "int" }], row: [1] },
+  { columns: [{ name: "地域", type: "string" }], row: ["a"] },
+  { columns: [{ name: "a b", type: "string" }], row: ["a"] },
+  { columns: [{ name: "user", type: "string" }], row: ["a"] },
+  { columns: [{ name: "x", type: "string" }], row: null },
 ];
 
 type BindCase = { text: string; values: Record<string, unknown>; user?: DevBIUser | null; rowLevel?: boolean };
@@ -397,6 +421,17 @@ describe("the SQL Server cases the C# reference checks against", () => {
           lines = errorOf(e);
         }
         return { text, lines, signal: rowLevelSignal(text) ?? null };
+      }),
+      tableUsers: tableUsers.map(({ columns, row }) => {
+        try {
+          const t = tableUserOf(
+            columns.map((c) => c.name),
+            row ?? undefined,
+          );
+          return { columns, row, user: { attrs: Object.fromEntries(t.attrs), roles: t.roles } };
+        } catch (e) {
+          return { columns, row, user: errorOf(e) };
+        }
       }),
       // the user as the host hands it over (viewerOf: the id trimmed, empty attributes as none)
       binds: binds.map(({ text, values, user, rowLevel }) => {

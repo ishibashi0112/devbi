@@ -315,7 +315,9 @@ namespace DevBI.Server
                 var value = Task.Run(() => LookUpAsync(id));
                 if (options.UserCache > TimeSpan.Zero)
                 {
-                    userCache[id] = new CachedUser(now + options.UserCache, value, cacheOrder.AddLast(id));
+                    // TimeSpan.MaxValue: kept as long as the server runs (rather than an overflow)
+                    var until = options.UserCache >= TimeSpan.MaxValue - now ? TimeSpan.MaxValue : now + options.UserCache;
+                    userCache[id] = new CachedUser(until, value, cacheOrder.AddLast(id));
                     if (userCache.Count > MaxCachedUsers)
                     {
                         var oldest = cacheOrder.First!;
@@ -589,10 +591,11 @@ namespace DevBI.Server
         /// <see cref="RunAsync(string, IEnumerable{KeyValuePair{string, object}}, CancellationToken)"/> as the signed-in
         /// user (row-level security): the same checks as <c>api/query</c>.
         /// </summary>
-        public Task<QueryResult> RunAsync(string name, IEnumerable<KeyValuePair<string, object?>>? parameters, DevBIUser? user, CancellationToken cancellationToken = default)
+        public async Task<QueryResult> RunAsync(string name, IEnumerable<KeyValuePair<string, object?>>? parameters, DevBIUser? user, CancellationToken cancellationToken = default)
         {
+            // async: a user of the wrong shape or a folder that cannot be read fails the task (is not thrown before it)
             var asker = AskerOf(user, null);
-            return RunAsAsync(name, parameters ?? Enumerable.Empty<KeyValuePair<string, object?>>(), asker, ModeFor(asker), cancellationToken);
+            return await RunAsAsync(name, parameters ?? Enumerable.Empty<KeyValuePair<string, object?>>(), asker, ModeFor(asker), cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>

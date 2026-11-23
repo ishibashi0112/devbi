@@ -1189,7 +1189,7 @@ SELECT code AS 商品コード, name AS 商品名 FROM products
 いちばん起こりやすい事故は、あとから足した `api/*.sql` で絞り忘れることです。そこで、プロジェクトが**行レベルのモード**のときは、次の決まりにします。
 
 1. **すべての** `api/*.sql` に、`:user.` か `-- access: all` が要ります。どちらもないファイルは実行せず、`400` と「api/x.sql は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: …）」を返します。`:user`（点なし）も、`:user.id` の書き間違いとしてエラーです。
-2. **すべての**リクエスト（`api/schema`、`api/query`、`snapshots/`、ホストが呼ぶ `run`）に、ログインが要ります。利用者がなければ `401` です。ホストが利用者を渡し忘れても、行が出ていくことはありません。
+2. **すべての**リクエスト（`api/schema`、`api/query`、`snapshots/`、ホストが呼ぶ `run`）に、ログインが要ります。利用者がなければ `401` です。ホストが利用者を渡し忘れても、行が出ていくことはありません。C# の API では `snapshots/` は IIS などが静的なファイルとして配るので、サイトのログインで守ります（[ASP.NET（C#）でログインした人を渡す](#aspnetcでログインした人を渡す)）。
 
 行レベルのモードになるのは、次のどれかのときです。メッセージの最後の（ ）に、どれでなったかが出ます。
 
@@ -1240,17 +1240,21 @@ var api = new DevBIApi(new DevBIOptions { Directory = ..., Connect = ..., Requir
 app.MapDevBIApi("/reports", api).RequireAuthorization();
 
 // OpenID Connect（Entra ID）などで、ID にするクレームを決めるとき
-app.MapDevBIApi("/reports", api, user: context => new DevBIUser
+app.MapDevBIApi("/reports", api, user: context =>
 {
-    Id = context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value,   // Entra ID の oid
-    IsInRole = context.User.IsInRole,
-    Attributes = { ["region"] = context.User.FindFirst("region")?.Value },
+    var id = context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;   // Entra ID の oid
+    if (id == null) return null;   // ログインしていない
+    var user = new DevBIUser { Id = id, IsInRole = context.User.IsInRole };
+    // クレームがないときは足さない（null は「その属性はない」で、access/user.sql の値も使わない）
+    if (context.User.FindFirst("region") is { } region) user.Attributes["region"] = region.Value;
+    return user;
 }).RequireAuthorization();
 ```
 
 - `user` を書かなければ、`MapDevBIApi` は `HttpContext.User` から、ID を `User.Identity.Name`、役割を `User.IsInRole` にして渡します。Windows 認証なら `CORP\yamada` と AD のグループです（`-- roles:` の名前の比べ方は `IsInRole` のとおり）。ログインしていない人（`IsAuthenticated` でない）は、利用者なしです。OpenID Connect では、`Identity.Name` にどのクレームが入るかがアプリの設定（`NameClaimType`）で変わるので、上のように `user` で変わらない ID のクレームを選びます。
 - `DevBIUser` の `Id`・`IsInRole`・`Attributes` は、Node の `id`・`roles`・`attrs` と同じ決まりです（上の表）。役割は一覧ではなく `IsInRole(名前)` で聞きます（Windows のグループは数が多いため）。`Attributes` にない名前は、[`access/user.sql`](#利用者の属性と役割を表から引くaccessusersql) の値を使い、`null` を入れた名前は「その属性はない」です。
 - `DevBIOptions.RequireUser = true` で行レベルのモードにします（Node の `requireUser`）。`DevBIOptions.UserCache` は `access/user.sql` の結果を覚えておく時間です（既定 60 秒、`TimeSpan.Zero` で毎回読む）。
+- **サイト全体にログインをかけます。** C# の API は `snapshots/` を配らず、`snapshots/` と `data/` のファイルは IIS や `UseStaticFiles` が静的なファイルとして配るので、API の `401` はそこには届きません。ASP.NET Core では、どこにも決まりのないリクエストにもログインを求め（`FallbackPolicy`）、`UseStaticFiles` を `UseAuthorization` のあとに置きます。IIS では匿名認証を無効にします（[社内に公開する](deploying.md#aspnet-core)）。
 - C# の API はスナップショットを作らないので、`devbi-snapshot` をタスクスケジューラで動かします（[スナップショット](#毎朝のスナップショット)）。`RequireUser = true` にしたら、`devbi-snapshot` にも `--require-user` を付けます。付けないと、プロジェクトのファイルだけでは行レベルのモードにならないとき、`-- access: all` のない SQL のスナップショットも作ってしまい、IIS がそれをログインした人のだれにでも配ります。
 - WebForms・MVC 5 の `DevBIHttpHandler` も、`HttpContext.User` から同じように作ります。作り方を変えるときは、`DevBIHttpHandler` を継承して `UserOf(HttpContext)` を書き換え、`web.config` にはその型を書きます。
 - ホストが自分で SQL を実行するときは `api.RunAsync(name, parameters, user)`、ほかの Web の仕組みにつなぐときは `ApiRequest.User`（と、`401` の（ ）に入る `ApiRequest.SignInHint`）に入れます。

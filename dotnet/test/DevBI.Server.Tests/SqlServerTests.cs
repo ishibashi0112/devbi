@@ -487,6 +487,26 @@ namespace DevBI.Server.Tests
         }
 
         [SqlServerFact]
+        public async Task ReadsDatesOfAccessUserSqlAsNodeDoes()
+        {
+            var dir = System.IO.Directory.CreateTempSubdirectory("devbi-rls-").FullName;
+            System.IO.Directory.CreateDirectory(Path.Combine(dir, "api"));
+            System.IO.Directory.CreateDirectory(Path.Combine(dir, "access"));
+            File.WriteAllText(Path.Combine(dir, "api", "when.sql"), "SELECT :user.since AS since, :user.at AS at, :user.moment AS moment");
+            File.WriteAllText(
+                Path.Combine(dir, "access", "user.sql"),
+                "SELECT CAST('2024-01-02' AS date) AS since, CAST('2024-01-02 03:04:05.1234567' AS datetime2) AS at, CAST('2024-01-02 12:04:05 +09:00' AS datetimeoffset) AS moment WHERE N'u' = :user.id");
+            var api = new DevBIApi(new DevBIOptions { Directory = dir, Connect = _ => new SqlConnection(SqlServer.ConnectionString) });
+            var r = await Ask(api, "{\"name\":\"when\"}", new DevBIUser { Id = "u" });
+            Assert.Equal(200, r.Status);
+            var batch = Read(r.Body);
+            // as devbi-serve's mssql: YYYY-MM-DD, and the time to the millisecond (a moment's in UTC)
+            Assert.Equal(
+                ("2024-01-02", "2024-01-02 03:04:05.123", "2024-01-02 03:04:05"),
+                (((StringArray)batch.Column("since")).GetString(0), ((StringArray)batch.Column("at")).GetString(0), ((StringArray)batch.Column("moment")).GetString(0)));
+        }
+
+        [SqlServerFact]
         public async Task ReadsAccessUserSqlOnlyWhenNeededAndKeepsIt()
         {
             const string mine = "{\"name\":\"mine\",\"params\":{\"from\":\"2024-04-01\"}}";

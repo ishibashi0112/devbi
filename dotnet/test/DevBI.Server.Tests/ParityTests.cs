@@ -155,6 +155,55 @@ namespace DevBI.Server.Tests
             });
         }
 
+        private static readonly DateTime Epoch = new DateTime(1970, 1, 1);
+
+        /// <summary>A value of access/user.sql's row as SqlServerQuery hands it over: dates as days, timestamps as microseconds since 1970.</summary>
+        private static object? CellOf(JsonNode? v, ColumnType type)
+        {
+            if (v == null) return null;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            switch (type)
+            {
+                case ColumnType.Date:
+                    return (int)(DateTime.ParseExact(v.GetValue<string>(), "yyyy-MM-dd", culture) - Epoch).TotalDays;
+                case ColumnType.Timestamp:
+                    return (DateTime.ParseExact(v.GetValue<string>(), new[] { "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm:ss.fff" }, culture, System.Globalization.DateTimeStyles.None) - Epoch).Ticks / 10;
+                case ColumnType.Int:
+                    return v.GetValue<long>();
+                case ColumnType.Float:
+                    return v.GetValue<double>();
+                case ColumnType.Bool:
+                    return v.GetValue<bool>();
+                default:
+                    return v.GetValue<string>();
+            }
+        }
+
+        [Fact]
+        public void ReadsTheRowOfAccessUserSql()
+        {
+            Compare("tableUsers", c =>
+            {
+                var columns = c["columns"]!.AsArray()
+                    .Select(x => new ResultColumn(x!["name"]!.GetValue<string>(), Enum.Parse<ColumnType>(x["type"]!.GetValue<string>(), ignoreCase: true)))
+                    .ToList();
+                var row = c["row"] is JsonArray values ? values.Select((v, i) => CellOf(v, columns[i].Type)).ToArray() : null;
+                JsonNode user;
+                try
+                {
+                    var t = Access.TableUserOf(columns, row);
+                    var attrs = new JsonObject();
+                    foreach (var pair in t.Attrs) attrs[pair.Key] = Value(pair.Value);
+                    user = new JsonObject { ["attrs"] = attrs, ["roles"] = Strings(t.Roles) };
+                }
+                catch (ArgumentException e)
+                {
+                    user = ErrorOf(e);
+                }
+                return ($"{c["columns"]!.ToJsonString(Readable)} {c["row"]?.ToJsonString(Readable)}", c["user"]!.DeepClone(), user);
+            });
+        }
+
         /// <summary>A JSON value as the API reads it from a request.</summary>
         private static object? ValueOf(JsonNode? v) => DevBIApi.ValueOf(JsonDocument.Parse(v?.ToJsonString() ?? "null").RootElement);
 

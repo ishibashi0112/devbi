@@ -437,7 +437,7 @@ npm run build
 - データベースは SQL Server だけで、接続文字列の `Integrated Security=true` で Windows 認証でもつなげます（アプリケーション プールのアカウント。[Windows 認証で SQL Server につなぐ](reference.md#windows-認証で-sql-server-につなぐ)）。
 - `.arrows`（スナップショット）と、データに使うなら `.parquet` は、ASP.NET Core が型を知らないので、`FileExtensionContentTypeProvider` に足します（見本の `Program.cs`）。
 - ASP.NET Core の静的ファイル（`UseStaticFiles`）は、そのままではログインを確かめずに配ります。`wwwroot/reports/data/` の Excel なども守るときは、Microsoft のドキュメントの「静的ファイルの承認」のとおり、`wwwroot` の外に置いて `UseAuthorization` のあとで配り、`builder.Services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())` のように、どこにも決まりのないリクエストにもログインを求めます（これがないと、静的ファイルにはログインがかかりません）。IIS の上で動かし、IIS で匿名認証を無効にしているなら、IIS がすべてのリクエストにログインを求めるので、このままでも守られます。
-- 人ごとに見える行を変えるときは、`DevBIOptions` に `RequireUser = true` を足します。`MapDevBIApi` が、ログインした人（`HttpContext.User`）をそのまま利用者として API に渡します（Windows 認証なら `CORP\yamada` と AD のグループ。OpenID Connect では ID にするクレームを選びます。[ASP.NET（C#）でログインした人を渡す](reference.md#aspnetcでログインした人を渡す)）。
+- 人ごとに見える行を変えるときは、`DevBIOptions` に `RequireUser = true` を足します。`MapDevBIApi` が、ログインした人（`HttpContext.User`）をそのまま利用者として API に渡します（Windows 認証なら `CORP\yamada` と AD のグループ。OpenID Connect では ID にするクレームを選びます。[ASP.NET（C#）でログインした人を渡す](reference.md#aspnetcでログインした人を渡す)）。`snapshots/` と `data/` は API を通らないので、上のとおり静的なファイルにもログインをかけます。
 - `UseStaticFiles` は `Cache-Control` を付けないので、ブラウザは `index.html`・`devbi-embed.js`・`data/` を前のまましばらく使うことがあります。`StaticFileOptions` の `OnPrepareResponse` で、`assets/` の下のほかは `Cache-Control: no-cache` を付けます（`devbi-embed.js` が古いままだと、入れ替えで消えた `assets/` のファイルを読みに行って動かなくなります）。
 
 ### WebForms・MVC 5（.NET Framework 4.7.2 以降）
@@ -491,7 +491,7 @@ https://portal.corp.local/devbi/…  ──（/devbi を外して転送）──
 
 C# の API（ASP.NET Core、WebForms・MVC 5）はスナップショットを作りません。`-- snapshot:` の SQL を使うときは、[1 のスナップショット](#データを新しくする)と同じく、`devbi-snapshot --dir <プロジェクト> --out <dist を写した場所>`（`wwwroot/reports` や `Scripts/devbi`）をタスクスケジューラで毎朝動かします（サーバーに Node と `@devbi/server` が要ります。SQL Server には SQL Server 認証でつなぎます）。ファイルがなければ、ダッシュボードは API から読みます。Next.js は[上](#nextjs)のとおりです。
 
-`RequireUser = true` にしたときは、`devbi-snapshot` にも `--require-user` を付けます。行レベルのモードでは、`-- access: all`（全員に全部の行を見せる）の SQL のスナップショットだけを作り、ほかの SQL の古いファイルは消します。スナップショットは IIS が静的なファイルとして配り、ログインした人ならだれでも開けるからです。付け忘れると、プロジェクトのファイルだけでは行レベルのモードにならないとき（`:user.`・`-- roles:`・`-- access:`・`access/` がどれもない）、人で絞るはずだった SQL のスナップショットも作ってしまいます。
+`RequireUser = true` にしたときは、`devbi-snapshot` にも `--require-user` を付けます。行レベルのモードでは、`-- access: all`（全員に全部の行を見せる）の SQL のスナップショットだけを作り、ほかの SQL の古いファイルは消します。スナップショットは IIS が静的なファイルとして配り、ログインした人ならだれでも開けるからです（なので、サイト全体にログインをかけておきます）。付け忘れると、プロジェクトのファイルだけでは行レベルのモードにならないとき（`:user.`・`-- roles:`・`-- access:`・`access/` がどれもない）、人で絞るはずだった SQL のスナップショットも作ってしまいます。
 
 ## 公開する前のチェックリスト
 

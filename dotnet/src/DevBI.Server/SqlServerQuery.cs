@@ -318,6 +318,12 @@ namespace DevBI.Server
             return ms * 1000;
         }
 
+        /// <summary>A result's date (days since 1970) as Node's drivers give it: <c>YYYY-MM-DD</c>.</summary>
+        internal static string DateText(int days) => Epoch.AddDays(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        /// <summary>A result's timestamp (microseconds since 1970) as Node's drivers give it: <c>YYYY-MM-DD HH:MM:SS[.fff]</c>.</summary>
+        internal static string TimestampText(long micros) => DateTimeText(Epoch.AddTicks(micros * 10));
+
         /// <summary><c>YYYY-MM-DD HH:MM:SS.fff</c> (without <c>.000</c>).</summary>
         private static string DateTimeText(DateTime d)
         {

@@ -233,6 +233,9 @@ namespace DevBI.Server.Tests
             Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT 1 AS a", ["api/b.sql"] = "SELECT 1 AS b -- ｒｏｌｅｓ：" }));
             Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT ':USER.x' AS a" }));
             Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT 1 AS a", ["access/readme.txt"] = "" }));
+            // a noncharacter, which .NET's normalization refuses: read as JavaScript reads it, not a 500 for every file
+            Assert.Equal(200, await Status(new Dictionary<string, string> { ["api/a.sql"] = "-- 説明\uFFFE\nSELECT 1 AS a -- x\uFFFE" }));
+            Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT 1 AS a -- ｒｏｌｅｓ：\uFFFF" }));
         }
 
         [Fact]

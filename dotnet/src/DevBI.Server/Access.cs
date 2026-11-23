@@ -226,8 +226,9 @@ namespace DevBI.Server
                 }
                 CheckAttrName(name, () => what);
                 if (row == null) continue;
-                // a date or a time is not text, a number or a boolean (as in Node, where it is a Date)
-                if (v != null && (columns[i].Type == ColumnType.Date || columns[i].Type == ColumnType.Timestamp)) throw new ArgumentException($"{what} の値は文字・数値・真偽のどれかにしてください");
+                // a date or a timestamp as the text Node's drivers give (2024-01-02, 2024-01-02 03:04:05.123)
+                if (v is int days && columns[i].Type == ColumnType.Date) v = SqlServerQuery.DateText(days);
+                else if (v is long micros && columns[i].Type == ColumnType.Timestamp) v = SqlServerQuery.TimestampText(micros);
                 output.Attrs[lower] = AttrValue(v, () => what);
             }
             return output;
@@ -258,9 +259,67 @@ namespace DevBI.Server
 
         /// <summary>
         /// JavaScript's <c>normalize("NFKC")</c>, which leaves a lone surrogate as it is (.NET's throws): one as U+FFFD,
-        /// which reads the same here (only ASCII words are looked for).
+        /// which reads the same here (only ASCII words are looked for). A code point .NET refuses to normalize (U+FFFE
+        /// with ICU; Windows may refuse more) is kept as it is, as JavaScript does, with the text around it normalized.
         /// </summary>
         private static string Nfkc(string s)
+        {
+            var text = WithoutLoneSurrogates(s);
+            try
+            {
+                return text.Normalize(NormalizationForm.FormKC);
+            }
+            catch (ArgumentException)
+            {
+                return NfkcAround(text);
+            }
+        }
+
+        /// <summary>
+        /// The text normalized between the code points .NET refuses, which stay as they are: these are noncharacters,
+        /// which have no decomposition and never compose, so normalizing the parts apart gives what JavaScript gives.
+        /// </summary>
+        private static string NfkcAround(string s)
+        {
+            string Normalized(string part)
+            {
+                try
+                {
+                    return part.Normalize(NormalizationForm.FormKC);
+                }
+                catch (ArgumentException)
+                {
+                    return part;
+                }
+            }
+            var b = new StringBuilder(s.Length);
+            var start = 0;
+            for (var i = 0; i < s.Length;)
+            {
+                var n = char.IsHighSurrogate(s[i]) && i + 1 < s.Length ? 2 : 1;
+                var code = s.Substring(i, n);
+                bool refused;
+                try
+                {
+                    code.Normalize(NormalizationForm.FormKC);
+                    refused = false;
+                }
+                catch (ArgumentException)
+                {
+                    refused = true;
+                }
+                if (refused)
+                {
+                    b.Append(Normalized(s.Substring(start, i - start))).Append(code);
+                    start = i + n;
+                }
+                i += n;
+            }
+            return b.Append(Normalized(s.Substring(start))).ToString();
+        }
+
+        /// <summary>The text with each lone surrogate as U+FFFD.</summary>
+        private static string WithoutLoneSurrogates(string s)
         {
             var b = new StringBuilder(s.Length);
             for (var i = 0; i < s.Length; i++)
@@ -275,7 +334,7 @@ namespace DevBI.Server
                     b.Append(char.IsSurrogate(c) ? '�' : c);
                 }
             }
-            return b.ToString().Normalize(NormalizationForm.FormKC);
+            return b.ToString();
         }
 
         /// <summary>

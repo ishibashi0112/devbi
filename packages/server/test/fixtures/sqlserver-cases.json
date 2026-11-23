@@ -1970,6 +1970,30 @@
         "roles": null,
         "access": null
       }
+    },
+    {
+      "name": "nonchar",
+      "text": "-- 受注￾\n-- roles: ａ￾\nSELECT * FROM t WHERE r = :user.region",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "受注￾",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE r = :user.region",
+        "params": [],
+        "parameters": [],
+        "key": null,
+        "user": [
+          "region"
+        ],
+        "roles": [
+          "ａ￾"
+        ],
+        "access": null
+      }
     }
   ],
   "access": [
@@ -2395,6 +2419,273 @@
         "access": null
       },
       "signal": null
+    },
+    {
+      "text": "SELECT 1 -- x￾",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- 説明￾\n-- ｒｏｌｅｓ：￿経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（2 行目）: -- roles: は半角の英字と : で書いてください（このままでは読みません）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- ﷐access: all\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: access: の行は、-- access: all のように -- のすぐあとに書いてください（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- ａｃｃｅｓｓ：ａｌｌ￾\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- access: は半角の英字と : で書いてください（このままでは読みません）"
+      },
+      "signal": "-- access:"
+    }
+  ],
+  "tableUsers": [
+    {
+      "columns": [
+        {
+          "name": "region",
+          "type": "string"
+        },
+        {
+          "name": "roles",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "関東",
+        "営業、 経理 ,営業,, "
+      ],
+      "user": {
+        "attrs": {
+          "region": "関東"
+        },
+        "roles": [
+          "営業",
+          "経理"
+        ]
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "Region",
+          "type": "string"
+        },
+        {
+          "name": "ROLES",
+          "type": "string"
+        }
+      ],
+      "row": [
+        null,
+        null
+      ],
+      "user": {
+        "attrs": {
+          "region": null
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "region",
+          "type": "string"
+        },
+        {
+          "name": "roles",
+          "type": "string"
+        }
+      ],
+      "row": null,
+      "user": {
+        "attrs": {},
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "n",
+          "type": "int"
+        },
+        {
+          "name": "f",
+          "type": "float"
+        },
+        {
+          "name": "ok",
+          "type": "bool"
+        },
+        {
+          "name": "blank",
+          "type": "string"
+        }
+      ],
+      "row": [
+        3,
+        1.5,
+        false,
+        " 　"
+      ],
+      "user": {
+        "attrs": {
+          "n": 3,
+          "f": 1.5,
+          "ok": false,
+          "blank": null
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "since",
+          "type": "date"
+        },
+        {
+          "name": "at",
+          "type": "timestamp"
+        },
+        {
+          "name": "before",
+          "type": "timestamp"
+        }
+      ],
+      "row": [
+        "2024-01-02",
+        "2024-01-02 03:04:05.123",
+        "1969-12-31 23:59:59"
+      ],
+      "user": {
+        "attrs": {
+          "since": "2024-01-02",
+          "at": "2024-01-02 03:04:05.123",
+          "before": "1969-12-31 23:59:59"
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "x"
+      ],
+      "user": {
+        "error": "access/user.sql の列 id: id は属性の名前に使えません（:user.id はログインした人の ID です）"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "region",
+          "type": "string"
+        },
+        {
+          "name": "REGION",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a",
+        "b"
+      ],
+      "user": {
+        "error": "access/user.sql の列 REGION が 2 つあります（大文字と小文字は区別しません）"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "roles",
+          "type": "int"
+        }
+      ],
+      "row": [
+        1
+      ],
+      "user": {
+        "error": "access/user.sql の列 roles は、役割を , で区切った文字にしてください"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "地域",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a"
+      ],
+      "user": {
+        "attrs": {
+          "地域": "a"
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "a b",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a"
+      ],
+      "user": {
+        "error": "access/user.sql の列 a b: 属性の名前は文字・数字・_ で書きます（:user.a b と書けない名前です）"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "user",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a"
+      ],
+      "user": {
+        "attrs": {
+          "user": "a"
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "x",
+          "type": "string"
+        }
+      ],
+      "row": null,
+      "user": {
+        "attrs": {},
+        "roles": []
+      }
     }
   ],
   "binds": [
