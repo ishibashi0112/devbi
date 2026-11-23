@@ -397,7 +397,7 @@ ASP.NET（C#）の見本（55）でも、アドレスを `http://127.0.0.1:4179/
 | 163 | 埋め込みのページ <http://localhost:8080/embed-demo.html> のコンソールで `DevBI.mount("#report-area", { dashboard: "sales-report", params: { from: "2024-04-01", regions: ["九州・沖縄"] } })` | 受注明細レポートに替わり、地域が「九州・沖縄」、表はその地域だけ。ページのアドレスは変わらない |
 | 164 | `pnpm example:dev` で <http://localhost:5173/#/sales-report> を開き、`dashboards/sales-report.dash.json` の `"fiscalYearStart": 4,` の下に `"apply": "button",` を足して保存 | 欄の右に「表示」のボタン。値を変えても表は変わらず、「表示」を押すと読み直す。戻す |
 | 165 | 同じく、`api/order_lines.sql` の `label=受注日（から）` を `label=開始日` に変えて保存 | ページが読み込み直され、欄の名前が「開始日」になる。戻す |
-| 166 | `pnpm example:check` | `dashboards/sales-report.dash.json: タイル 3（クエリを実行 0）` と、`customers: データセット customer_totals（api/customer_totals.sql）を読むタイル（データベースから読むため行は数えていません）`、`lines` の同じ行。最後は「問題はありません」 |
+| 166 | `pnpm example:check` | `dashboards/sales-report.dash.json: タイル 3（クエリを実行 0）` と、`customers: データセット customer_totals（api/customer_totals.sql）を読むタイル。列 6 個の名前はデータベースに聞いて確かめました。行はデータベースから読むため数えていません`、`lines` の同じ行（列 10 個）。最後は「問題はありません」 |
 
 #### 表の options（列・グループ・合計・クリック）
 
@@ -419,6 +419,20 @@ ASP.NET（C#）の見本（55）でも、アドレスを `http://127.0.0.1:4179/
 | 178 | `dashboards/sales-report.dash.json` の明細の `"agg": "sum"` を `"agg": "median"` にして `pnpm example:check` | `タイル lines: options.columns[7].agg は sum・avg・min・max・count のどれかです` のエラー。画面の表にも同じ文が出る。戻す |
 | 179 | `pnpm example:dev` で <http://localhost:5173/#/sales-report> を開き、「編集」で「顧客別」の表を選ぶ | 設定欄の「表示」に「列」「グループ」「合計の行」「検索欄」「行のクリック」。「売上ダッシュボード」の表（指標ファイルの表）を選んだときは、これらは出ない |
 | 180 | 続けて「グループ」を `{}` にして欄の外を押し、次に `["地域", "顧客"]` にして欄の外を押す | `{}` では欄の下に「[ ] で囲んだ JSON の配列にしてください」と出て、表は変わらない。`["地域", "顧客"]` では、地域の中に顧客のグループ。保存せずに閉じる |
+
+#### 列を聞く（devbi-check・pnpm gen・api/describe）
+
+データセットの結果の列を、行を読まずにデータベースに聞きます（[リファレンス](reference.md#データセットの行の型)）。サンプルの接続先は `examples/sales/.env` の SQLite です。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 181 | `dashboards/sales-report.dash.json` の顧客別（`customers`）の `options.columns` の `"顧客",` を `"顧客名",` にして `pnpm example:check` | `✗ dashboards/sales-report.dash.json: タイル customers（顧客別（…））: options.columns の「顧客名」は結果の列にありません（列: 顧客ID、地域、顧客、受注数、数量、金額）`。戻す |
+| 182 | `api/order_lines.sql` の `-- key: 受注番号, 行番号` を `-- key: 受注番号, 行` にして `pnpm example:check` | `✗ api/order_lines.sql: -- key: の 行 は結果の列にありません（列: 受注日、受注番号、行番号、…）` が 1 回だけ。戻す |
+| 183 | `DEVBI_DB=postgres://devbi@127.0.0.1:1/x pnpm example:check`（つながらない接続先） | レポートのタイルの行が「データベースにつながらないため、列の名前は確かめていません。」で、列の名前のエラーや注意は出ない（DB 版の指標ファイルの `read_api` は、いつもどおりエラー） |
+| 184 | `pnpm gen` のあと `examples/sales/.devbi/env.d.ts` を開く | `interface DatasetRegistry` に `"order_lines"` の `params: "from" \| "to" \| "regions" \| "customer";` と `row: {` の下に `"受注日": Date \| null;`、`"数量": number \| null;` など。計算した列（`"金額"`）は `import("devbi").Scalar`。`.devbi/columns.json` もできる |
+| 185 | `DEVBI_DB=postgres://devbi@127.0.0.1:1/x pnpm --filter devbi-example-sales gen` | 「データセットの列を聞けませんでした（行の型は前に聞いたまま。…）」と、6 つのデータセットごとに `api/orders.sql: connect ECONNREFUSED 127.0.0.1:1` のような理由。終了コードは 0 で、`env.d.ts` の `row` は 184 のまま |
+| 186 | `pnpm example:dev` を動かしたまま、`api/regions.sql` の `SELECT DISTINCT region AS 地域` を `SELECT DISTINCT region AS 地域, 1 AS one` にして保存 | 1〜2 秒で `.devbi/env.d.ts` の `"regions"` の `row` に `"one": import("devbi").Scalar;` が加わる。戻すと消える |
+| 187 | 開発サーバーを動かしたまま、`curl -s -X POST -H "Content-Type: application/json" -d '{"name":"order_lines"}' http://localhost:5173/api/describe` | `{"name":"order_lines","columns":[{"name":"受注日","type":"date","dbType":"DATE"},…]}`（10 列）。`pnpm example:serve` の `http://localhost:8080/api/describe` には同じものを送っても `405`（開発サーバーだけ） |
 
 ## 4. 自分の Excel で試す
 

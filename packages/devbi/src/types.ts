@@ -52,7 +52,7 @@ export interface Query {
    */
   dataset?: string;
   /** What goes in the dataset's parameters: `{ "param": "<dashboard parameter>" }` or a value. Default: the same name. */
-  params?: Record<string, ParamBinding>;
+  params?: Partial<Record<string, ParamBinding>>;
 }
 
 /**
@@ -84,16 +84,48 @@ export type DimensionName = Registered extends true ? RegistryPart<"dimensions">
 /** Time column names across the project's metrics files. */
 export type TimeName = Registered extends true ? RegistryPart<"time"> : string;
 
-/** A {@link Query} whose names are checked against the generated {@link MetricsRegistry}. */
+/**
+ * The project's datasets (`api/<name>.sql`), filled in by the generated `.devbi/env.d.ts`: each one's parameter
+ * names, and its row type when its database told `pnpm gen` (or the dev server) its columns. Empty when not
+ * generated: dataset names are then plain strings and rows are {@link Row}.
+ *
+ * ```ts
+ * declare module "devbi" {
+ *   interface DatasetRegistry {
+ *     order_lines: { params: "from" | "to"; row: { 受注日: Date; 顧客: string; 金額: number | null } };
+ *   }
+ * }
+ * ```
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface DatasetRegistry {}
+
+type DatasetsRegistered = [keyof DatasetRegistry] extends [never] ? false : true;
+
+/** Names of the project's datasets (`api/<name>.sql`). */
+export type DatasetName = DatasetsRegistered extends true ? keyof DatasetRegistry & string : string;
+/** A dataset's parameter names (any name when they are not generated). */
+export type DatasetParamName<S extends string> = S extends keyof DatasetRegistry
+  ? DatasetRegistry[S] extends { params: infer P extends string } ? P : string
+  : string;
+/** A dataset's row: its columns as its database describes them (generated), or any columns ({@link Row}). */
+export type DatasetRow<S extends string> = S extends keyof DatasetRegistry
+  ? DatasetRegistry[S] extends { row: infer R } ? R : Row
+  : Row;
+
+/** A {@link Query} whose names are checked against the generated {@link MetricsRegistry} and {@link DatasetRegistry}. */
 export interface TypedQuery<
   M extends MeasureName = MeasureName,
   D extends DimensionName = DimensionName,
   T extends Grain | undefined = Grain | undefined,
+  S extends DatasetName | undefined = DatasetName | undefined,
 > extends Query {
   metrics?: MetricsName;
   measures?: readonly M[];
   dimensions?: readonly D[];
   time?: T;
+  dataset?: S;
+  params?: { [K in DatasetParamName<S & string>]?: ParamBinding };
 }
 
 /**
@@ -109,16 +141,21 @@ export function defineQuery<
   const M extends MeasureName = never,
   const D extends DimensionName = never,
   const T extends Grain | undefined = undefined,
->(query: TypedQuery<M, D, T>): TypedQuery<M, D, T> {
+  const S extends DatasetName | undefined = undefined,
+>(query: TypedQuery<M, D, T, S>): TypedQuery<M, D, T, S> {
   return query;
 }
 
 /**
  * The row type of a query declared with {@link defineQuery}: measures are numbers (or null),
  * dimensions are scalars, and the time column is a Date (or null for empty dates) when the query has a time grain.
+ * A dataset's rows (`dataset`) are its columns as its database describes them, when `pnpm gen` could ask it
+ * ({@link DatasetRow}).
  */
-export type RowOf<Q> = Q extends TypedQuery<infer M, infer D, infer T>
-  ? { [K in M]: number | null } & { [K in D]: Scalar } & ([T] extends [Grain] ? TimeColumns : unknown)
+export type RowOf<Q> = Q extends TypedQuery<infer M, infer D, infer T, infer S>
+  ? [S] extends [string]
+    ? DatasetRow<S>
+    : { [K in M]: number | null } & { [K in D]: Scalar } & ([T] extends [Grain] ? TimeColumns : unknown)
   : Row;
 
 // Without generated names the time column's name is unknown, so it is left out (rather than typing every key).

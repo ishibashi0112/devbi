@@ -3,8 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { toArrowStream } from "./arrow.js";
-import { connect, dialectOf, type Connection } from "./connect.js";
-import { DatasetError, bindParameters, connectionOf, connectionVariable, listDatasets, parseDataset, readDatasetText } from "./datasets.js";
+import { connect, dialectOf, type Connection, type DescribedColumn } from "./connect.js";
+import { DatasetError, bindParameters, connectionOf, connectionVariable, describeValues, listDatasets, parseDataset, readDatasetText } from "./datasets.js";
 import { createSnapshots, type Snapshots } from "./snapshot.js";
 import { promisify } from "node:util";
 import { createGzip, gzip } from "node:zlib";
@@ -32,6 +32,17 @@ export interface ApiOptions {
    * when it is not there yet. Without it (the dev server), each request runs the SQL.
    */
   snapshotDir?: string;
+  /**
+   * Also answer `POST …/api/describe` (`{ name }` → the SQL file's columns as the database describes them): for
+   * the dev server, where the GUI editor lists a dataset's columns. Off (devbi-serve, apps): that path is 404.
+   */
+  describe?: boolean;
+}
+
+/** `api/describe`'s answer: the columns of a dataset's result, without running it for rows. */
+export interface DatasetColumns {
+  name: string;
+  columns: DescribedColumn[];
 }
 
 export interface ApiHandler {
@@ -48,6 +59,11 @@ export interface ApiHandler {
   fetch(request: Request): Promise<Response | undefined>;
   /** Run `api/<name>.sql` with the parameters: the Arrow IPC stream `POST …/api/query` answers, and its row count. */
   run(name: string, params?: Record<string, unknown>): Promise<{ bytes: Uint8Array; rows: number }>;
+  /**
+   * The columns `api/<name>.sql` returns, asking its database without its rows (any parameter values that pass the
+   * checks). For tools (devbi-check, pnpm gen) whatever `describe` says; `POST …/api/describe` only with it.
+   */
+  describe(name: string): Promise<DatasetColumns>;
   /** The snapshots of the `read_api` calls in models/ whose SQL file has a `-- snapshot:` line. */
   snapshots: Snapshots;
   /** Close the database connections. */
@@ -187,8 +203,8 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     return { datasets, snapshots: await snapshots.status() };
   };
 
-  /** api/<name>.sql with the parameters: the Arrow IPC stream and the row count. */
-  const run = async (name: string, params: Record<string, unknown> = {}) => {
+  /** api/<name>.sql parsed for its database, and that database's connection. */
+  const prepare = async (name: string) => {
     const text = await readDatasetText(options.dir, name);
     const connection = connectionOf(text);
     const url = urlOf(connection);
@@ -201,7 +217,12 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       throw new HttpError(500, options.exposeErrors ? `データベースにつなげません: ${detail}` : "データベースにつなげません（くわしくはサーバーのログにあります）");
     }
     // Checked with the database's quoting rules ([brackets], $$ … $$), which the read-only check depends on.
-    const dataset = parseDataset(name, text, conn.dialect);
+    return { conn, dataset: parseDataset(name, text, conn.dialect) };
+  };
+
+  /** api/<name>.sql with the parameters: the Arrow IPC stream and the row count. */
+  const run = async (name: string, params: Record<string, unknown> = {}) => {
+    const { conn, dataset } = await prepare(name);
     const bound = bindParameters(dataset, conn.dialect, params as Record<string, unknown>);
     let result;
     try {
@@ -218,7 +239,21 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     return { bytes: toArrowStream(result), rows: result.rows.length };
   };
 
-  const query = async (asked: Asked): Promise<Answer> => {
+  const describe = async (name: string): Promise<DatasetColumns> => {
+    const { conn, dataset } = await prepare(name);
+    if (!conn.describe) throw new HttpError(501, `この接続先（${conn.dialect}）では列を聞けません`);
+    const bound = bindParameters(dataset, conn.dialect, describeValues(dataset));
+    try {
+      return { name, columns: await conn.describe(bound.sql, bound.params) };
+    } catch (e) {
+      const detail = (e as Error).message;
+      log(`api/${name}.sql: ${detail}`);
+      throw new HttpError(500, options.exposeErrors ? `api/${name}.sql: ${detail}` : `api/${name}.sql の列を聞けませんでした（くわしくはサーバーのログにあります）`);
+    }
+  };
+
+  /** The request's JSON body. */
+  const jsonBody = async (asked: Asked): Promise<unknown> => {
     if (!/^application\/json\b/i.test(asked.header("content-type") ?? "")) {
       // JSON only: a page on another site cannot send it without the browser asking this server first (CORS).
       throw new HttpError(415, "Content-Type: application/json で送ってください");
@@ -230,7 +265,11 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       if (e instanceof HttpError) throw e;
       throw new HttpError(400, "リクエストの JSON を読めません");
     }
-    const { name, params = {} } = (body ?? {}) as { name?: unknown; params?: unknown };
+    return body;
+  };
+
+  const query = async (asked: Asked): Promise<Answer> => {
+    const { name, params = {} } = ((await jsonBody(asked)) ?? {}) as { name?: unknown; params?: unknown };
     if (typeof name !== "string" || !name) throw new HttpError(400, "name（api/ の SQL ファイルの名前）がありません");
     if (typeof params !== "object" || params === null || Array.isArray(params)) throw new HttpError(400, "params はオブジェクトで送ってください");
 
@@ -312,7 +351,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
 
   /** The answer for an API path, or undefined for others. */
   const answer = async (asked: Asked): Promise<Answer | undefined> => {
-    const m = /\/api\/(schema|query)$|\/snapshots\/([^/]+\.arrows)$/.exec(asked.pathname);
+    const m = (options.describe ? /\/api\/(schema|query|describe)$|\/snapshots\/([^/]+\.arrows)$/ : /\/api\/(schema|query)$|\/snapshots\/([^/]+\.arrows)$/).exec(asked.pathname);
     if (!m) return undefined;
     const { method } = asked;
     let a: Answer;
@@ -329,6 +368,11 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       } else if (m[1] === "schema") {
         if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "GET で呼んでください");
         a = json(200, await schema());
+      } else if (m[1] === "describe") {
+        if (method !== "POST") throw new HttpError(405, "POST で呼んでください");
+        const { name } = ((await jsonBody(asked)) ?? {}) as { name?: unknown };
+        if (typeof name !== "string" || !name) throw new HttpError(400, "name（api/ の SQL ファイルの名前）がありません");
+        a = json(200, await describe(name));
       } else {
         if (method !== "POST") throw new HttpError(405, "POST で呼んでください");
         a = await query(asked);
@@ -372,6 +416,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array<ArrayBuffer>>, { status: a.status, headers: a.headers });
     },
     run,
+    describe,
     snapshots,
     async close() {
       snapshots.stop();

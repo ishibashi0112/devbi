@@ -27,6 +27,20 @@ export interface QueryOptions {
   maxRows?: number;
 }
 
+/** A result column as the database describes it without returning rows (`api/describe`: the editor, check, gen). */
+export interface DescribedColumn {
+  name: string;
+  /**
+   * The type its values come as (the same as `query` gives). Undefined: only its values tell (an Oracle NUMBER
+   * without digits, a SQLite expression, sql_variant).
+   */
+  type?: ColumnType;
+  /** The database's own name for its type, as it says it (`nvarchar(100)`, `NUMBER`, `numeric`…), where it says one. */
+  dbType?: string;
+  /** Whether it can be NULL (outer joins and expressions too). Undefined: the database does not say. */
+  nullable?: boolean;
+}
+
 /** A read-only connection to one database. */
 export interface Connection {
   dialect: Dialect;
@@ -35,6 +49,11 @@ export interface Connection {
    * transaction that cannot write where the database has one.
    */
   query(sql: string, params: unknown[], options?: QueryOptions): Promise<ResultSet>;
+  /**
+   * The result's columns, asking the database without running the SQL (SQL Server, Oracle, MySQL, SQLite) or with
+   * no rows (PostgreSQL: `LIMIT 0`). The parameters are placeholders' values, as for `query`.
+   */
+  describe?(sql: string, params: unknown[]): Promise<DescribedColumn[]>;
   close(): Promise<void>;
 }
 

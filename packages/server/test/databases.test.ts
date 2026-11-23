@@ -268,6 +268,14 @@ for (const c of CASES) {
         expect(Number(totals.get(0)!.toJSON()["顧客ID"])).toBe(5);
         const customers = tableFromIPC((await big.run("customers", { regions: ["関東"] })).bytes);
         expect(customers.numRows).toBeGreaterThan(0);
+        // the columns without the rows (api/describe: the GUI editor, devbi-check, pnpm gen)
+        const described = (await big.describe("order_lines")).columns;
+        expect(described.map((col) => col.name)).toEqual(["受注日", "受注番号", "行番号", "顧客", "地域", "商品分類", "商品", "数量", "単価", "金額"]);
+        const col = (n: string) => described.find((x) => x.name === n)!;
+        expect([col("受注日").type, col("顧客").type, col("数量").type]).toEqual(["date", "string", "int"]);
+        // NOT NULL columns through inner joins, where the database says
+        for (const n of ["受注日", "顧客"]) if (col(n).nullable !== undefined) expect(col(n).nullable).toBe(false);
+        expect((await big.describe("customer_totals")).columns.map((x) => x.name)).toEqual(["顧客ID", "地域", "顧客", "受注数", "数量", "金額"]);
         const until = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: "2024-04-02", regions: ["関東"], customer: null })).bytes);
         expect(until.numRows).toBeGreaterThan(0);
         expect(new Set(Array.from({ length: until.numRows }, (_, i) => until.get(i)!.toJSON()["地域"]))).toEqual(new Set(["関東"]));

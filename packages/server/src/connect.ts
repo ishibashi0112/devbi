@@ -4,7 +4,7 @@ import { connectMysql } from "./mysql.js";
 import { connectOracle } from "./oracle.js";
 import { DATE, TIMESTAMP, checkColumnNames, limited, loadDriver, typeOfValues, type ColumnType, type Connection, type Dialect, type ResultColumn } from "./result.js";
 
-export { loadDriver, type ColumnType, type Connection, type Dialect, type QueryOptions, type ResultColumn, type ResultSet } from "./result.js";
+export { loadDriver, type ColumnType, type Connection, type DescribedColumn, type Dialect, type QueryOptions, type ResultColumn, type ResultSet } from "./result.js";
 
 const SCHEMES: Record<string, Dialect> = {
   postgres: "postgres",
@@ -126,6 +126,15 @@ async function connectSqlite(file: string): Promise<Connection> {
       }
       return { columns, rows };
     },
+    async describe(sql) {
+      // Prepared, not run: the declared type of a table's column, none for an expression (its values tell).
+      const info = db.prepare(sql).columns();
+      checkColumnNames(info.map((c) => c.name));
+      return info.map((c) => {
+        const type = sqliteDeclaredType(c.type);
+        return { name: c.name, ...(type ? { type } : {}), ...(c.type ? { dbType: c.type } : {}) };
+      });
+    },
     async close() {
       db.close();
     },
@@ -195,6 +204,27 @@ async function connectPostgres(url: URL): Promise<Connection> {
         const columns = res.fields.map((f): ResultColumn => ({ name: f.name, type: PG_TYPES[f.dataTypeID] ?? "string" }));
         const rows = (res.rows as (string | null)[][]).map((r) => r.map((v, i) => (v === null ? null : pgValue(v, columns[i]!.type))));
         return { columns, rows };
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+    async describe(sql, params) {
+      // Run with no rows (PREPARE does not give the columns' names), then the types' names in one more query.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN READ ONLY; SET LOCAL statement_timeout = 30000");
+        const res = await client.query({ text: limited(sql, 0), values: params, rowMode: "array" });
+        checkColumnNames(res.fields.map((f) => f.name));
+        const names = await client.query({
+          text: "SELECT format_type(t.oid, t.mod) FROM unnest($1::oid[], $2::int[]) WITH ORDINALITY AS t(oid, mod, i) ORDER BY t.i",
+          values: [res.fields.map((f) => f.dataTypeID), res.fields.map((f) => f.dataTypeModifier)],
+          rowMode: "array",
+        });
+        await client.query("ROLLBACK");
+        return res.fields.map((f, i) => ({ name: f.name, type: PG_TYPES[f.dataTypeID] ?? "string", dbType: String((names.rows as unknown[][])[i]?.[0] ?? f.dataTypeID) }));
       } catch (e) {
         await client.query("ROLLBACK").catch(() => undefined);
         throw e;

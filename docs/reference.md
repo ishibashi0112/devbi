@@ -436,6 +436,7 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 - `defineQuery({...})` は、指標と軸の名前を `models/*.metrics.yaml` と照らし合わせます（[`pnpm gen`](#エディタでの補完と型pnpm-gen) のあと）。`"revenu"` と書くと、エディタに「`"revenue"` ではありませんか」と出ます。候補はすべての指標ファイルの名前をまとめたものなので、`metrics` で選んだファイルにない名前は、読み込み時にタイルのエラーになります。
 - `RowOf<typeof query>` で `rows` の列に型が付きます（指標は `number | null`、軸は値、`time` を書いたときの時間の列は `Date | null`）。`r.` と打つと列の名前が補完されます。
+- データセットを読むクエリ（`defineQuery({ dataset: "order_lines" })`）では、`RowOf<typeof query>` はデータベースが答えた列の型です（[データセットの行の型](#データセットの行の型)）。データセットの名前と `params` の名前も `api/` の SQL と照らし合わせます。
 - `import type { Query } from "devbi"` で `export const query: Query = {...}` と書いてもかまいません。その場合、名前は読み込み時にだけ検証されます。
 
 ### `TileProps`
@@ -468,13 +469,14 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 
 ## エディタでの補完と型（pnpm gen）
 
-`pnpm gen`（中身は `@devbi/vite` の `devbi-gen`）が `models/*.metrics.yaml` を読んで、`.devbi/` に次の 3 つを書きます。`@devbi/vite` も、開発サーバーとビルドの開始時と、metrics.yaml を保存したときに同じものを書き直します。
+`pnpm gen`（中身は `@devbi/vite` の `devbi-gen`）が `models/*.metrics.yaml` と `api/*.sql` を読んで、`.devbi/` に次のファイルを書きます。`@devbi/vite` も、開発サーバーとビルドの開始時と、metrics.yaml と `api/` の SQL を保存したときに同じものを書き直します。
 
 | ファイル | 使い道 |
 | --- | --- |
 | `.devbi/dash.schema.json` | dash.json の JSON Schema。タイルの種類（説明つき）、種類ごとの `options`、`query` の指標・軸・時間の名前を補完し、間違いに波線を出す |
 | `.devbi/metrics.schema.json` | metrics.yaml の JSON Schema。キーの補完と説明、`compare` / `as` / `running` などの値の候補 |
-| `.devbi/env.d.ts` | TypeScript 用の名前の一覧。[`defineQuery` と `RowOf`](#自作タイルjsx) が使う |
+| `.devbi/env.d.ts` | TypeScript 用の名前の一覧と、データセットの行の型。[`defineQuery` と `RowOf`](#自作タイルjsx) が使う |
+| `.devbi/columns.json` | データセット（`api/*.sql`）の結果の列（名前・型・NULL になりうるか）を、データベースに最後に聞いたときのまま覚えておくもの。`env.d.ts` の行の型のもと。データセットがあって、データベースに聞いたときだけ書く |
 
 使うための設定（`pnpm try-xlsx` が作る下書きには最初から入っていて、`.devbi/` も作り直します）:
 
@@ -489,14 +491,39 @@ export default function TopCustomers({ rows, format, select, selection }: TilePr
 - 読めない metrics.yaml があると、エラーを出して、その分の名前を入れずに書きます。開発サーバーで書きかけのときは、そのファイルの最後に読めた名前を残します。
 - 名前の入っていない共通の JSON Schema は、パッケージの `devbi/schema/dash.schema.json` と `devbi/schema/metrics.schema.json` にもあります。
 
-`devbi-gen [--dir <フォルダ>] [--check]`:
+### データセットの行の型
+
+`pnpm gen` は、`api/*.sql` のデータセットごとに、接続先のデータベースに結果の列を聞きます。行は読みません（SQL Server は `sp_describe_first_result_set`、PostgreSQL は `LIMIT 0` に包んで読み取り専用で実行、Oracle・MySQL・SQLite は準備（prepare）だけ）。パラメーターは型の見本の値（日付なら `2000-01-01`）か `NULL` で聞きます。接続先は [`devbi-check`](#ファイルを確かめるdevbi-check) と同じく、環境変数とプロジェクトの `.env`・`.env.local` の `DEVBI_DB…` です。
+
+```ts
+// .devbi/env.d.ts（抜き出し）
+interface DatasetRegistry {
+  "order_lines": {
+    params: "from" | "to" | "regions" | "customer";
+    row: {
+      "受注日": Date | null;
+      "顧客": string | null;
+      "数量": number | null;
+      "金額": import("devbi").Scalar;
+    };
+  };
+}
+```
+
+- 列の型は、ブラウザに来る値の型です。文字は `string`、整数と小数は `number`、真偽は `boolean`、日付と日時は `Date`。データベースが「NULL にならない」と答えた列（SQL Server・Oracle・MySQL の `NOT NULL` の列）のほかは `| null` が付きます。SQLite の計算した列（`SUM(…)` など）や Oracle の桁の指定のない `NUMBER` のように、値を見るまで型が決まらない列は `Scalar`（どの値でも）です。
+- パラメーターの名前（`params`）は、データベースに聞かずに SQL ファイルから入ります。読めない SQL ファイルのあいだは、どの名前でも通します。
+- データベースが答えないとき（接続先がない、つなげない、20 秒たっても答えない、SQL が間違っている）は、前に聞いた列（`.devbi/columns.json`）のままにして、「データセットの列を聞けませんでした」と、どれがなぜかを出します（終了コードは 0）。一度も聞けていないデータセットの行は、列の名前を決めない `Row` です。
+- 開発サーバーは、起動したときにすべてのデータセットに、`api/` の SQL を保存したときには中身が変わったデータセットに、裏で聞き直します（ページは待たせません）。ビルドと `vite preview` は聞かず、前に聞いた列を使います。データベースの表の列を変えたとき（SQL はそのまま）は、`pnpm gen` か開発サーバーの起動し直しで型が変わります。
+
+`devbi-gen [--dir <フォルダ>] [--check] [--no-db]`:
 
 | オプション | 中身 |
 | --- | --- |
-| `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
+| `--dir` | `models/` か `api/` のあるフォルダ。既定は今のフォルダ |
 | `--check` | 何も書かずに、古いファイルがあれば一覧を出して終了コード 1 |
+| `--no-db` | データセットの列をデータベースに聞かない（前に聞いた列のまま） |
 
-読めない metrics.yaml があったときも終了コード 1 です。フォルダに `models/` がないときは、何も書かずに終了コード 2 です。
+読めない metrics.yaml があったときも終了コード 1 です。フォルダに `models/` も `api/` もないときは、何も書かずに終了コード 2 です。
 
 ## ファイルを確かめる（devbi-check）
 
@@ -530,6 +557,7 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 9、date-range の
 - DuckDB のエラー（`Binder Error` など）は DuckDB の英語のままです。`Candidate bindings` は、近い名前の列の候補です
 - 期間は `date-range` の最初の期間だけです（`default` がない・`all` なら全期間）。ほかの期間を選んだときの数字と、ほかのタイルのクリックでの絞り込みは確かめません
 - データセットのタイル（`query.dataset`）は、パラメーターの値でデータベースから読むので、流しません（行数の代わりに「データセット … を読むタイル」と出します）。`api/` と `dashboards/` があれば、`models/` のないプロジェクトでも動きます
+- データベースにつながるときは、データセットの結果の列をデータベースに聞いて（[`pnpm gen`](#データセットの行の型) と同じく、行は読みません）、表の `options.columns`・`options.groupBy`・`options.click` の列の名前（エラーはタイルに）と、SQL の `-- key:` の列の名前（エラーは SQL ファイルに 1 回）を確かめます。タイルの行は「列 6 個の名前はデータベースに聞いて確かめました。」のようになります。つながらないとき（接続先がない、つなげない、20 秒たっても答えない）は名前を確かめず、「データベースにつながらないため、列の名前は確かめていません。」と出します。SQL が間違っていてデータベースが答えないときは、その SQL ファイルに注意を 1 回出します
 - 確かめないもの: 接続先がないときの `read_api`（注意）、URL のデータ、DuckDB の拡張（Parquet、JSON、`current_date` の icu など）をインターネットから取ってこられないときのその SQL（注意）、Node で読み込めない自作タイル（`window` を読むなど。プロジェクトの vite.config も使わないので、そこでの設定が要るものも。注意）、自作タイルが `query` の外で読むデータ、見た目（色・幅・高さ）
 
 `--values` を付けると、タイルごとに、結果の最初の行を画面と同じ書式で出します。作ったダッシュボードの数字を、人が知っている数字や `devbi-inspect --sql` で別に数えた数字と比べるときに使います。
@@ -654,8 +682,8 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - 開発サーバーでは、dash.json・metrics.yaml・data/・api/ のファイルを保存したときと、`dashboards/` に自作タイルのファイル（`.tsx`・`.jsx`）を足したり消したりしたときに、ページを読み込み直します（GUI エディタで編集中は[別の動き](#ほかで書き換えたとき)）。自作タイルのファイルを直したときは、Vite（React）の決まりどおりです（`export const query` のあるファイルは、ページを読み込み直します）。
 - プロジェクトに `@devbi/editor` が入っていると、開発サーバーでだけ [GUI エディタ](#gui-エディタdevbieditor)を付けます（`vite.config.ts` や `main.tsx` は変えなくてよい）。ビルド、`vite preview` には入りません。
 - 開発サーバーでは、npm から入れた `@devbi/editor`・`devbi`・`@devbi/react` を、Vite の `optimizeDeps.include` に足して先にまとめます（エディタを開いたときや、「コードにする」で書き出したファイルを読んだときに、Vite が新しい依存を見つけてページを読み込み直さないように）。DuckDB-wasm も、ほかと同じく先にまとめます（`optimizeDeps.exclude` に入れると、npm で入れたときは集計が動かず、pnpm で入れたときは開けません）。
-- 開発サーバーとビルドの開始時、metrics.yaml を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。
-- コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check? })` も入っています。
+- 開発サーバーとビルドの開始時、metrics.yaml と `api/` の SQL を保存したときに `.devbi/` を書き直します（[エディタでの補完と型](#エディタでの補完と型pnpm-gen)）。開発サーバーは、データセットの列もデータベースに裏で聞きます（[データセットの行の型](#データセットの行の型)）。
+- コマンド `devbi-gen` と、同じことをする関数 `generate(dir, { check?, describe?, api?, env? })` も入っています（`describe` は `"all"`・`"changed"`・`false`。結果の `unasked` に、列を聞けなかったデータセットとわけ）。
 - コマンド [`devbi-check`](#ファイルを確かめるdevbi-check) と [`devbi-inspect`](#データの中を見るdevbi-inspect) も入っています（DuckDB-wasm を Node で動かすので、`@duckdb/duckdb-wasm` と `apache-arrow` に依存します）。
 - ビルドでは、`model` が読むデータのファイルを `dist/` にコピーします。`base: "./"` にしておくと、`dist/` をどのフォルダに置いても動きます。`api/` の SQL はコピーしません。
 - `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
@@ -1101,6 +1129,17 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
 - `Content-Type: application/json` 以外は受け付けません。ほかのサイトのページから、ブラウザに確かめさせずに送ることができないようにするためです。
 
+`POST <場所>/api/describe`（`Content-Type: application/json`。開発サーバーだけ）
+
+```json
+{ "name": "order_lines" }
+```
+
+- データセットの結果の列を、データベースに聞いて返します（行は読みません。聞き方は[データセットの行の型](#データセットの行の型)）。`devbi-check` と `pnpm gen` も、同じことを中で呼びます。
+- 成功: `200` と `{ "name": "order_lines", "columns": [{ "name": "受注日", "type": "date", "dbType": "DATE", "nullable": false }, …] }`。`type` は `string`・`int`・`float`・`bool`・`date`・`timestamp`（値を見るまで決まらない列にはない）、`dbType` はデータベースの型の名前、`nullable` はデータベースが答えたときだけ（`false` は NULL にならない）。
+- 失敗: API と同じ `{ "error": … }` と、`400`（`name` がない、SQL の決まり違反）、`404`、`405`（POST 以外）、`500`（データベースのエラー、接続先がない）、`501`（列を聞けない接続）。
+- 開くのは開発サーバーだけです（`createApiHandler({ describe: true })`）。`devbi-serve`、`vite preview`、C# と Next.js の見本にはありません（`404` か `405`）。
+
 `GET <サイト>/snapshots/<ファイル>.arrows`
 
 - スナップショットのファイルです。ふつうの静的ファイルとして置けば足ります（API のサーバーでなくてよい）。ブラウザは `Last-Modified` を「何時点のデータか」として出します。
@@ -1109,7 +1148,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。
 - ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
 
-`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。`run(name, params)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, describe?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。`run(name, params)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します）、`describe(name)` でその結果の列を聞き（`describe: true` でなくても使えます。`describe: true` は `api/describe` の口を開けるだけ）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
 ## レポート（パラメーターの欄と、SQL の結果の表）
 
@@ -1152,7 +1191,7 @@ SSRS のレポートのように、`api/<名前>.sql`（データセット）の
 - 値（`"2024-04-01"`、`10`、`["関東"]`、`null`）: このタイルだけの決まった値です。欄は出ません。
 - データセットにない名前はエラーです。
 
-自作タイル（`component`）の `export const query` に `dataset` を書くこともできますが、欄は dash.json のタイルからだけ作ります。自作タイルが使うパラメーターは、dash.json のそのタイルの `query` に `dataset` を書くか、`params` に `type` を書いて欄を作ってください（ないと「パラメーター x の欄がありません」のエラーです）。
+自作タイル（`component`）の `export const query` に `dataset` を書くこともできます（`defineQuery` で書くと、[行に型が付きます](#データセットの行の型)）が、欄は dash.json のタイルからだけ作ります。自作タイルが使うパラメーターは、dash.json のそのタイルの `query` に `dataset` を書くか、`params` に `type` を書いて欄を作ってください（ないと「パラメーター x の欄がありません」のエラーです）。
 
 ### 表の `options`
 
@@ -1619,7 +1658,7 @@ DuckDB-wasm のエンジンはページに 1 つで、ダッシュボードを�
 | `dashboardJsonSchema(names?)` / `metricsJsonSchema()` | dash.json と metrics.yaml の JSON Schema。`names`（`{ metrics, measures, dimensions, fields }`）を渡すと、その名前だけを許す |
 | `dateRangePresets(max, fiscalYearStart?)` | `date-range` の期間の一覧（`{ key, label, range: [始まり, 終わり) \| null }`）。データの最終日 `max` から数える。画面と `devbi-check` が使う |
 | `TILE_TYPES` / `TILE_TYPE_NAMES` / `DATE_RANGE_PRESETS` | 組み込みタイルの種類（`label` は短い名前、`description`、`options`、`size` は GUI エディタで足したときの大きさ）、`date-range` の期間の名前。`options` のそれぞれ（`TileOptionSchema`）には、GUI エディタの設定欄の名前 `label`、`enum` の値の名前 `enumLabels`（JSON Schema の `enumDescriptions` にもなり、VS Code の補完に出る）、入れ方 `input`（`text` は複数行、`field` は軸か時間の列、`metrics` は指標ファイル、`json` は JSON で書くオブジェクト）がある。`rows: true` の種類（`explore`）は、`model` の行を読み、`query` は `metrics`・`filters`・`limit`・`period` だけを使う |
-| 型 | `Query`、`Filter`、`Row`、`Scalar`、`FieldInfo`、`TileSpec`、`TileProps`、`Grain`、`MetricsView`、`Dashboard`、`MetricsRegistry`（`.devbi/env.d.ts` が名前を足す）など |
+| 型 | `Query`、`Filter`、`Row`、`Scalar`、`FieldInfo`、`TileSpec`、`TileProps`、`Grain`、`MetricsView`、`Dashboard`、`MetricsRegistry`・`DatasetRegistry`（`.devbi/env.d.ts` が名前と行の型を足す）、`DatasetName`・`DatasetRow<名前>` など |
 
 ## 見た目の変更（CSS 変数）
 
