@@ -204,7 +204,7 @@ namespace DevBI.Server
         }
 
         /// <summary>Letters, digits and _ $ # @ continue a name, and so do non-ASCII characters other than spaces (受注番号).</summary>
-        private static bool IsNameChar(string s, int i)
+        internal static bool IsNameChar(string s, int i)
         {
             if (i < 0 || i >= s.Length) return false;
             var c = s[i];

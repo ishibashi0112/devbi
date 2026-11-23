@@ -613,7 +613,13 @@
         "sql": "SELECT * FROM orders WHERE d >= :from",
         "params": [
           "from"
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "from"
+          }
+        ],
+        "key": null
       }
     },
     {
@@ -637,7 +643,16 @@
         "params": [
           "From",
           "to"
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "From"
+          },
+          {
+            "name": "to"
+          }
+        ],
+        "key": null
       }
     },
     {
@@ -697,7 +712,9 @@
         "connection": null,
         "snapshot": null,
         "sql": "SELECT 1\n-- connection: erp\n-- snapshot: 06:00",
-        "params": []
+        "params": [],
+        "parameters": [],
+        "key": null
       }
     },
     {
@@ -784,7 +801,9 @@
         "connection": null,
         "snapshot": null,
         "sql": "(SELECT 1)",
-        "params": []
+        "params": [],
+        "parameters": [],
+        "key": null
       }
     },
     {
@@ -805,7 +824,703 @@
           "08:00"
         ],
         "sql": "SELECT 1",
-        "params": []
+        "params": [],
+        "parameters": [],
+        "key": null
+      }
+    },
+    {
+      "name": "typed",
+      "text": "-- 受注の明細\n-- param: from date label=受注日（から） default=month_start\n-- param: regions text[] label=\"地域 （複数）\" values=regions default=all\n--param:customer integer optional hidden\n-- key: 受注番号, \"行, 番号\"、 \"a\"\"b\"\n\n-- 説明の 2 行目\n-- Param : status text default=\"受付 \"\"中\"\"\"\nSELECT * FROM t WHERE d >= :from AND r IN (:Regions) AND (:customer IS NULL OR c = :customer) AND s = :status AND x = :plain",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "説明の 2 行目",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE d >= :from AND r IN (:Regions) AND (:customer IS NULL OR c = :customer) AND s = :status AND x = :plain",
+        "params": [
+          "from",
+          "Regions",
+          "customer",
+          "status",
+          "plain"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "type": "date",
+            "label": "受注日（から）",
+            "default": "month_start"
+          },
+          {
+            "name": "regions",
+            "type": "text",
+            "multiple": true,
+            "label": "地域 （複数）",
+            "default": "all",
+            "values": "regions"
+          },
+          {
+            "name": "customer",
+            "type": "integer",
+            "optional": true,
+            "hidden": true
+          },
+          {
+            "name": "status",
+            "type": "text",
+            "default": "受付 \"中\""
+          },
+          {
+            "name": "plain"
+          }
+        ],
+        "key": [
+          "受注番号",
+          "行, 番号",
+          "a\"b"
+        ]
+      }
+    },
+    {
+      "name": "typed_late",
+      "text": "SELECT * FROM t WHERE a = :a\n-- param: a date",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE a = :a\n-- param: a date",
+        "params": [
+          "a"
+        ],
+        "parameters": [
+          {
+            "name": "a"
+          }
+        ],
+        "key": null
+      }
+    },
+    {
+      "name": "typed_defaults",
+      "text": "-- param: a date default=today-30\n-- param: b datetime default=2024-04-01T09:00\n-- param: c text default=\"\"\n-- param: d number default=-1.5e3\n-- param: e boolean default=false\n-- param: f integer[] default=1,2\n-- param: g text[] default=all\nSELECT :a, :b, :c, :d, :e FROM t WHERE x IN (:f) AND y IN (:g)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT :a, :b, :c, :d, :e FROM t WHERE x IN (:f) AND y IN (:g)",
+        "params": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e",
+          "f",
+          "g"
+        ],
+        "parameters": [
+          {
+            "name": "a",
+            "type": "date",
+            "default": "today-30"
+          },
+          {
+            "name": "b",
+            "type": "datetime",
+            "default": "2024-04-01T09:00"
+          },
+          {
+            "name": "c",
+            "type": "text",
+            "default": ""
+          },
+          {
+            "name": "d",
+            "type": "number",
+            "default": "-1.5e3"
+          },
+          {
+            "name": "e",
+            "type": "boolean",
+            "default": "false"
+          },
+          {
+            "name": "f",
+            "type": "integer",
+            "multiple": true,
+            "default": "1,2"
+          },
+          {
+            "name": "g",
+            "type": "text",
+            "multiple": true,
+            "default": "all"
+          }
+        ],
+        "key": null
+      }
+    },
+    {
+      "name": "bad0",
+      "text": "-- 説明\n-- param: d\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad0.sql（2 行目）: パラメーター d の型がありません。text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad1",
+      "text": "-- 説明\n-- param:\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad1.sql（2 行目）: -- param: のあとにパラメーターの名前と型を書いてください（例: -- param: from date）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad2",
+      "text": "-- 説明\n-- param: d day\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad2.sql（2 行目）: 型 day は使えません。text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad3",
+      "text": "-- 説明\n-- param: d text[ ]\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad3.sql（2 行目）: 型 text[ は使えません。text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad4",
+      "text": "-- 説明\n-- param: nope date\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad4.sql（2 行目）: パラメーター nope は SQL にありません（SQL に :nope と書くか、この行を消してください）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad5",
+      "text": "-- 説明\n-- param: d date\n-- param: D date\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad5.sql（3 行目）: パラメーター D の -- param: が 2 つあります（2 行目にも）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad6",
+      "text": "-- 説明\n-- param: d date colour=red\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad6.sql（2 行目）: colour は知らない指定です。label・default・values・optional・hidden を書けます",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad7",
+      "text": "-- 説明\n-- param: d date label\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad7.sql（2 行目）: label には値を書いてください（label=…）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad8",
+      "text": "-- 説明\n-- param: d date label=\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad8.sql（2 行目）: label に名前を書いてください",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad9",
+      "text": "-- 説明\n-- param: d date optional=yes\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad9.sql（2 行目）: optional は値を付けずに書きます",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad10",
+      "text": "-- 説明\n-- param: d date label=a label=b\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad10.sql（2 行目）: label が 2 回あります",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad11",
+      "text": "-- 説明\n-- param: d date label=\"a\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad11.sql（2 行目）: \" が閉じていません",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad12",
+      "text": "-- 説明\n-- param: d=1 date\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad12.sql（2 行目）: -- param: のあとにパラメーターの名前と型を書いてください（例: -- param: from date）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad13",
+      "text": "-- 説明\n-- param: d type=date\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad13.sql（2 行目）: パラメーター d の型がありません（名前と型のあとに label=… などを書きます）。text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad14",
+      "text": "-- 説明\n-- param: r text[] optional\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad14.sql（2 行目）: 複数の値（text[]）には optional を付けられません（1 つも選ばないことはできません）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad15",
+      "text": "-- 説明\n-- param: user.region text\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad15.sql（2 行目）: user.region: user. で始まる名前は、ログインした人の値のために取ってあるので使えません",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad16",
+      "text": "-- 説明\n-- param: 1d text\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad16.sql（2 行目）: 1d はパラメーターの名前として読めません（SQL の :名前 の名前を書きます）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad17",
+      "text": "-- 説明\n-- param: d integer default=1.5\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad17.sql（2 行目）: default=1.5 は integer の値として読めません（例: 10）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad18",
+      "text": "-- 説明\n-- param: d integer default=9007199254740992\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad18.sql（2 行目）: default=9007199254740992 は integer の値として読めません（例: 10）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad19",
+      "text": "-- 説明\n-- param: d date default=2024-02-30\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad19.sql（2 行目）: default=2024-02-30 は date の値として読めません（例: 2024-04-01 か month_start、today-30）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad20",
+      "text": "-- 説明\n-- param: d date default=2024-02-29\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "説明",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE d = :d AND r IN (:r)",
+        "params": [
+          "d",
+          "r"
+        ],
+        "parameters": [
+          {
+            "name": "d",
+            "type": "date",
+            "default": "2024-02-29"
+          },
+          {
+            "name": "r"
+          }
+        ],
+        "key": null
+      }
+    },
+    {
+      "name": "bad21",
+      "text": "-- 説明\n-- param: d date default=2023-02-29\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad21.sql（2 行目）: default=2023-02-29 は date の値として読めません（例: 2024-04-01 か month_start、today-30）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad22",
+      "text": "-- 説明\n-- param: d datetime default=2024-04-01T24:00\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad22.sql（2 行目）: default=2024-04-01T24:00 は datetime の値として読めません（例: 2024-04-01T09:00 か today）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad23",
+      "text": "-- 説明\n-- param: d date default=today+\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad23.sql（2 行目）: default=today+ は date の値として読めません（例: 2024-04-01 か month_start、today-30）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad24",
+      "text": "-- 説明\n-- param: d date default=\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad24.sql（2 行目）: default に値を書いてください（例: default=2024-04-01）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad25",
+      "text": "-- 説明\n-- param: r integer[] default=1,,2\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad25.sql（2 行目）: default=1,,2 に空の値があります（, で区切って書きます）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad26",
+      "text": "-- 説明\n-- param: r integer[] default=all\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad26.sql（2 行目）: default の all は integer[] の値として読めません（例: 10）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad27",
+      "text": "-- 説明\n-- param: d boolean default=yes\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad27.sql（2 行目）: default=yes は boolean の値として読めません（例: true か false）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad28",
+      "text": "-- 説明\n-- param: d date values=../x\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad28.sql（2 行目）: values には候補を出すデータセットの名前（api/ の SQL ファイルの名前）を書きます（../x）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad29",
+      "text": "-- 説明\n-- key:\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad29.sql（2 行目）: -- key: のあとに、行を見分ける列の名前を , で区切って書いてください（例: -- key: 受注番号, 行番号）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad30",
+      "text": "-- 説明\n-- key: a, a\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad30.sql（2 行目）: 列 a が 2 回あります",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad31",
+      "text": "-- 説明\n-- key: a\n-- key: b\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad31.sql（3 行目）: -- key: が 2 つあります（2 行目にも）",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad32",
+      "text": "-- 説明\n-- key: \"a\" b\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad32.sql（2 行目）: \"a\" のあとは , で区切ります",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad33",
+      "text": "-- 説明\n-- key: \"a\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/bad33.sql（2 行目）: \" が閉じていません",
+        "status": 400
+      }
+    },
+    {
+      "name": "bad34",
+      "text": "-- 説明\n-- param: r text[]\n-- 説明\n\nSELECT * FROM t WHERE d = :d AND r IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE d = :d AND r IN (:r)",
+        "params": [
+          "d",
+          "r"
+        ],
+        "parameters": [
+          {
+            "name": "r",
+            "type": "text",
+            "multiple": true
+          },
+          {
+            "name": "d"
+          }
+        ],
+        "key": null
+      }
+    },
+    {
+      "name": "multi_eq",
+      "text": "-- param: r text[]\nSELECT * FROM t\nWHERE\n  r = :r",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/multi_eq.sql（4 行目）: :r は複数の値（text[]）なので、IN (:r) の形でだけ使えます",
+        "status": 400
+      }
+    },
+    {
+      "name": "multi_two",
+      "text": "-- param: r text[]\nSELECT * FROM t WHERE r IN (:r, 'x')",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/multi_two.sql（2 行目）: :r は複数の値（text[]）なので、IN (:r) の形でだけ使えます",
+        "status": 400
+      }
+    },
+    {
+      "name": "multi_name",
+      "text": "-- param: r text[]\nSELECT * FROM t WHERE rIN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/multi_name.sql（2 行目）: :r は複数の値（text[]）なので、IN (:r) の形でだけ使えます",
+        "status": 400
+      }
+    },
+    {
+      "name": "multi_not_in",
+      "text": "-- param: r text[]\nSELECT * FROM t WHERE r NOT IN(\n  :r\n) OR [x]IN (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE r NOT IN(\n  :r\n) OR [x]IN (:r)",
+        "params": [
+          "r"
+        ],
+        "parameters": [
+          {
+            "name": "r",
+            "type": "text",
+            "multiple": true
+          }
+        ],
+        "key": null
+      }
+    },
+    {
+      "name": "multi_space",
+      "text": "-- param: r text[]\nSELECT * FROM t WHERE r　In　(　:r )",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE r　In　(　:r )",
+        "params": [
+          "r"
+        ],
+        "parameters": [
+          {
+            "name": "r",
+            "type": "text",
+            "multiple": true
+          }
+        ],
+        "key": null
+      }
+    },
+    {
+      "name": "multi_dotless",
+      "text": "-- param: r text[]\nSELECT * FROM t WHERE r ın (:r)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/multi_dotless.sql（2 行目）: :r は複数の値（text[]）なので、IN (:r) の形でだけ使えます",
+        "status": 400
       }
     }
   ],
@@ -998,6 +1713,979 @@
           "関東",
           0
         ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user",
+      "values": {
+        "user.region": "関東",
+        "user": "x"
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター user.region は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user",
+      "values": {
+        "user": "x"
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1",
+        "values": [
+          "x"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 09:00:00",
+          10,
+          1.5,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": null,
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          null,
+          10,
+          1.5,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 00:00:00",
+          10,
+          1.5,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01 09:00:30.123456",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 09:00:30.123456",
+          10,
+          1.5,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00:30.1234567",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター at には日時（'2024-04-01T09:00' の形の文字）を渡してください（\"2024-04-01T09:00:30.1234567\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T24:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター at には日時（'2024-04-01T09:00' の形の文字）を渡してください（\"2024-04-01T24:00\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:60",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター at には日時（'2024-04-01T09:00' の形の文字）を渡してください（\"2024-04-01T09:60\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00Z",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター at には日時（'2024-04-01T09:00' の形の文字）を渡してください（\"2024-04-01T09:00Z\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T9:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター at には日時（'2024-04-01T09:00' の形の文字）を渡してください（\"2024-04-01T9:00\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-02-30",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（\"2024-02-30\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-02-29",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-02-29",
+          "2024-04-01 09:00:00",
+          10,
+          1.5,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "1900-02-29",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（\"1900-02-29\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2000-02-29",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2000-02-29",
+          "2024-04-01 09:00:00",
+          10,
+          1.5,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "0000-01-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（\"0000-01-01\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "２０２４-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（\"２０２４-04-01\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": 20240401,
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（20240401 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": null,
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター from の値がありません（null にできるのは -- param: に optional を付けたパラメーターだけです）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 1.5,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（1.5 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": "10",
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（\"10\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": -9007199254740991,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 09:00:00",
+          -9007199254740991,
+          1.5,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 9007199254740992,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（9007199254740992 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 1e+300,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（1e+300 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 1.5e-7,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（1.5e-7 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": -0.000001,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（-0.000001 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 1e+21,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（1e+21 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 123456789012345680000,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（123456789012345680000 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 0.30000000000000004,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター n には整数を渡してください（0.30000000000000004 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": "1.5",
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター r には数値を渡してください（\"1.5\" が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 10,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 09:00:00",
+          10,
+          10,
+          true,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": 1,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター ok には真偽（true か false）を渡してください（1 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": false,
+        "s": "関東",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 09:00:00",
+          10,
+          1.5,
+          false,
+          "関東",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": 1,
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター s には文字を渡してください（1 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 09:00:00",
+          10,
+          1.5,
+          true,
+          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "関東",
+          "近畿"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター s の文字が長すぎます（4,000 文字まで）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター s の文字が長すぎます（4,000 文字まで）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": [
+          "a"
+        ],
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター s は 1 つの値です（複数の値にするには -- param: の型を text[] にします）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": {
+          "a": 1
+        },
+        "regions": [
+          "関東",
+          "近畿"
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター s には文字を渡してください（{\"a\":1} が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": []
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター regions に 1 つ以上の値を渡してください",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": null
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター regions に 1 つ以上の値を渡してください",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "a",
+          null
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター regions の値に null は入れられません",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "a",
+          1
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター regions には文字を渡してください（1 が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": [
+          "a",
+          [
+            "b"
+          ]
+        ]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター regions には文字を渡してください（[\"b\"] が来ました）",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": "関東"
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7) AND d < CAST(@p1 AS date)",
+        "values": [
+          "2024-04-01",
+          "2024-04-01 09:00:00",
+          10,
+          1.5,
+          true,
+          "関東",
+          "関東"
+        ]
+      }
+    },
+    {
+      "text": "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\nSELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+      "values": {
+        "from": "2024-04-01",
+        "at": "2024-04-01T09:00",
+        "n": 10,
+        "r": 1.5,
+        "ok": true,
+        "s": "関東",
+        "regions": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "100", "101", "102", "103", "104", "105", "106", "107", "108", "109", "110", "111", "112", "113", "114", "115", "116", "117", "118", "119", "120", "121", "122", "123", "124", "125", "126", "127", "128", "129", "130", "131", "132", "133", "134", "135", "136", "137", "138", "139", "140", "141", "142", "143", "144", "145", "146", "147", "148", "149", "150", "151", "152", "153", "154", "155", "156", "157", "158", "159", "160", "161", "162", "163", "164", "165", "166", "167", "168", "169", "170", "171", "172", "173", "174", "175", "176", "177", "178", "179", "180", "181", "182", "183", "184", "185", "186", "187", "188", "189", "190", "191", "192", "193", "194", "195", "196", "197", "198", "199", "200", "201", "202", "203", "204", "205", "206", "207", "208", "209", "210", "211", "212", "213", "214", "215", "216", "217", "218", "219", "220", "221", "222", "223", "224", "225", "226", "227", "228", "229", "230", "231", "232", "233", "234", "235", "236", "237", "238", "239", "240", "241", "242", "243", "244", "245", "246", "247", "248", "249", "250", "251", "252", "253", "254", "255", "256", "257", "258", "259", "260", "261", "262", "263", "264", "265", "266", "267", "268", "269", "270", "271", "272", "273", "274", "275", "276", "277", "278", "279", "280", "281", "282", "283", "284", "285", "286", "287", "288", "289", "290", "291", "292", "293", "294", "295", "296", "297", "298", "299", "300", "301", "302", "303", "304", "305", "306", "307", "308", "309", "310", "311", "312", "313", "314", "315", "316", "317", "318", "319", "320", "321", "322", "323", "324", "325", "326", "327", "328", "329", "330", "331", "332", "333", "334", "335", "336", "337", "338", "339", "340", "341", "342", "343", "344", "345", "346", "347", "348", "349", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "360", "361", "362", "363", "364", "365", "366", "367", "368", "369", "370", "371", "372", "373", "374", "375", "376", "377", "378", "379", "380", "381", "382", "383", "384", "385", "386", "387", "388", "389", "390", "391", "392", "393", "394", "395", "396", "397", "398", "399", "400", "401", "402", "403", "404", "405", "406", "407", "408", "409", "410", "411", "412", "413", "414", "415", "416", "417", "418", "419", "420", "421", "422", "423", "424", "425", "426", "427", "428", "429", "430", "431", "432", "433", "434", "435", "436", "437", "438", "439", "440", "441", "442", "443", "444", "445", "446", "447", "448", "449", "450", "451", "452", "453", "454", "455", "456", "457", "458", "459", "460", "461", "462", "463", "464", "465", "466", "467", "468", "469", "470", "471", "472", "473", "474", "475", "476", "477", "478", "479", "480", "481", "482", "483", "484", "485", "486", "487", "488", "489", "490", "491", "492", "493", "494", "495", "496", "497", "498", "499", "500", "501", "502", "503", "504", "505", "506", "507", "508", "509", "510", "511", "512", "513", "514", "515", "516", "517", "518", "519", "520", "521", "522", "523", "524", "525", "526", "527", "528", "529", "530", "531", "532", "533", "534", "535", "536", "537", "538", "539", "540", "541", "542", "543", "544", "545", "546", "547", "548", "549", "550", "551", "552", "553", "554", "555", "556", "557", "558", "559", "560", "561", "562", "563", "564", "565", "566", "567", "568", "569", "570", "571", "572", "573", "574", "575", "576", "577", "578", "579", "580", "581", "582", "583", "584", "585", "586", "587", "588", "589", "590", "591", "592", "593", "594", "595", "596", "597", "598", "599", "600", "601", "602", "603", "604", "605", "606", "607", "608", "609", "610", "611", "612", "613", "614", "615", "616", "617", "618", "619", "620", "621", "622", "623", "624", "625", "626", "627", "628", "629", "630", "631", "632", "633", "634", "635", "636", "637", "638", "639", "640", "641", "642", "643", "644", "645", "646", "647", "648", "649", "650", "651", "652", "653", "654", "655", "656", "657", "658", "659", "660", "661", "662", "663", "664", "665", "666", "667", "668", "669", "670", "671", "672", "673", "674", "675", "676", "677", "678", "679", "680", "681", "682", "683", "684", "685", "686", "687", "688", "689", "690", "691", "692", "693", "694", "695", "696", "697", "698", "699", "700", "701", "702", "703", "704", "705", "706", "707", "708", "709", "710", "711", "712", "713", "714", "715", "716", "717", "718", "719", "720", "721", "722", "723", "724", "725", "726", "727", "728", "729", "730", "731", "732", "733", "734", "735", "736", "737", "738", "739", "740", "741", "742", "743", "744", "745", "746", "747", "748", "749", "750", "751", "752", "753", "754", "755", "756", "757", "758", "759", "760", "761", "762", "763", "764", "765", "766", "767", "768", "769", "770", "771", "772", "773", "774", "775", "776", "777", "778", "779", "780", "781", "782", "783", "784", "785", "786", "787", "788", "789", "790", "791", "792", "793", "794", "795", "796", "797", "798", "799", "800", "801", "802", "803", "804", "805", "806", "807", "808", "809", "810", "811", "812", "813", "814", "815", "816", "817", "818", "819", "820", "821", "822", "823", "824", "825", "826", "827", "828", "829", "830", "831", "832", "833", "834", "835", "836", "837", "838", "839", "840", "841", "842", "843", "844", "845", "846", "847", "848", "849", "850", "851", "852", "853", "854", "855", "856", "857", "858", "859", "860", "861", "862", "863", "864", "865", "866", "867", "868", "869", "870", "871", "872", "873", "874", "875", "876", "877", "878", "879", "880", "881", "882", "883", "884", "885", "886", "887", "888", "889", "890", "891", "892", "893", "894", "895", "896", "897", "898", "899", "900", "901", "902", "903", "904", "905", "906", "907", "908", "909", "910", "911", "912", "913", "914", "915", "916", "917", "918", "919", "920", "921", "922", "923", "924", "925", "926", "927", "928", "929", "930", "931", "932", "933", "934", "935", "936", "937", "938", "939", "940", "941", "942", "943", "944", "945", "946", "947", "948", "949", "950", "951", "952", "953", "954", "955", "956", "957", "958", "959", "960", "961", "962", "963", "964", "965", "966", "967", "968", "969", "970", "971", "972", "973", "974", "975", "976", "977", "978", "979", "980", "981", "982", "983", "984", "985", "986", "987", "988", "989", "990", "991", "992", "993", "994", "995", "996", "997", "998", "999", "1000"]
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター regions の値が 1,001 個あります。1 つのパラメーターに渡せるのは 1,000 個までです。候補を絞るか、すべてのときはこのパラメーターを使わない SQL にしてください",
+        "status": 400
+      }
+    },
+    {
+      "text": "-- param: ids integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:ids)",
+      "values": {
+        "ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 613, 614, 615, 616, 617, 618, 619, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 659, 660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 681, 682, 683, 684, 685, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699, 700, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979, 980, 981, 982, 983, 984, 985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999]
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a IN (@p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25, @p26, @p27, @p28, @p29, @p30, @p31, @p32, @p33, @p34, @p35, @p36, @p37, @p38, @p39, @p40, @p41, @p42, @p43, @p44, @p45, @p46, @p47, @p48, @p49, @p50, @p51, @p52, @p53, @p54, @p55, @p56, @p57, @p58, @p59, @p60, @p61, @p62, @p63, @p64, @p65, @p66, @p67, @p68, @p69, @p70, @p71, @p72, @p73, @p74, @p75, @p76, @p77, @p78, @p79, @p80, @p81, @p82, @p83, @p84, @p85, @p86, @p87, @p88, @p89, @p90, @p91, @p92, @p93, @p94, @p95, @p96, @p97, @p98, @p99, @p100, @p101, @p102, @p103, @p104, @p105, @p106, @p107, @p108, @p109, @p110, @p111, @p112, @p113, @p114, @p115, @p116, @p117, @p118, @p119, @p120, @p121, @p122, @p123, @p124, @p125, @p126, @p127, @p128, @p129, @p130, @p131, @p132, @p133, @p134, @p135, @p136, @p137, @p138, @p139, @p140, @p141, @p142, @p143, @p144, @p145, @p146, @p147, @p148, @p149, @p150, @p151, @p152, @p153, @p154, @p155, @p156, @p157, @p158, @p159, @p160, @p161, @p162, @p163, @p164, @p165, @p166, @p167, @p168, @p169, @p170, @p171, @p172, @p173, @p174, @p175, @p176, @p177, @p178, @p179, @p180, @p181, @p182, @p183, @p184, @p185, @p186, @p187, @p188, @p189, @p190, @p191, @p192, @p193, @p194, @p195, @p196, @p197, @p198, @p199, @p200, @p201, @p202, @p203, @p204, @p205, @p206, @p207, @p208, @p209, @p210, @p211, @p212, @p213, @p214, @p215, @p216, @p217, @p218, @p219, @p220, @p221, @p222, @p223, @p224, @p225, @p226, @p227, @p228, @p229, @p230, @p231, @p232, @p233, @p234, @p235, @p236, @p237, @p238, @p239, @p240, @p241, @p242, @p243, @p244, @p245, @p246, @p247, @p248, @p249, @p250, @p251, @p252, @p253, @p254, @p255, @p256, @p257, @p258, @p259, @p260, @p261, @p262, @p263, @p264, @p265, @p266, @p267, @p268, @p269, @p270, @p271, @p272, @p273, @p274, @p275, @p276, @p277, @p278, @p279, @p280, @p281, @p282, @p283, @p284, @p285, @p286, @p287, @p288, @p289, @p290, @p291, @p292, @p293, @p294, @p295, @p296, @p297, @p298, @p299, @p300, @p301, @p302, @p303, @p304, @p305, @p306, @p307, @p308, @p309, @p310, @p311, @p312, @p313, @p314, @p315, @p316, @p317, @p318, @p319, @p320, @p321, @p322, @p323, @p324, @p325, @p326, @p327, @p328, @p329, @p330, @p331, @p332, @p333, @p334, @p335, @p336, @p337, @p338, @p339, @p340, @p341, @p342, @p343, @p344, @p345, @p346, @p347, @p348, @p349, @p350, @p351, @p352, @p353, @p354, @p355, @p356, @p357, @p358, @p359, @p360, @p361, @p362, @p363, @p364, @p365, @p366, @p367, @p368, @p369, @p370, @p371, @p372, @p373, @p374, @p375, @p376, @p377, @p378, @p379, @p380, @p381, @p382, @p383, @p384, @p385, @p386, @p387, @p388, @p389, @p390, @p391, @p392, @p393, @p394, @p395, @p396, @p397, @p398, @p399, @p400, @p401, @p402, @p403, @p404, @p405, @p406, @p407, @p408, @p409, @p410, @p411, @p412, @p413, @p414, @p415, @p416, @p417, @p418, @p419, @p420, @p421, @p422, @p423, @p424, @p425, @p426, @p427, @p428, @p429, @p430, @p431, @p432, @p433, @p434, @p435, @p436, @p437, @p438, @p439, @p440, @p441, @p442, @p443, @p444, @p445, @p446, @p447, @p448, @p449, @p450, @p451, @p452, @p453, @p454, @p455, @p456, @p457, @p458, @p459, @p460, @p461, @p462, @p463, @p464, @p465, @p466, @p467, @p468, @p469, @p470, @p471, @p472, @p473, @p474, @p475, @p476, @p477, @p478, @p479, @p480, @p481, @p482, @p483, @p484, @p485, @p486, @p487, @p488, @p489, @p490, @p491, @p492, @p493, @p494, @p495, @p496, @p497, @p498, @p499, @p500, @p501, @p502, @p503, @p504, @p505, @p506, @p507, @p508, @p509, @p510, @p511, @p512, @p513, @p514, @p515, @p516, @p517, @p518, @p519, @p520, @p521, @p522, @p523, @p524, @p525, @p526, @p527, @p528, @p529, @p530, @p531, @p532, @p533, @p534, @p535, @p536, @p537, @p538, @p539, @p540, @p541, @p542, @p543, @p544, @p545, @p546, @p547, @p548, @p549, @p550, @p551, @p552, @p553, @p554, @p555, @p556, @p557, @p558, @p559, @p560, @p561, @p562, @p563, @p564, @p565, @p566, @p567, @p568, @p569, @p570, @p571, @p572, @p573, @p574, @p575, @p576, @p577, @p578, @p579, @p580, @p581, @p582, @p583, @p584, @p585, @p586, @p587, @p588, @p589, @p590, @p591, @p592, @p593, @p594, @p595, @p596, @p597, @p598, @p599, @p600, @p601, @p602, @p603, @p604, @p605, @p606, @p607, @p608, @p609, @p610, @p611, @p612, @p613, @p614, @p615, @p616, @p617, @p618, @p619, @p620, @p621, @p622, @p623, @p624, @p625, @p626, @p627, @p628, @p629, @p630, @p631, @p632, @p633, @p634, @p635, @p636, @p637, @p638, @p639, @p640, @p641, @p642, @p643, @p644, @p645, @p646, @p647, @p648, @p649, @p650, @p651, @p652, @p653, @p654, @p655, @p656, @p657, @p658, @p659, @p660, @p661, @p662, @p663, @p664, @p665, @p666, @p667, @p668, @p669, @p670, @p671, @p672, @p673, @p674, @p675, @p676, @p677, @p678, @p679, @p680, @p681, @p682, @p683, @p684, @p685, @p686, @p687, @p688, @p689, @p690, @p691, @p692, @p693, @p694, @p695, @p696, @p697, @p698, @p699, @p700, @p701, @p702, @p703, @p704, @p705, @p706, @p707, @p708, @p709, @p710, @p711, @p712, @p713, @p714, @p715, @p716, @p717, @p718, @p719, @p720, @p721, @p722, @p723, @p724, @p725, @p726, @p727, @p728, @p729, @p730, @p731, @p732, @p733, @p734, @p735, @p736, @p737, @p738, @p739, @p740, @p741, @p742, @p743, @p744, @p745, @p746, @p747, @p748, @p749, @p750, @p751, @p752, @p753, @p754, @p755, @p756, @p757, @p758, @p759, @p760, @p761, @p762, @p763, @p764, @p765, @p766, @p767, @p768, @p769, @p770, @p771, @p772, @p773, @p774, @p775, @p776, @p777, @p778, @p779, @p780, @p781, @p782, @p783, @p784, @p785, @p786, @p787, @p788, @p789, @p790, @p791, @p792, @p793, @p794, @p795, @p796, @p797, @p798, @p799, @p800, @p801, @p802, @p803, @p804, @p805, @p806, @p807, @p808, @p809, @p810, @p811, @p812, @p813, @p814, @p815, @p816, @p817, @p818, @p819, @p820, @p821, @p822, @p823, @p824, @p825, @p826, @p827, @p828, @p829, @p830, @p831, @p832, @p833, @p834, @p835, @p836, @p837, @p838, @p839, @p840, @p841, @p842, @p843, @p844, @p845, @p846, @p847, @p848, @p849, @p850, @p851, @p852, @p853, @p854, @p855, @p856, @p857, @p858, @p859, @p860, @p861, @p862, @p863, @p864, @p865, @p866, @p867, @p868, @p869, @p870, @p871, @p872, @p873, @p874, @p875, @p876, @p877, @p878, @p879, @p880, @p881, @p882, @p883, @p884, @p885, @p886, @p887, @p888, @p889, @p890, @p891, @p892, @p893, @p894, @p895, @p896, @p897, @p898, @p899, @p900, @p901, @p902, @p903, @p904, @p905, @p906, @p907, @p908, @p909, @p910, @p911, @p912, @p913, @p914, @p915, @p916, @p917, @p918, @p919, @p920, @p921, @p922, @p923, @p924, @p925, @p926, @p927, @p928, @p929, @p930, @p931, @p932, @p933, @p934, @p935, @p936, @p937, @p938, @p939, @p940, @p941, @p942, @p943, @p944, @p945, @p946, @p947, @p948, @p949, @p950, @p951, @p952, @p953, @p954, @p955, @p956, @p957, @p958, @p959, @p960, @p961, @p962, @p963, @p964, @p965, @p966, @p967, @p968, @p969, @p970, @p971, @p972, @p973, @p974, @p975, @p976, @p977, @p978, @p979, @p980, @p981, @p982, @p983, @p984, @p985, @p986, @p987, @p988, @p989, @p990, @p991, @p992, @p993, @p994, @p995, @p996, @p997, @p998, @p999, @p1000) OR b IN (@p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23, @p24, @p25, @p26, @p27, @p28, @p29, @p30, @p31, @p32, @p33, @p34, @p35, @p36, @p37, @p38, @p39, @p40, @p41, @p42, @p43, @p44, @p45, @p46, @p47, @p48, @p49, @p50, @p51, @p52, @p53, @p54, @p55, @p56, @p57, @p58, @p59, @p60, @p61, @p62, @p63, @p64, @p65, @p66, @p67, @p68, @p69, @p70, @p71, @p72, @p73, @p74, @p75, @p76, @p77, @p78, @p79, @p80, @p81, @p82, @p83, @p84, @p85, @p86, @p87, @p88, @p89, @p90, @p91, @p92, @p93, @p94, @p95, @p96, @p97, @p98, @p99, @p100, @p101, @p102, @p103, @p104, @p105, @p106, @p107, @p108, @p109, @p110, @p111, @p112, @p113, @p114, @p115, @p116, @p117, @p118, @p119, @p120, @p121, @p122, @p123, @p124, @p125, @p126, @p127, @p128, @p129, @p130, @p131, @p132, @p133, @p134, @p135, @p136, @p137, @p138, @p139, @p140, @p141, @p142, @p143, @p144, @p145, @p146, @p147, @p148, @p149, @p150, @p151, @p152, @p153, @p154, @p155, @p156, @p157, @p158, @p159, @p160, @p161, @p162, @p163, @p164, @p165, @p166, @p167, @p168, @p169, @p170, @p171, @p172, @p173, @p174, @p175, @p176, @p177, @p178, @p179, @p180, @p181, @p182, @p183, @p184, @p185, @p186, @p187, @p188, @p189, @p190, @p191, @p192, @p193, @p194, @p195, @p196, @p197, @p198, @p199, @p200, @p201, @p202, @p203, @p204, @p205, @p206, @p207, @p208, @p209, @p210, @p211, @p212, @p213, @p214, @p215, @p216, @p217, @p218, @p219, @p220, @p221, @p222, @p223, @p224, @p225, @p226, @p227, @p228, @p229, @p230, @p231, @p232, @p233, @p234, @p235, @p236, @p237, @p238, @p239, @p240, @p241, @p242, @p243, @p244, @p245, @p246, @p247, @p248, @p249, @p250, @p251, @p252, @p253, @p254, @p255, @p256, @p257, @p258, @p259, @p260, @p261, @p262, @p263, @p264, @p265, @p266, @p267, @p268, @p269, @p270, @p271, @p272, @p273, @p274, @p275, @p276, @p277, @p278, @p279, @p280, @p281, @p282, @p283, @p284, @p285, @p286, @p287, @p288, @p289, @p290, @p291, @p292, @p293, @p294, @p295, @p296, @p297, @p298, @p299, @p300, @p301, @p302, @p303, @p304, @p305, @p306, @p307, @p308, @p309, @p310, @p311, @p312, @p313, @p314, @p315, @p316, @p317, @p318, @p319, @p320, @p321, @p322, @p323, @p324, @p325, @p326, @p327, @p328, @p329, @p330, @p331, @p332, @p333, @p334, @p335, @p336, @p337, @p338, @p339, @p340, @p341, @p342, @p343, @p344, @p345, @p346, @p347, @p348, @p349, @p350, @p351, @p352, @p353, @p354, @p355, @p356, @p357, @p358, @p359, @p360, @p361, @p362, @p363, @p364, @p365, @p366, @p367, @p368, @p369, @p370, @p371, @p372, @p373, @p374, @p375, @p376, @p377, @p378, @p379, @p380, @p381, @p382, @p383, @p384, @p385, @p386, @p387, @p388, @p389, @p390, @p391, @p392, @p393, @p394, @p395, @p396, @p397, @p398, @p399, @p400, @p401, @p402, @p403, @p404, @p405, @p406, @p407, @p408, @p409, @p410, @p411, @p412, @p413, @p414, @p415, @p416, @p417, @p418, @p419, @p420, @p421, @p422, @p423, @p424, @p425, @p426, @p427, @p428, @p429, @p430, @p431, @p432, @p433, @p434, @p435, @p436, @p437, @p438, @p439, @p440, @p441, @p442, @p443, @p444, @p445, @p446, @p447, @p448, @p449, @p450, @p451, @p452, @p453, @p454, @p455, @p456, @p457, @p458, @p459, @p460, @p461, @p462, @p463, @p464, @p465, @p466, @p467, @p468, @p469, @p470, @p471, @p472, @p473, @p474, @p475, @p476, @p477, @p478, @p479, @p480, @p481, @p482, @p483, @p484, @p485, @p486, @p487, @p488, @p489, @p490, @p491, @p492, @p493, @p494, @p495, @p496, @p497, @p498, @p499, @p500, @p501, @p502, @p503, @p504, @p505, @p506, @p507, @p508, @p509, @p510, @p511, @p512, @p513, @p514, @p515, @p516, @p517, @p518, @p519, @p520, @p521, @p522, @p523, @p524, @p525, @p526, @p527, @p528, @p529, @p530, @p531, @p532, @p533, @p534, @p535, @p536, @p537, @p538, @p539, @p540, @p541, @p542, @p543, @p544, @p545, @p546, @p547, @p548, @p549, @p550, @p551, @p552, @p553, @p554, @p555, @p556, @p557, @p558, @p559, @p560, @p561, @p562, @p563, @p564, @p565, @p566, @p567, @p568, @p569, @p570, @p571, @p572, @p573, @p574, @p575, @p576, @p577, @p578, @p579, @p580, @p581, @p582, @p583, @p584, @p585, @p586, @p587, @p588, @p589, @p590, @p591, @p592, @p593, @p594, @p595, @p596, @p597, @p598, @p599, @p600, @p601, @p602, @p603, @p604, @p605, @p606, @p607, @p608, @p609, @p610, @p611, @p612, @p613, @p614, @p615, @p616, @p617, @p618, @p619, @p620, @p621, @p622, @p623, @p624, @p625, @p626, @p627, @p628, @p629, @p630, @p631, @p632, @p633, @p634, @p635, @p636, @p637, @p638, @p639, @p640, @p641, @p642, @p643, @p644, @p645, @p646, @p647, @p648, @p649, @p650, @p651, @p652, @p653, @p654, @p655, @p656, @p657, @p658, @p659, @p660, @p661, @p662, @p663, @p664, @p665, @p666, @p667, @p668, @p669, @p670, @p671, @p672, @p673, @p674, @p675, @p676, @p677, @p678, @p679, @p680, @p681, @p682, @p683, @p684, @p685, @p686, @p687, @p688, @p689, @p690, @p691, @p692, @p693, @p694, @p695, @p696, @p697, @p698, @p699, @p700, @p701, @p702, @p703, @p704, @p705, @p706, @p707, @p708, @p709, @p710, @p711, @p712, @p713, @p714, @p715, @p716, @p717, @p718, @p719, @p720, @p721, @p722, @p723, @p724, @p725, @p726, @p727, @p728, @p729, @p730, @p731, @p732, @p733, @p734, @p735, @p736, @p737, @p738, @p739, @p740, @p741, @p742, @p743, @p744, @p745, @p746, @p747, @p748, @p749, @p750, @p751, @p752, @p753, @p754, @p755, @p756, @p757, @p758, @p759, @p760, @p761, @p762, @p763, @p764, @p765, @p766, @p767, @p768, @p769, @p770, @p771, @p772, @p773, @p774, @p775, @p776, @p777, @p778, @p779, @p780, @p781, @p782, @p783, @p784, @p785, @p786, @p787, @p788, @p789, @p790, @p791, @p792, @p793, @p794, @p795, @p796, @p797, @p798, @p799, @p800, @p801, @p802, @p803, @p804, @p805, @p806, @p807, @p808, @p809, @p810, @p811, @p812, @p813, @p814, @p815, @p816, @p817, @p818, @p819, @p820, @p821, @p822, @p823, @p824, @p825, @p826, @p827, @p828, @p829, @p830, @p831, @p832, @p833, @p834, @p835, @p836, @p837, @p838, @p839, @p840, @p841, @p842, @p843, @p844, @p845, @p846, @p847, @p848, @p849, @p850, @p851, @p852, @p853, @p854, @p855, @p856, @p857, @p858, @p859, @p860, @p861, @p862, @p863, @p864, @p865, @p866, @p867, @p868, @p869, @p870, @p871, @p872, @p873, @p874, @p875, @p876, @p877, @p878, @p879, @p880, @p881, @p882, @p883, @p884, @p885, @p886, @p887, @p888, @p889, @p890, @p891, @p892, @p893, @p894, @p895, @p896, @p897, @p898, @p899, @p900, @p901, @p902, @p903, @p904, @p905, @p906, @p907, @p908, @p909, @p910, @p911, @p912, @p913, @p914, @p915, @p916, @p917, @p918, @p919, @p920, @p921, @p922, @p923, @p924, @p925, @p926, @p927, @p928, @p929, @p930, @p931, @p932, @p933, @p934, @p935, @p936, @p937, @p938, @p939, @p940, @p941, @p942, @p943, @p944, @p945, @p946, @p947, @p948, @p949, @p950, @p951, @p952, @p953, @p954, @p955, @p956, @p957, @p958, @p959, @p960, @p961, @p962, @p963, @p964, @p965, @p966, @p967, @p968, @p969, @p970, @p971, @p972, @p973, @p974, @p975, @p976, @p977, @p978, @p979, @p980, @p981, @p982, @p983, @p984, @p985, @p986, @p987, @p988, @p989, @p990, @p991, @p992, @p993, @p994, @p995, @p996, @p997, @p998, @p999, @p1000)",
+        "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 613, 614, 615, 616, 617, 618, 619, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 659, 660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 681, 682, 683, 684, 685, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699, 700, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979, 980, 981, 982, 983, 984, 985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999]
+      }
+    },
+    {
+      "text": "-- param: ids integer[]\n-- param: more integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:more) OR c = :x",
+      "values": {
+        "ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 613, 614, 615, 616, 617, 618, 619, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 659, 660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 681, 682, 683, 684, 685, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699, 700, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979, 980, 981, 982, 983, 984, 985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999],
+        "more": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 561, 562, 563, 564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 581, 582, 583, 584, 585, 586, 587, 588, 589, 590, 591, 592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 613, 614, 615, 616, 617, 618, 619, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 637, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 659, 660, 661, 662, 663, 664, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 681, 682, 683, 684, 685, 686, 687, 688, 689, 690, 691, 692, 693, 694, 695, 696, 697, 698, 699, 700, 701, 702, 703, 704, 705, 706, 707, 708, 709, 710, 711, 712, 713, 714, 715, 716, 717, 718, 719, 720, 721, 722, 723, 724, 725, 726, 727, 728, 729, 730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851, 852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 965, 966, 967, 968, 969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979, 980, 981, 982, 983, 984, 985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999],
+        "x": 1
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーターの値が全部で 2,001 個になります。1 つの SQL に渡せるのは 2,000 個までです。候補を絞るか、すべてのときはこのパラメーターを使わない SQL にしてください",
+        "status": 400
       }
     }
   ]

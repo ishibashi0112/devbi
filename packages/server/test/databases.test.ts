@@ -11,7 +11,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { connect, createApiHandler, toArrowTable, type ApiHandler, type Connection } from "../src/index.js";
+import { connect, createApiHandler, toArrowTable, type ApiHandler, type Connection, type Dialect } from "../src/index.js";
+import { typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
 
 const SAMPLE = path.resolve(import.meta.dirname, "../../../examples/sales");
 
@@ -203,6 +204,7 @@ for (const c of CASES) {
       for (const f of ["orders.sql", "sales_daily.sql"]) copyFileSync(path.join(SAMPLE, "api", f), path.join(dir, "api", f));
       writeFileSync(path.join(dir, "api", "types.sql"), "-- 型の確認\nSELECT * FROM devbi_types WHERE d >= :from AND region <> :skip AND (:from IS NOT NULL) ORDER BY id");
       writeFileSync(path.join(dir, "api", "text.sql"), "SELECT region, 'a:b ? @p1 ;' AS s FROM devbi_types WHERE id = :id");
+      writeTypedDatasets(dir, ({ "SQL Server": "mssql", Oracle: "oracle" } as Record<string, Dialect>)[c.name] ?? "mysql");
       api = createApiHandler({ dir, env: { DEVBI_DB: c.url }, exposeErrors: true, maxRows: 2 });
       // Oracle's SET TRANSACTION READ ONLY refuses a table made in the same second as the transaction starts
       // (ORA-01466: table definition has changed). Tables in use are never that new; the ones above are.
@@ -228,6 +230,8 @@ for (const c of CASES) {
       expect(t.get(1)!.toJSON()[name("amount")]).toBe(800);
     });
 
+    typedParameterTests(() => api);
+
     it("sends parameters as values, and leaves quoted text alone", async () => {
       const t = tableFromIPC((await api.run("text", { id: 2 })).bytes);
       expect(t.get(0)!.toJSON()).toEqual({ [name("region")]: "近畿", [name("s")]: "a:b ? @p1 ;" });
@@ -244,6 +248,16 @@ for (const c of CASES) {
         expect(daily.numRows).toBe(4014);
         expect(Array.from(daily.getChild("金額")!.toArray() as ArrayLike<number | bigint>, Number).reduce((a, b) => a + b, 0)).toBe(193161410);
         expect(String(lines.schema.fields.find((f) => f.name === "受注日")!.type)).toBe("Date32<DAY>");
+        // the SSRS-like dataset: typed parameters, all regions in IN (…), an optional end date
+        const regions = tableFromIPC((await big.run("regions")).bytes);
+        expect(regions.numRows).toBe(6);
+        const all = Array.from({ length: regions.numRows }, (_, i) => String(regions.get(i)!.toArray()[0]));
+        const selected = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: null, regions: all })).bytes);
+        expect(selected.numRows).toBe(6044);
+        expect(Array.from(selected.getChild("金額")!.toArray() as ArrayLike<number | bigint>, Number).reduce((a, b) => a + b, 0)).toBe(193161410);
+        const until = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: "2024-04-02", regions: ["関東"] })).bytes);
+        expect(until.numRows).toBeGreaterThan(0);
+        expect(new Set(Array.from({ length: until.numRows }, (_, i) => until.get(i)!.toJSON()["地域"]))).toEqual(new Set(["関東"]));
       } finally {
         await big.close();
       }

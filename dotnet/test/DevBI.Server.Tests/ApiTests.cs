@@ -56,13 +56,16 @@ namespace DevBI.Server.Tests
             // Japanese as it is, like JSON.stringify
             Assert.Contains("受注の明細", text);
             using var doc = JsonDocument.Parse(text);
-            var datasets = doc.RootElement.GetProperty("datasets").EnumerateArray().ToList();
-            Assert.Equal(new[] { "orders", "sales_daily" }, datasets.Select(d => d.GetProperty("name").GetString()));
-            Assert.Equal(new[] { "name", "description", "params", "connection" }, datasets[0].EnumerateObject().Select(p => p.Name));
-            Assert.Equal("DEVBI_DB", datasets[0].GetProperty("connection").GetString());
-            Assert.Equal(new[] { "from" }, datasets[0].GetProperty("params").EnumerateArray().Select(p => p.GetString()));
-            Assert.Equal(new[] { "06:00" }, datasets[1].GetProperty("snapshot").EnumerateArray().Select(p => p.GetString()));
-            Assert.StartsWith("日・地域・商品分類", datasets[1].GetProperty("description").GetString());
+            var all = doc.RootElement.GetProperty("datasets").EnumerateArray().ToList();
+            Assert.Equal(new[] { "order_lines", "orders", "regions", "sales_daily" }, all.Select(d => d.GetProperty("name").GetString()));
+            var orders = all[1];
+            Assert.Equal(new[] { "name", "description", "params", "parameters", "connection" }, orders.EnumerateObject().Select(p => p.Name));
+            Assert.Equal("[{\"name\":\"from\",\"type\":\"date\",\"label\":\"受注日（から）\"}]", orders.GetProperty("parameters").GetRawText());
+            Assert.Equal("DEVBI_DB", orders.GetProperty("connection").GetString());
+            Assert.Equal(new[] { "from" }, orders.GetProperty("params").EnumerateArray().Select(p => p.GetString()));
+            Assert.Equal(new[] { "受注番号", "行番号" }, all[0].GetProperty("key").EnumerateArray().Select(p => p.GetString()));
+            Assert.Equal(new[] { "06:00" }, all[3].GetProperty("snapshot").EnumerateArray().Select(p => p.GetString()));
+            Assert.StartsWith("日・地域・商品分類", all[3].GetProperty("description").GetString());
             // devbi-snapshot makes snapshots: none here
             Assert.Equal(0, doc.RootElement.GetProperty("snapshots").GetArrayLength());
         }
@@ -75,9 +78,12 @@ namespace DevBI.Server.Tests
             File.WriteAllText(Path.Combine(dir, "api", "bad.sql"), "-- connection: erp\nDELETE FROM t");
             File.WriteAllText(Path.Combine(dir, "api", "good.sql"), "-- connection: erp-2\nSELECT 1 AS one");
             File.WriteAllText(Path.Combine(dir, "api", "notes.txt"), "SELECT 1");
+            File.WriteAllText(
+                Path.Combine(dir, "api", "typed.sql"),
+                "-- 地域で絞る\n-- param: regions text[] label=\"地 域\" values=regions default=all\n-- param: from date optional hidden\n-- key: id, \"行\"\nSELECT id FROM t WHERE r IN (:regions) AND (:from IS NULL OR d >= :from) AND x = :x");
             var r = await Api(dir).HandleAsync(new ApiRequest { Action = "schema", Method = "GET" });
             Assert.Equal(
-                "{\"datasets\":[{\"name\":\"bad\",\"error\":\"api/bad.sql: SELECT か WITH で始まる文だけ使えます（DELETE で始まっています）\"},{\"name\":\"good\",\"description\":\"\",\"params\":[],\"connection\":\"DEVBI_DB_ERP_2\"}],\"snapshots\":[]}",
+                "{\"datasets\":[{\"name\":\"bad\",\"error\":\"api/bad.sql: SELECT か WITH で始まる文だけ使えます（DELETE で始まっています）\"},{\"name\":\"good\",\"description\":\"\",\"params\":[],\"parameters\":[],\"connection\":\"DEVBI_DB_ERP_2\"},{\"name\":\"typed\",\"description\":\"地域で絞る\",\"params\":[\"regions\",\"from\",\"x\"],\"parameters\":[{\"name\":\"regions\",\"type\":\"text\",\"multiple\":true,\"label\":\"地 域\",\"default\":\"all\",\"values\":\"regions\"},{\"name\":\"from\",\"type\":\"date\",\"optional\":true,\"hidden\":true},{\"name\":\"x\"}],\"key\":[\"id\",\"行\"],\"connection\":\"DEVBI_DB\"}],\"snapshots\":[]}",
                 Encoding.UTF8.GetString(r.Body));
             Assert.Equal("{\"datasets\":[],\"snapshots\":[]}", Encoding.UTF8.GetString((await Api(Path.Combine(dir, "none")).HandleAsync(new ApiRequest { Action = "schema", Method = "GET" })).Body));
         }
@@ -109,7 +115,7 @@ namespace DevBI.Server.Tests
             // not UTF-16 (a lone surrogate): JSON.parse reads it, but no file has such a name
             r = await Post(api, "{\"name\":\"\\ud800\"}");
             Assert.Equal(400, r.Status);
-            r = await Post(api, "{\"name\":\"orders\",\"pad\":\"" + new string('x', 64 * 1024) + "\"}");
+            r = await Post(api, "{\"name\":\"orders\",\"pad\":\"" + new string('x', 256 * 1024) + "\"}");
             Assert.Equal((413, "リクエストが大きすぎます"), (r.Status, Error(r)));
             foreach (var name in new[] { "nothing", "../api/orders", "api/orders", "orders.sql", "ORDERS" })
             {

@@ -77,6 +77,64 @@ const datasets: { name: string; text: string }[] = [
   { name: "several", text: "SELECT 'a' + 'b;' FROM t WHERE x = ']'; DROP TABLE t" },
   { name: "not_select", text: "-- 説明\n(SELECT 1)" },
   { name: "spaces", text: "　-- connection:　erp　\n -- snapshot:　07:00　08:00\nSELECT 1" },
+  // -- param: and -- key: (docs/design/sql-datasets.md 4 章)
+  {
+    name: "typed",
+    text:
+      "-- 受注の明細\n-- param: from date label=受注日（から） default=month_start\n-- param: regions text[] label=\"地域 （複数）\" values=regions default=all\n" +
+      "--param:customer integer optional hidden\n-- key: 受注番号, \"行, 番号\"、 \"a\"\"b\"\n\n-- 説明の 2 行目\n-- Param : status text default=\"受付 \"\"中\"\"\"\n" +
+      "SELECT * FROM t WHERE d >= :from AND r IN (:Regions) AND (:customer IS NULL OR c = :customer) AND s = :status AND x = :plain",
+  },
+  { name: "typed_late", text: "SELECT * FROM t WHERE a = :a\n-- param: a date" },
+  {
+    name: "typed_defaults",
+    text:
+      "-- param: a date default=today-30\n-- param: b datetime default=2024-04-01T09:00\n-- param: c text default=\"\"\n-- param: d number default=-1.5e3\n" +
+      "-- param: e boolean default=false\n-- param: f integer[] default=1,2\n-- param: g text[] default=all\nSELECT :a, :b, :c, :d, :e FROM t WHERE x IN (:f) AND y IN (:g)",
+  },
+  ...[
+    "-- param: d",
+    "-- param:",
+    "-- param: d day",
+    "-- param: d text[ ]",
+    "-- param: nope date",
+    "-- param: d date\n-- param: D date",
+    "-- param: d date colour=red",
+    "-- param: d date label",
+    "-- param: d date label=",
+    "-- param: d date optional=yes",
+    "-- param: d date label=a label=b",
+    "-- param: d date label=\"a",
+    "-- param: d=1 date",
+    "-- param: d type=date",
+    "-- param: r text[] optional",
+    "-- param: user.region text",
+    "-- param: 1d text",
+    "-- param: d integer default=1.5",
+    "-- param: d integer default=9007199254740992",
+    "-- param: d date default=2024-02-30",
+    "-- param: d date default=2024-02-29",
+    "-- param: d date default=2023-02-29",
+    "-- param: d datetime default=2024-04-01T24:00",
+    "-- param: d date default=today+",
+    "-- param: d date default=",
+    "-- param: r integer[] default=1,,2",
+    "-- param: r integer[] default=all",
+    "-- param: d boolean default=yes",
+    "-- param: d date values=../x",
+    "-- key:",
+    "-- key: a, a",
+    "-- key: a\n-- key: b",
+    "-- key: \"a\" b",
+    "-- key: \"a",
+    "-- param: r text[]\n-- 説明\n",
+  ].map((head, i) => ({ name: `bad${i}`, text: `-- 説明\n${head}\nSELECT * FROM t WHERE d = :d AND r IN (:r)` })),
+  { name: "multi_eq", text: "-- param: r text[]\nSELECT * FROM t\nWHERE\n  r = :r" },
+  { name: "multi_two", text: "-- param: r text[]\nSELECT * FROM t WHERE r IN (:r, 'x')" },
+  { name: "multi_name", text: "-- param: r text[]\nSELECT * FROM t WHERE rIN (:r)" },
+  { name: "multi_not_in", text: "-- param: r text[]\nSELECT * FROM t WHERE r NOT IN(\n  :r\n) OR [x]IN (:r)" },
+  { name: "multi_space", text: "-- param: r text[]\nSELECT * FROM t WHERE r\u3000In\u3000(\u3000:r )" },
+  { name: "multi_dotless", text: "-- param: r text[]\nSELECT * FROM t WHERE r \u0131n (:r)" },
 ];
 
 const binds: { text: string; values: Record<string, unknown> }[] = [
@@ -96,6 +154,66 @@ const binds: { text: string; values: Record<string, unknown> }[] = [
   { text: "SELECT 1", values: { a: 1 } },
   { text: "SELECT '::a', :a, [:b], :b FROM t", values: { a: "x", b: "y" } },
   { text: "SELECT :地域, :ｘ FROM t", values: { 地域: "関東", ｘ: 0 } },
+  { text: "SELECT * FROM t WHERE r = :user", values: { "user.region": "関東", user: "x" } },
+  { text: "SELECT * FROM t WHERE r = :user", values: { user: "x" } },
+  ...((): { text: string; values: Record<string, unknown> }[] => {
+    const typed =
+      "-- param: from date\n-- param: at datetime optional\n-- param: n integer\n-- param: r number\n-- param: ok boolean\n-- param: s text\n-- param: regions text[]\n" +
+      "SELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from";
+    const values = { from: "2024-04-01", at: "2024-04-01T09:00", n: 10, r: 1.5, ok: true, s: "関東", regions: ["関東", "近畿"] };
+    const patches: Record<string, unknown>[] = [
+      {},
+      { at: null },
+      { at: "2024-04-01" },
+      { at: "2024-04-01 09:00:30.123456" },
+      { at: "2024-04-01T09:00:30.1234567" },
+      { at: "2024-04-01T24:00" },
+      { at: "2024-04-01T09:60" },
+      { at: "2024-04-01T09:00Z" },
+      { at: "2024-04-01T9:00" },
+      { from: "2024-02-30" },
+      { from: "2024-02-29" },
+      { from: "1900-02-29" },
+      { from: "2000-02-29" },
+      { from: "0000-01-01" },
+      { from: "２０２４-04-01" },
+      { from: 20240401 },
+      { from: null },
+      { n: 1.5 },
+      { n: "10" },
+      { n: -9007199254740991 },
+      { n: 9007199254740992 },
+      { n: 1e300 },
+      { n: 1.5e-7 },
+      { n: -0.000001 },
+      { n: 1e21 },
+      { n: 123456789012345680000 },
+      { n: 0.1 + 0.2 },
+      { r: "1.5" },
+      { r: 10 },
+      { ok: 1 },
+      { ok: false },
+      { s: 1 },
+      { s: "x".repeat(4000) },
+      { s: "x".repeat(4001) },
+      { s: "😀".repeat(2001) },
+      { s: ["a"] },
+      { s: { a: 1 } },
+      { regions: [] },
+      { regions: null },
+      { regions: ["a", null] },
+      { regions: ["a", 1] },
+      { regions: ["a", ["b"]] },
+      { regions: "関東" },
+      { regions: Array.from({ length: 1001 }, (_, i) => String(i)) },
+    ];
+    return patches.map((p) => ({ text: typed, values: { ...values, ...p } }));
+  })(),
+  { text: "-- param: ids integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:ids)", values: { ids: Array.from({ length: 1000 }, (_, i) => i) } },
+  {
+    text: "-- param: ids integer[]\n-- param: more integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:more) OR c = :x",
+    values: { ids: Array.from({ length: 1000 }, (_, i) => i), more: Array.from({ length: 1000 }, (_, i) => i), x: 1 },
+  },
 ];
 
 const errorOf = (e: unknown) => ({ error: (e as Error).message, ...((e as { status?: number }).status ? { status: (e as { status: number }).status } : {}) });
@@ -106,6 +224,8 @@ const datasetOf = (d: Dataset) => ({
   snapshot: d.snapshot ?? null,
   sql: d.sql,
   params: d.params,
+  parameters: d.parameters,
+  key: d.key ?? null,
 });
 
 describe("the SQL Server cases the C# reference checks against", () => {
@@ -134,6 +254,13 @@ describe("the SQL Server cases the C# reference checks against", () => {
         }
       }),
     };
-    await expect(`${JSON.stringify(cases, null, 2)}\n`).toMatchFileSnapshot("fixtures/sqlserver-cases.json");
+    // Long lists of values (1,000 for one IN) on one line each: the file stays readable.
+    const scalar = String.raw`(?:"(?:[^"\\\n]|\\.)*"|-?[0-9.e+]+|null|true|false)`;
+    const list = new RegExp(String.raw`\[\n( +)(${scalar}(?:,\n\1${scalar})*)\n *\]`, "g");
+    const text = JSON.stringify(cases, null, 2).replace(list, (all, indent: string, body: string) => {
+      const items = body.split(`,\n${indent}`);
+      return items.length > 10 ? `[${items.join(", ")}]` : all;
+    });
+    await expect(`${text}\n`).toMatchFileSnapshot("fixtures/sqlserver-cases.json");
   });
 });

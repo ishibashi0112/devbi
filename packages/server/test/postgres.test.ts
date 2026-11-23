@@ -5,6 +5,8 @@ import { tableFromIPC } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { connect, createApiHandler, type ApiHandler, type Connection } from "../src/index.js";
 import { createServer, type Server } from "node:http";
+import { DatabaseSync } from "node:sqlite";
+import { SAMPLE_DB, typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
 
 // A PostgreSQL to write test tables into, e.g. postgres://postgres@127.0.0.1:5432/postgres (CI's service container).
 const url = process.env.DEVBI_TEST_PG;
@@ -26,6 +28,21 @@ describe.skipIf(!url)("PostgreSQL", () => {
       INSERT INTO devbi_test.orders VALUES
         (1, '2026-04-01', '2026-04-01 09:30:00.25', '2026-04-01 09:30:00+09', 1200.50, 0.5, true, '関東', '{"a":1}', 9007199254740993),
         (2, '2026-04-02', NULL, NULL, 800, NULL, false, '近畿', NULL, NULL);`);
+    // The sample's customers and orders, for the typed parameters (typed-cases.ts).
+    await client.query(`DROP SCHEMA IF EXISTS devbi_sample CASCADE; CREATE SCHEMA devbi_sample;
+      CREATE TABLE devbi_sample.customers (id integer, name text, region text);
+      CREATE TABLE devbi_sample.orders (order_no text, order_date date, customer_id integer);`);
+    const sample = new DatabaseSync(SAMPLE_DB, { readOnly: true });
+    try {
+      for (const [table, sql] of [["customers", "SELECT id, name, region FROM customers"], ["orders", "SELECT order_no, order_date, customer_id FROM orders"]] as const) {
+        const rows = (sample.prepare(sql).all() as Record<string, unknown>[]).map((r) => Object.values(r));
+        const width = rows[0]!.length;
+        const values = rows.map((_, i) => `(${Array.from({ length: width }, (_, j) => `$${i * width + j + 1}`).join(", ")})`).join(", ");
+        await client.query(`INSERT INTO devbi_sample.${table} VALUES ${values}`, rows.flat());
+      }
+    } finally {
+      sample.close();
+    }
     await client.end();
     admin = await connect(url!);
 
@@ -33,6 +50,7 @@ describe.skipIf(!url)("PostgreSQL", () => {
     mkdirSync(path.join(dir, "api"));
     writeFileSync(path.join(dir, "api", "orders.sql"), "SELECT * FROM devbi_test.orders WHERE order_date >= :from::date AND region <> :skip ORDER BY id");
     writeFileSync(path.join(dir, "api", "dollar.sql"), "SELECT $$a;b$$ AS s");
+    writeTypedDatasets(dir, "postgres", "devbi_sample.");
     api = createApiHandler({ dir, env: { DEVBI_DB: url }, exposeErrors: true });
     server = createServer((req, res) => void api.handle(req, res));
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -73,6 +91,8 @@ describe.skipIf(!url)("PostgreSQL", () => {
     expect(row.extra).toBe('{"a": 1}');
     expect(row.big).toBe(9007199254740993n);
   });
+
+  typedParameterTests(() => api);
 
   it("reads $$ … $$ text with PostgreSQL's rules", async () => {
     const res = await fetch(new URL("api/query", base), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "dollar" }) });

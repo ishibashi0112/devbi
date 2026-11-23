@@ -61,6 +61,12 @@ namespace DevBI.Server.Tests
             File.WriteAllText(Path.Combine(Directory, "api", "types.sql"), "-- 型の確認\nSELECT * FROM devbi_types WHERE d >= :from AND region <> :skip AND (:from IS NOT NULL) ORDER BY id");
             File.WriteAllText(Path.Combine(Directory, "api", "text.sql"), "SELECT region, 'a:b ? @p1 ;' AS s FROM devbi_types WHERE id = :id");
             File.WriteAllText(Path.Combine(Directory, "api", "kinds.sql"), "SELECT CAST(:s AS NVARCHAR(10)) AS s, :i + 1 AS i, :b AS b, :f * 2 AS f, :big AS big, CAST(:n AS INT) AS n");
+            // typed parameters (-- param:), as packages/server/test/typed-cases.ts
+            File.WriteAllText(
+                Path.Combine(Directory, "api", "typed_orders.sql"),
+                "-- param: from date\n-- param: customer integer optional\n-- param: at datetime optional\n" +
+                "SELECT COUNT(*) AS n FROM orders o WHERE o.order_date >= :from AND (:customer IS NULL OR o.customer_id = :customer) AND (:at IS NULL OR o.order_date < :at)");
+            File.WriteAllText(Path.Combine(Directory, "api", "typed_regions.sql"), "-- param: regions text[]\nSELECT COUNT(*) AS n FROM customers c WHERE c.region IN (:regions) OR c.region IN (:regions)");
             if (ConnectionString == null) return;
             using var conn = new SqlConnection(ConnectionString);
             conn.Open();
@@ -212,6 +218,35 @@ namespace DevBI.Server.Tests
             t = Read((await db.Api().RunAsync("kinds", new Dictionary<string, object?> { ["s"] = "", ["i"] = 0, ["b"] = false, ["f"] = 0, ["big"] = 1152921504606846976.0, ["n"] = null })).Bytes);
             Assert.Equal(1152921504606846976L, ((Int64Array)t.Column("big")).GetValue(0));
             Assert.Null(((Int64Array)t.Column("n")).GetValue(0));
+        }
+
+        [SqlServerFact]
+        public async Task TypedParametersDatesOptionalNullsAndSeveralValues()
+        {
+            long Count(QueryResult r) => Convert.ToInt64(Read(r.Bytes).Column("n") switch { Int32Array a => a.GetValue(0), Int64Array a => a.GetValue(0), var c => throw new InvalidOperationException(c.GetType().Name) });
+            var api = db.Api();
+            Assert.Equal(1040L, Count(await api.RunAsync("typed_orders", new Dictionary<string, object?> { ["from"] = "2026-01-01", ["customer"] = null, ["at"] = null })));
+            Assert.Equal(45L, Count(await api.RunAsync("typed_orders", new Dictionary<string, object?> { ["from"] = "2026-01-01", ["customer"] = 3, ["at"] = null })));
+            Assert.Equal(7L, Count(await api.RunAsync("typed_orders", new Dictionary<string, object?> { ["from"] = "2024-04-01", ["customer"] = null, ["at"] = "2024-04-02T12:00" })));
+            Assert.Equal(7L, Count(await api.RunAsync("typed_orders", new Dictionary<string, object?> { ["from"] = "2024-04-01", ["customer"] = null, ["at"] = "2024-04-03" })));
+            // a list from C# (string[]), or an array in the request's JSON
+            Assert.Equal(26L, Count(await api.RunAsync("typed_regions", new Dictionary<string, object?> { ["regions"] = new[] { "関東", "近畿" } })));
+            Assert.Equal(16L, Count(await api.RunAsync("typed_regions", new Dictionary<string, object?> { ["regions"] = "関東" })));
+            var r = await api.HandleAsync(new ApiRequest
+            {
+                Action = "query",
+                Method = "POST",
+                ContentType = "application/json",
+                Body = new MemoryStream(Encoding.UTF8.GetBytes("{\"name\":\"typed_regions\",\"params\":{\"regions\":[\"関東\",\"近畿\",\"九州・沖縄\"]}}")),
+            });
+            Assert.Equal(200, r.Status);
+            Assert.Equal(29L, Count(new QueryResult(r.Body, 1)));
+            var e = await Assert.ThrowsAsync<DatasetException>(() => api.RunAsync("typed_orders", new Dictionary<string, object?> { ["from"] = "2026-02-30", ["customer"] = null, ["at"] = null }));
+            Assert.Equal((400, "api/typed_orders.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（\"2026-02-30\" が来ました）"), (e.Status, e.Message));
+            e = await Assert.ThrowsAsync<DatasetException>(() => api.RunAsync("typed_regions", new Dictionary<string, object?> { ["regions"] = Enumerable.Range(0, 1001).Select(i => i.ToString()).ToArray() }));
+            Assert.Contains("1,001 個あります", e.Message);
+            e = await Assert.ThrowsAsync<DatasetException>(() => api.RunAsync("typed_regions", new Dictionary<string, object?> { ["regions"] = "関東", ["user.region"] = "関東" }));
+            Assert.Equal("api/typed_regions.sql: パラメーター user.region は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）", e.Message);
         }
 
         [SqlServerFact]

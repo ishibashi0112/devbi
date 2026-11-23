@@ -2,12 +2,13 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Dialect } from "./result.js";
-import { parameters, readOnlyProblem, splitStatements } from "./sqltext.js";
+import { MAX_PLACEHOLDERS, ParamLineError, RESERVED, checkValue, headerDirectives, type DatasetParameter, type ParamType } from "./params.js";
+import { isNameChar, parameters, readOnlyProblem, splitStatements } from "./sqltext.js";
 
 /** One `api/<name>.sql` file: a SELECT the API runs for `read_api('<name>')`. */
 export interface Dataset {
   name: string;
-  /** The comment lines above the SELECT, without the `connection:` line. */
+  /** The comment lines above the SELECT, without the `connection:`, `snapshot:`, `param:` and `key:` lines. */
   description: string;
   /** The `-- connection: <name>` line: which DEVBI_DB_<NAME> to use. Undefined: DEVBI_DB. */
   connection?: string;
@@ -17,6 +18,13 @@ export interface Dataset {
   sql: string;
   /** Parameter names (`:from` → `from`), each once, in the order they first appear. */
   params: string[];
+  /**
+   * One per parameter: those with a `-- param:` line first, in the order of the lines (with their type, label,
+   * default…), then the others in the order they first appear (only `name`).
+   */
+  parameters: DatasetParameter[];
+  /** The `-- key: 受注番号, 行番号` line: the result columns that tell one row from another. */
+  key?: string[];
 }
 
 export class DatasetError extends Error {
@@ -114,11 +122,29 @@ export function parseDataset(name: string, text: string, dialect?: Dialect): Dat
   }
   const connection = connectionOf(text);
   const snapshot = snapshotOf(text, name);
-  const description = st.title.split("\n").filter((line) => !/^(connection|snapshot)\s*:/i.test(line.trim()));
+  const description = st.title.split("\n").filter((line) => !/^(connection|snapshot|param|key)\s*:/i.test(line.trim()));
+  const places = parameters(st.sql, dialect);
   const params: string[] = [];
-  for (const p of parameters(st.sql, dialect)) {
+  for (const p of places) {
     if (!params.some((q) => q.toLowerCase() === p.name.toLowerCase())) params.push(p.name);
   }
+  let header: ReturnType<typeof headerDirectives>;
+  try {
+    header = headerDirectives(text, name, params);
+  } catch (e) {
+    if (e instanceof ParamLineError) throw new DatasetError(e.message, 400);
+    throw e;
+  }
+  // A multiple-value parameter only in `IN (:name)`: the server writes one placeholder per value there.
+  for (const p of places) {
+    const def = header.parameters.find((d) => d.name.toLowerCase() === p.name.toLowerCase());
+    if (!def?.multiple) continue;
+    if (!inList(st.sql, p.start, p.end)) {
+      const line = st.line + (st.sql.slice(0, p.start).match(/\n/g)?.length ?? 0);
+      throw new DatasetError(`${rel}（${line} 行目）: :${p.name} は複数の値（${def.type}[]）なので、IN (:${p.name}) の形でだけ使えます`, 400);
+    }
+  }
+  const declared = new Set(header.parameters.map((d) => d.name.toLowerCase()));
   return {
     name,
     description: description.join("\n").trim(),
@@ -126,15 +152,82 @@ export function parseDataset(name: string, text: string, dialect?: Dialect): Dat
     ...(snapshot ? { snapshot } : {}),
     sql: st.sql,
     params,
+    parameters: [...header.parameters, ...params.filter((p) => !declared.has(p.toLowerCase())).map((p) => ({ name: p }))],
+    ...(header.key ? { key: header.key } : {}),
   };
+}
+
+/** Whether the parameter at sql[start, end) is all there is in `IN (…)` (NOT IN too), spaces aside. */
+function inList(sql: string, start: number, end: number): boolean {
+  const space = (c: string | undefined) => c !== undefined && /\s/.test(c);
+  let j = end;
+  while (space(sql[j])) j++;
+  if (sql[j] !== ")") return false;
+  let i = start - 1;
+  while (space(sql[i])) i--;
+  if (sql[i] !== "(") return false;
+  i--;
+  while (space(sql[i])) i--;
+  return i >= 1 && (sql[i - 1] === "I" || sql[i - 1] === "i") && (sql[i] === "N" || sql[i] === "n") && !isNameChar(sql[i - 2]);
 }
 
 export type ParamValue = string | number | boolean | null;
 
+/** The placeholder for the k-th value (from 1): `?` (SQLite, MySQL), `$1` (PostgreSQL), `@p1` (SQL Server), `:p1` (Oracle). */
+function placeholder(dialect: Dialect, k: number): string {
+  switch (dialect) {
+    case "postgres":
+      return `$${k}`;
+    case "mssql":
+      return `@p${k}`;
+    case "oracle":
+      return `:p${k}`;
+    default:
+      return "?";
+  }
+}
+
+const PG_TYPES: Record<ParamType, string> = { text: "text", integer: "bigint", number: "numeric", date: "date", datetime: "timestamp", boolean: "boolean" };
+
+/**
+ * A typed parameter's place in the SQL. Dates and times go as `YYYY-MM-DD[ HH:MM:SS[.ffffff]]` text, read the same
+ * whatever the session's date format: PostgreSQL casts every typed value (otherwise `:x IS NULL OR …` cannot tell
+ * the type), SQL Server, Oracle and MySQL cast dates and times, SQLite nothing (it keeps dates as text).
+ */
+function typedPlace(dialect: Dialect, type: ParamType | undefined, ph: string, value: ParamValue): string {
+  if (!type) return ph;
+  switch (dialect) {
+    case "postgres":
+      return `CAST(${ph} AS ${PG_TYPES[type]})`;
+    case "mssql":
+      return type === "date" ? `CAST(${ph} AS date)` : type === "datetime" ? `CAST(${ph} AS datetime2)` : ph;
+    case "oracle":
+      if (type === "date") return `TO_DATE(${ph}, 'YYYY-MM-DD')`;
+      // a DATE keeps seconds, and a DATE column compared with a TIMESTAMP loses its index: TIMESTAMP only for fractions
+      if (type === "datetime") return typeof value === "string" && value.includes(".") ? `TO_TIMESTAMP(${ph}, 'YYYY-MM-DD HH24:MI:SS.FF')` : `TO_DATE(${ph}, 'YYYY-MM-DD HH24:MI:SS')`;
+      return ph;
+    case "mysql":
+      return type === "date" ? `CAST(${ph} AS DATE)` : type === "datetime" ? `CAST(${ph} AS DATETIME(6))` : ph;
+    default:
+      return ph;
+  }
+}
+
+/** A value as the driver takes it. */
+function driverValue(dialect: Dialect, v: ParamValue): unknown {
+  if (dialect !== "sqlite") return v;
+  // SQLite has no booleans: 1 and 0, as its own TRUE and FALSE. And a whole number goes in as an integer
+  // (a JS number would be a REAL, which does not equal the text '10' in a TEXT column the way 10 does).
+  if (typeof v === "boolean") return v ? 1n : 0n;
+  return typeof v === "number" && Number.isSafeInteger(v) ? BigInt(v) : v;
+}
+
 /**
  * The dataset's SQL with its `:name` parameters in the database's placeholder style, and the values in order:
  * `?` for each place (SQLite, MySQL), or one numbered placeholder per name (`$1` PostgreSQL, `@p1` SQL Server,
- * `:p1` Oracle). Every parameter needs a value, and no others may be given.
+ * `:p1` Oracle). Every parameter needs a value, and no others may be given. A parameter with a `-- param:` line is
+ * checked against its type and goes typed (`typedPlace`); a multiple-value one becomes one placeholder per value in
+ * its `IN (…)`. Names starting with `user.` are refused: they are the signed-in user's values (row-level security).
  */
 export function bindParameters(dataset: Dataset, dialect: Dialect, values: Record<string, unknown>): { sql: string; params: unknown[] } {
   const rel = `api/${dataset.name}.sql`;
@@ -142,6 +235,7 @@ export function bindParameters(dataset: Dataset, dialect: Dialect, values: Recor
   const given = new Map<string, unknown>();
   for (const [key, v] of Object.entries(values)) {
     const lower = key.toLowerCase();
+    if (RESERVED.test(key)) throw new DatasetError(`${rel}: パラメーター ${key} は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）`, 400);
     if (given.has(lower)) throw new DatasetError(`${rel}: パラメーター ${key} が 2 回あります`, 400);
     if (!dataset.params.some((p) => p.toLowerCase() === lower)) {
       const known = dataset.params.length ? `（使えるのは ${dataset.params.join(", ")}）` : "（この SQL にはパラメーターがありません）";
@@ -149,36 +243,53 @@ export function bindParameters(dataset: Dataset, dialect: Dialect, values: Recor
     }
     given.set(lower, v);
   }
+  const types = new Map<string, ParamType | undefined>();
+  const checked = new Map<string, ParamValue | ParamValue[]>();
   for (const p of dataset.params) {
-    if (!given.has(p.toLowerCase())) throw new DatasetError(`${rel}: パラメーター :${p} の値がありません。read_api('${dataset.name}', ${p} = ...) と書きます`, 400);
-    const v = given.get(p.toLowerCase());
+    const lower = p.toLowerCase();
+    if (!given.has(lower)) throw new DatasetError(`${rel}: パラメーター :${p} の値がありません。read_api('${dataset.name}', ${p} = ...) と書きます`, 400);
+    const v = given.get(lower);
+    const def = dataset.parameters.find((d) => d.name.toLowerCase() === lower);
+    if (def?.type) {
+      types.set(lower, def.type);
+      try {
+        checked.set(lower, checkValue(rel, def as DatasetParameter & { type: ParamType }, v));
+      } catch (e) {
+        throw new DatasetError((e as Error).message, 400);
+      }
+      continue;
+    }
     if (v !== null && typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") {
       throw new DatasetError(`${rel}: パラメーター ${p} の値は文字・数値・真偽・null のどれかにしてください`, 400);
     }
+    checked.set(lower, v);
   }
-  const order: string[] = [];
+  const numbered = dialect === "postgres" || dialect === "mssql" || dialect === "oracle";
+  // PostgreSQL, SQL Server, Oracle: a name's placeholders, written again where the name comes again.
+  const written = new Map<string, string>();
+  const params: unknown[] = [];
   let out = "";
   let last = 0;
   for (const p of parameters(dataset.sql, dialect)) {
     out += dataset.sql.slice(last, p.start);
-    if (dialect === "postgres" || dialect === "mssql" || dialect === "oracle") {
-      let k = order.findIndex((q) => q.toLowerCase() === p.name.toLowerCase());
-      if (k < 0) k = order.push(p.name) - 1;
-      out += dialect === "postgres" ? `$${k + 1}` : dialect === "mssql" ? `@p${k + 1}` : `:p${k + 1}`;
-    } else {
-      order.push(p.name);
-      out += "?";
+    const lower = p.name.toLowerCase();
+    let place = numbered ? written.get(lower) : undefined;
+    if (place === undefined) {
+      const v = checked.get(lower)!;
+      const type = types.get(lower);
+      place = (Array.isArray(v) ? v : [v]).map((x) => typedPlace(dialect, type, placeholder(dialect, params.push(driverValue(dialect, x))), x)).join(", ");
+      if (numbered) written.set(lower, place);
     }
+    out += place;
     last = p.end;
   }
   out += dataset.sql.slice(last);
-  const params = order.map((name) => {
-    const v = given.get(name.toLowerCase()) as ParamValue;
-    if (dialect !== "sqlite") return v;
-    // SQLite has no booleans: 1 and 0, as its own TRUE and FALSE. And a whole number goes in as an integer
-    // (a JS number would be a REAL, which does not equal the text '10' in a TEXT column the way 10 does).
-    if (typeof v === "boolean") return v ? 1n : 0n;
-    return typeof v === "number" && Number.isSafeInteger(v) ? BigInt(v) : v;
-  });
+  if (params.length > MAX_PLACEHOLDERS) {
+    throw new DatasetError(
+      `${rel}: パラメーターの値が全部で ${params.length.toLocaleString("en-US")} 個になります。1 つの SQL に渡せるのは ${MAX_PLACEHOLDERS.toLocaleString("en-US")} 個までです。候補を絞るか、すべてのときはこのパラメーターを使わない SQL にしてください`,
+      400,
+    );
+  }
   return { sql: out, params };
 }
+
