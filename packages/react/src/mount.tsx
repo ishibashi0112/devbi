@@ -65,6 +65,15 @@ function fetchId(f: typeof fetch | undefined): number {
  * again replaces what it shows: another dashboard, API or fetch starts fresh, another theme only changes the colors.
  * `project` is what `loadProject()` returns.
  */
+/** `exports` from plain JavaScript: true, false or a list of kinds; anything else (`"xlsx,pdf"`) leaves the menu out, with an error. */
+function exportsOption(value: unknown): boolean | readonly ExportKind[] {
+  if (value === undefined) return true;
+  if (value === null) return false;
+  if (typeof value === "boolean" || Array.isArray(value)) return value as boolean | readonly ExportKind[];
+  console.error(`DevBI: exports は true・false か、["xlsx", "pdf"] のような配列です（${JSON.stringify(value)} なのでメニューを出しません）`);
+  return false;
+}
+
 export function mountDashboard(element: Element, project: Project, options: MountOptions = {}): MountedDashboard {
   const names = Object.keys(project.dashboards);
   const name = options.dashboard ?? (names.length === 1 ? names[0]! : "");
@@ -80,7 +89,7 @@ export function mountDashboard(element: Element, project: Project, options: Moun
       project={p}
       name={name}
       isolate={options.isolate ?? true}
-      exports={options.exports ?? true}
+      exports={exportsOption(options.exports)}
       {...(options.theme ? { theme: options.theme } : {})}
       {...(options.params ? { params: options.params } : {})}
       {...(options.onParamsChange ? { onParamsChange: options.onParamsChange } : {})}

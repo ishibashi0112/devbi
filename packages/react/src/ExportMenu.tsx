@@ -68,8 +68,10 @@ export function ExportMenu({ root, kinds }: { root: RefObject<HTMLElement | null
   const [error, setError] = useState<string | null>(null);
   // The tiles that have a CSV: found each time the menu opens (null while looking, and while closed).
   const [tiles, setTiles] = useState<TileSpec[] | null>(null);
-  // Opened to the right of the button (from its left edge): no room on its left (on a phone, the button wrapped left).
-  const [toRight, setToRight] = useState(false);
+  // Where the menu's left edge is, from the button's (px): when there is no room for it on the button's left (on a
+  // phone, the button wrapped left), it opens rightward, moved back as far as the screen's right edge needs. None: it
+  // ends at the button's right edge.
+  const [shift, setShift] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -122,7 +124,7 @@ export function ExportMenu({ root, kinds }: { root: RefObject<HTMLElement | null
   useLayoutEffect(() => {
     const el = menu.current;
     if (!open || !el) {
-      setToRight(false);
+      setShift(null);
       return;
     }
     const at = document.activeElement;
@@ -132,8 +134,12 @@ export function ExportMenu({ root, kinds }: { root: RefObject<HTMLElement | null
       placed.current = (startAt.current === "last" ? items.at(-1) : items[0]) ?? null;
       placed.current?.focus();
     }
-    const right = box.current?.getBoundingClientRect().right;
-    if (right !== undefined) setToRight(right - el.offsetWidth < 8);
+    const b = box.current?.getBoundingClientRect();
+    if (!b) return;
+    const width = el.offsetWidth;
+    const screen = document.documentElement.clientWidth;
+    // 8px from the screen's edges (the menu is at most the screen less 32px wide)
+    setShift(b.right - width >= 8 ? null : Math.max(8 - b.left, Math.min(0, screen - 8 - (b.left + width))));
   }, [open, tiles]);
 
   const close = (focus = true) => {
@@ -267,7 +273,8 @@ export function ExportMenu({ root, kinds }: { root: RefObject<HTMLElement | null
         {open && (
           // tabIndex: a press on the menu between its items keeps the focus in it (Esc and the arrow keys still work)
           <div
-            className={toRight ? "devbi-menu devbi-menu-right" : "devbi-menu"}
+            className="devbi-menu"
+            style={shift === null ? undefined : { left: `${shift}px`, right: "auto" }}
             role="menu"
             id={menuId}
             aria-label="ファイル出力"

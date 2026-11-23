@@ -215,7 +215,6 @@ html perspective-viewer, html perspective-dropdown {
 .devbi-caret { margin-left: 4px; color: var(--devbi-muted); font-size: 11px; }
 .devbi-menu { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; width: max-content; min-width: 280px; max-width: min(360px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow: auto; background: var(--devbi-card); color: var(--devbi-text); border: 1px solid var(--devbi-border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16); padding: 4px; box-sizing: border-box; }
 .devbi-menu [role="menuitem"] { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; box-sizing: border-box; text-align: left; border: 0; background: none; color: inherit; font: inherit; font-size: 13px; line-height: 1.5; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
-.devbi-menu.devbi-menu-right { right: auto; left: 0; }
 .devbi-menu:focus { outline: none; }
 .devbi-menu [role="menuitem"]:focus { outline: none; }
 .devbi-menu [role="menuitem"]:hover:not(:disabled), .devbi-menu [role="menuitem"]:focus-visible { background: var(--devbi-accent-soft); }
