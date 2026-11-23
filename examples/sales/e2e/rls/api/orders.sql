@@ -1,5 +1,6 @@
 -- 受注の明細（1 行 = 受注の 1 明細）。ログインした人の担当の地域（:user.region）の行だけ。
--- :user.region は、ホスト（ここでは vite.config の devUsers）が渡すログインした人の属性で、ブラウザからは変えられない。
+-- :user.region は、ホストが渡すログインした人の属性で、ブラウザからは変えられない（開発サーバーでは vite.config の devUsers、
+-- devbi-serve --user-header では access/user.sql の表から）。
 -- param: from date label=受注日（から）
 SELECT o.order_date AS 受注日, o.order_no AS 受注番号, c.name AS 顧客, c.region AS 地域,
        p.category AS 商品分類, p.name AS 商品, l.qty AS 数量, l.unit_price AS 単価, l.qty * l.unit_price AS 金額

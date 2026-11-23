@@ -502,3 +502,181 @@ describe("devbi-serve sends snapshots through the API only", () => {
     expect(await status("/index.html")).toBe(200);
   });
 });
+
+describe("devbi-serve --user-header: the user from the server in front", () => {
+  const files = {
+    "api/mine.sql": "SELECT id FROM orders WHERE region = :user.region ORDER BY id",
+    "access/user.sql": "SELECT region, roles FROM devbi_users WHERE login = :user.id",
+    "dist/index.html": "<!doctype html><title>t</title>",
+  };
+  /** A raw request: headers as given (two of one, bytes Node reads as Latin-1). */
+  const ask = (running: RunningServer, p: string, headers: Record<string, string | string[]> = {}, body?: unknown) =>
+    new Promise<{ status: number; text: string }>((resolve, reject) => {
+      const u = new URL(running.url);
+      const req = request(
+        { host: u.hostname, port: u.port, path: p, method: body ? "POST" : "GET", headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...headers } },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") }));
+        },
+      );
+      req.on("error", reject);
+      // A Buffer: a string body would send the headers in its encoding (UTF-8), not byte for byte.
+      req.end(body ? Buffer.from(JSON.stringify(body)) : undefined);
+    });
+  const errorOf = (r: { status: number; text: string }) => `${r.status} ${(JSON.parse(r.text) as { error: string }).error}`;
+  const query = { name: "mine" };
+  const latin1 = (text: string) => Buffer.from(text, "utf8").toString("latin1");
+
+  it("believes the header from this computer; two of it, or bytes that are not UTF-8, are refused", async () => {
+    const dir = project(files);
+    const db = new DatabaseSync(path.join(dir, "db", "shop.sqlite"));
+    db.prepare("INSERT INTO devbi_users VALUES (?, '近畿', NULL, NULL)").run("山田");
+    db.close();
+    const logs: string[] = [];
+    const running = await serve({ dir, port: 0, env, schedule: false, userHeader: "X-DevBI-User", log: (l) => logs.push(l) });
+    try {
+      expect(errorOf(await ask(running, "/api/query", {}, query))).toBe("401 ログインしていません（前のサーバーから X-DevBI-User が届いていません）");
+      const yamada = await ask(running, "/api/query", { "X-DevBI-User": "CORP\\yamada" }, query);
+      expect(yamada.status).toBe(200);
+      expect(JSON.parse((await ask(running, "/api/schema", { "x-devbi-user": " CORP\\yamada " })).text).user).toEqual({ id: "CORP\\yamada" });
+      // a name in Japanese, as nginx or IIS sends it (UTF-8)
+      expect(JSON.parse((await ask(running, "/api/schema", { "X-DevBI-User": latin1("山田") })).text).user).toEqual({ id: "山田" });
+      expect((await ask(running, "/api/query", { "X-DevBI-User": latin1("山田") }, query)).status).toBe(200);
+      expect(errorOf(await ask(running, "/api/query", { "X-DevBI-User": "  " }, query))).toBe("401 ログインしていません（前のサーバーから届いた X-DevBI-User が空です）");
+      // the server in front added its own instead of replacing the browser's
+      expect(errorOf(await ask(running, "/api/query", { "X-DevBI-User": ["CORP\\yamada", "CORP\\suzuki"] }, query))).toBe(
+        "400 X-DevBI-User が 2 つあります。前のサーバーは、ブラウザから来た X-DevBI-User を上書きします（足しません）",
+      );
+      expect(errorOf(await ask(running, "/api/schema", { "X-DevBI-User": "\xff\xfe" }))).toBe("400 X-DevBI-User の値が UTF-8 ではありません");
+      expect(logs).toContain("リクエストを断りました: X-DevBI-User の値が UTF-8 ではありません");
+      // the site's files are the same for everyone
+      expect((await ask(running, "/index.html", { "X-DevBI-User": ["a", "b"] })).status).toBe(200);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("is row-level mode, whatever the files say (requireUser)", async () => {
+    const dir = project({ "api/all.sql": "SELECT COUNT(*) AS n FROM orders", "dist/index.html": "<!doctype html>" });
+    const running = await serve({ dir, port: 0, env, schedule: false, userHeader: "X-DevBI-User" });
+    try {
+      expect((await ask(running, "/api/query", {}, { name: "all" })).status).toBe(401);
+      const r = await ask(running, "/api/query", { "X-DevBI-User": "CORP\\yamada" }, { name: "all" });
+      expect(errorOf(r)).toMatch(/-- access: all を書いてください/);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("not from a trusted server, or without the secret: nobody, and a line in the log once a minute", async () => {
+    const dir = project(files);
+    const logs: string[] = [];
+    const far = await serve({ dir, port: 0, env, schedule: false, userHeader: "X-DevBI-User", trustedProxies: ["10.0.0.1"], log: (l) => logs.push(l) });
+    try {
+      for (let i = 0; i < 2; i++) {
+        expect(errorOf(await ask(far, "/api/query", { "X-DevBI-User": "CORP\\yamada" }, query))).toBe("401 ログインしていません（このサーバーは、前に置いたサーバーを通して開きます）");
+      }
+      expect(logs.filter((l) => l.includes("を使いませんでした"))).toEqual([
+        "X-DevBI-User を使いませんでした（127.0.0.1 は --trusted-proxy にありません）。ログインしていない人として答えます（同じ相手は 1 分に 1 回だけ書きます）",
+      ]);
+    } finally {
+      await far.close();
+    }
+    const near = await serve({ dir, port: 0, env, schedule: false, userHeader: "X-DevBI-User", trustedProxies: ["127.0.0.0/8"], proxySecret: "s3cret", userLowercase: true });
+    try {
+      expect((await ask(near, "/api/query", { "X-DevBI-User": "CORP\\yamada" }, query)).status).toBe(401);
+      expect((await ask(near, "/api/query", { "X-DevBI-User": "CORP\\yamada", "X-DevBI-Proxy-Secret": "wrong" }, query)).status).toBe(401);
+      expect((await ask(near, "/api/query", { "X-DevBI-User": "CORP\\yamada", "X-DevBI-Proxy-Secret": ["s3cret", "s3cret"] }, query)).status).toBe(401);
+      expect(JSON.parse((await ask(near, "/api/schema", { "X-DevBI-User": "CORP\\Yamada", "X-DevBI-Proxy-Secret": "s3cret" })).text).user).toEqual({ id: "corp\\yamada" });
+    } finally {
+      await near.close();
+    }
+  });
+
+  it("checks the options when it starts", async () => {
+    const { proxyUser } = await import("../src/proxy-user.js");
+    expect(() => proxyUser({ header: "X DevBI" })).toThrow("--user-header の X DevBI はヘッダーの名前になりません");
+    expect(() => proxyUser({ header: "X-DevBI-Proxy-Secret" })).toThrow(/合言葉のヘッダー/);
+    for (const bad of ["localhost", "10.0.0.0/33", "10.0.0.1/8/1", "::1/129", "10.0.0.0/x"]) {
+      expect(() => proxyUser({ header: "X-DevBI-User", trustedProxies: [bad] })).toThrow(`--trusted-proxy の ${bad} は IP アドレス`);
+    }
+    const from = (remoteAddress: string, user = "CORP\\yamada") =>
+      proxyUser({ header: "X-DevBI-User", trustedProxies: ["192.168.10.0/24", "fd00::/8"] })({ socket: { remoteAddress }, headersDistinct: { "x-devbi-user": [user] } } as never);
+    expect(from("192.168.10.7")).toEqual({ options: { user: { id: "CORP\\yamada" } } });
+    expect(from("::ffff:192.168.10.7")).toEqual({ options: { user: { id: "CORP\\yamada" } } });
+    expect(from("fd12::1")).toEqual({ options: { user: { id: "CORP\\yamada" } } });
+    expect(from("192.168.11.7")).toMatchObject({ ignored: "192.168.11.7 は --trusted-proxy にありません" });
+    expect(from("127.0.0.1")).toMatchObject({ ignored: "127.0.0.1 は --trusted-proxy にありません" });
+    await expect(serve({ dir: project(files), port: 0, env, schedule: false, userHeader: "X-DevBI-User", proxySecret: " " })).rejects.toThrow("合言葉（proxySecret）が空です");
+    // the options of the header without it
+    await expect(serve({ dir: project(files), port: 0, env, schedule: false, trustedProxies: ["10.0.0.1"], userLowercase: true })).rejects.toThrow(
+      "trustedProxies・userLowercase は userHeader と一緒に使います",
+    );
+    expect(() => proxyUser({ header: "X-DevBI-User", trustedProxies: [] })).toThrow("--trusted-proxy に IP アドレスがありません");
+  });
+
+  it("reads IPv4 as IPv4: ::ffff: ranges, and IPv6 ranges that would hold every IPv4 address are refused", async () => {
+    const { proxyUser, trustedList } = await import("../src/proxy-user.js");
+    const from = (trustedProxies: string[], remoteAddress: string) => {
+      const got = proxyUser({ header: "X-DevBI-User", trustedProxies })({ socket: { remoteAddress }, headersDistinct: { "x-devbi-user": ["a"] } } as never);
+      return "options" in got && got.options.user !== undefined;
+    };
+    expect(from(["::ffff:10.0.0.0/104"], "10.1.2.3")).toBe(true);
+    expect(from(["::ffff:10.0.0.0/104"], "::ffff:10.1.2.3")).toBe(true);
+    expect(from(["::ffff:10.0.0.0/104"], "11.0.0.1")).toBe(false);
+    expect(from(["::ffff:10.0.0.5"], "10.0.0.5")).toBe(true);
+    expect(from(["::ffff:10.0.0.5"], "10.0.0.6")).toBe(false);
+    for (const bad of ["::ffff:10.0.0.0/8", "::/8", "::/0", "::ffff:0:0/95"]) {
+      expect(() => trustedList([bad])).toThrow(`--trusted-proxy の ${bad} は、IPv4 のアドレスもすべて含んでしまいます`);
+    }
+    // a zone (fe80::1%eth0) is left out by the check: it would be fe80::1 on every network
+    expect(() => trustedList(["fe80::1%eth0"])).toThrow("--trusted-proxy の fe80::1%eth0 は IP アドレス");
+    expect(from(["fd00::/8"], "127.0.0.1")).toBe(false);
+  });
+
+  it("takes the value as it came: one with , (two joined), and with --user-lowercase a letter of another shape, are refused", async () => {
+    const { proxyUser } = await import("../src/proxy-user.js");
+    const got = (user: string, lowercase = false) =>
+      proxyUser({ header: "X-DevBI-User", lowercase })({ socket: { remoteAddress: "127.0.0.1" }, headersDistinct: { "x-devbi-user": [Buffer.from(user, "utf8").toString("latin1")] } } as never);
+    expect(got("mallory, alice")).toEqual({
+      refuse: "X-DevBI-User の値に , があります（2 つの値を 1 行にしたもののようです）。前のサーバーは、ブラウザから来た X-DevBI-User を上書きします（足しません）",
+    });
+    // only spaces and tabs around it are dropped: not U+3000, NBSP or a BOM
+    expect(got(" \talice\t ")).toEqual({ options: { user: { id: "alice" } } });
+    expect(got("alice\u3000")).toEqual({ options: { user: { id: "alice\u3000" } } });
+    expect(got("\u00a0alice")).toEqual({ options: { user: { id: "\u00a0alice" } } });
+    expect(got("\ufeffalice")).toEqual({ options: { user: { id: "\ufeffalice" } } });
+    expect(got("CORP\\Yamada", true)).toEqual({ options: { user: { id: "corp\\yamada" } } });
+    expect(got("\u212Aimura", true)).toMatchObject({ refuse: expect.stringMatching(/^X-DevBI-User の値に、全角の英字や記号のような、ふつうと違う形の文字があります/) });
+    expect(got("ｋimura", true)).toMatchObject({ refuse: expect.stringMatching(/ふつうと違う形の文字/) });
+    expect(got("\u212Aimura")).toEqual({ options: { user: { id: "\u212Aimura" } } });
+  });
+
+  it("takes a secret of visible ASCII only, and compares it byte for byte", async () => {
+    const { proxyUser } = await import("../src/proxy-user.js");
+    for (const bad of ["合言葉", "pässwörd", " s3cret", "s3\ncret", "\u0000s\u00003"]) {
+      expect(() => proxyUser({ header: "X-DevBI-User", secret: bad })).toThrow(/^合言葉は、半角の英数字と記号で書いてください/);
+    }
+    const check = proxyUser({ header: "X-DevBI-User", secret: "s3 cr#t" });
+    const ask = (secret: string) => check({ socket: { remoteAddress: "127.0.0.1" }, headersDistinct: { "x-devbi-user": ["a"], "x-devbi-proxy-secret": [secret] } } as never);
+    expect(ask("s3 cr#t")).toEqual({ options: { user: { id: "a" } } });
+    expect(ask("s3 cr#T")).toMatchObject({ ignored: "127.0.0.1 からの x-devbi-proxy-secret が合いません" });
+  });
+
+  it("writes the log line of a header not believed once a minute for each address, 10 lines a minute in all", async () => {
+    const { logGate } = await import("../src/proxy-user.js");
+    let now = 0;
+    const gate = logGate(10, () => now);
+    expect(gate("10.0.0.1")).toBe(true);
+    expect(gate("10.0.0.1")).toBe(false);
+    const written = Array.from({ length: 20 }, (_, i) => gate(`10.0.1.${i}`));
+    expect(written.filter((w) => w === true)).toHaveLength(8);
+    expect(written[8]).toBe("last");
+    expect(written.slice(9).every((w) => w === false)).toBe(true);
+    now += 60_000;
+    expect(gate("10.0.0.1")).toBe(true);
+    expect(gate("10.0.1.15")).toBe(true);
+  });
+});

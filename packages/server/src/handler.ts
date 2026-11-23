@@ -198,6 +198,14 @@ async function* chunksOf(stream: ReadableStream<Uint8Array> | null): AsyncIterab
   }
 }
 
+/**
+ * The paths the API answers, whatever comes before them: `…/api/schema`, `…/api/query` (`…/api/describe` with
+ * `describe`), and `…/snapshots/<file>.arrows` (the file's name in group 2).
+ */
+export function apiPathPattern(describe?: boolean): RegExp {
+  return describe ? /\/api\/(schema|query|describe)$|\/snapshots\/([^/]+\.arrows)$/ : /\/api\/(schema|query)$|\/snapshots\/([^/]+\.arrows)$/;
+}
+
 /** Row-level mode, and why it is on (for the messages). */
 export interface RowLevelMode {
   on: boolean;
@@ -602,7 +610,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
 
   /** The answer for an API path, or undefined for others. */
   const answer = async (asked: Asked, request: RequestOptions = {}): Promise<Answer | undefined> => {
-    const m = (options.describe ? /\/api\/(schema|query|describe)$|\/snapshots\/([^/]+\.arrows)$/ : /\/api\/(schema|query)$|\/snapshots\/([^/]+\.arrows)$/).exec(asked.pathname);
+    const m = apiPathPattern(options.describe).exec(asked.pathname);
     if (!m) return undefined;
     const { method } = asked;
     let a: Answer;
