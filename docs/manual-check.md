@@ -517,7 +517,7 @@ cd ../..
 前に置いたサーバー（IIS・nginx）がヘッダーで渡すユーザー名で、`devbi-serve` が人ごとに行を返すかを確かめます（[リファレンス](reference.md#前のサーバーからユーザー名を受け取るdevbi-serve)）。前のサーバーの代わりに curl でヘッダーを付けます。`pnpm build` のあと、`examples/sales` のフォルダで、見本の小さなプロジェクトをビルドして動かします。
 
 ```sh
-pnpm exec vite build --config e2e/rls.vite.config.ts --outDir e2e/rls/dist --emptyOutDir
+pnpm exec vite build --config e2e/rls.vite.config.ts
 pnpm exec devbi-serve --dir e2e/rls --user-header X-DevBI-User
 ```
 
@@ -540,6 +540,17 @@ ASP.NET Core と WebForms の API が、ログインした人（`HttpContext.Use
 | 221 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln --filter "FullyQualifiedName~User"` | `Passed!` と出て、`Failed: 0, Passed: 10`（SQL Server で人ごとの行と `access/user.sql`（日付の列も）、ASP.NET Core の `HttpContext.User` と `user:`、形の違う利用者の断り方など、名前に User を含むテスト）。`:user.`・`-- roles:`・`-- access:` の読み方が Node と同じことは、59 の `ParityTests` が確かめる |
 | 222 | 55 のコマンドの前に `DevBI__RequireUser=true` を足して起動し（PowerShell では `$env:DevBI__RequireUser="true"`）、<http://127.0.0.1:4179/api/schema> と <http://127.0.0.1:4179/#/sales-db> を開く | `{"error":"ログインしていません","access":1}`。タイルにも「API の orders を読めません（401）: ログインしていません」。見本にはログインがないので、行レベルのモードではだれにも行を返さない |
 | 223 | （Windows の IIS があるとき）WebForms のアプリで `RequireUser = true` にし、IIS で Windows 認証をかけて、`~/App_Data/devbi/api/` に `SELECT :user.id AS 見ている人` だけの `whoami.sql` を置く。ダッシュボードのページを開いたまま、ブラウザの開発者ツールのコンソールで `(await fetch("Scripts/devbi/api/query", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name: "whoami"})})).status` | `200`（ログインした人として読めた）。`DevBIOptions.Log` に渡したログに `CORP\<自分> api/whoami.sql: 1 行、… ms`。IIS の Windows 認証を外して匿名認証にすると `401` |
+
+### 行レベル制御（Next.js で、アプリのログインから渡す）
+
+Next.js のアプリ（`examples/nextjs`）の「担当の売上」で、アプリのセッションから利用者を渡します（[リファレンス](reference.md#nextjs-でログインした人を渡す)）。ログインは、パスワードなしで人を選ぶだけの見本のものです。ダッシュボードは `examples/sales/e2e/rls` のもので、`pnpm example:build` が一緒にビルドします。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 224 | `pnpm example:nextjs` のあと、<http://127.0.0.1:3000/> の上の帯の「担当の売上（ログイン）」を押す | 「山田（関東の担当）としてログイン」「鈴木（近畿の担当）としてログイン」「田中（中部の担当）としてログイン」「佐藤（担当の地域なし）としてログイン」の 4 つのボタン。ダッシュボードはまだ出ない |
+| 225 | 「山田（関東の担当）としてログイン」を押す | 「山田（関東の担当）（CORP\yamada）でログインしています」。「担当の売上」が ¥72,393,280、「地域別」は関東だけ、「全社の地域別」（`-- access: all`）は 6 つの地域。ターミナルに `[devbi-rls] CORP\yamada api/orders.sql: 2,322 行、… ms` |
+| 226 | 「ログアウト」を押し、「鈴木（近畿の担当）としてログイン」を押す。次にログアウトして田中、もう一度ログアウトして佐藤でログインする | 鈴木は ¥42,290,840 で近畿だけ（山田の行は残らない）。田中は ¥33,850,780 で中部だけ（`access/user.sql` にいない人。地域はアプリのセッションから）。佐藤はタイルに「API の orders を読めません（403）: 利用者 CORP\sato に属性 region がありません（api/orders.sql の :user.region）」 |
+| 227 | 別のターミナルで `curl -s http://127.0.0.1:3000/devbi-rls/api/schema`、次に `curl -s -b 'portal_session=yamada.AAAA' http://127.0.0.1:3000/devbi-rls/api/schema` | 2 つとも `{"error":"ログインしていません（ポータルの「担当の売上（ログイン）」からログインします）","access":1}`（サーバーが署名していない Cookie は、だれでもない）。61〜63 の「売上」と「日次集計」は、今までどおりログインなしで出る |
 
 ## 4. 自分の Excel で試す
 

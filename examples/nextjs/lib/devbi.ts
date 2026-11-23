@@ -18,7 +18,22 @@ function create(): ApiHandler {
   });
 }
 
+// 「担当の売上」: a project whose api/orders.sql filters by who signed in (:user.region). requireUser: every request
+// needs a user (401 without), and every api/*.sql must use :user. or say -- access: all, even if a file is removed
+// or mistyped. app/devbi-rls/[...path]/route.ts hands it the user of the app's session.
+const rlsDir = path.resolve(/* turbopackIgnore: true */ process.env.DEVBI_RLS_DIR ?? "../sales/e2e/rls");
+
+function createRls(): ApiHandler {
+  return createApiHandler({
+    dir: rlsDir,
+    env: loadEnv(rlsDir),
+    requireUser: true,
+    log: (line) => console.log(`[devbi-rls] ${line}`),
+  });
+}
+
 // globalThis: `next dev` loads this file again after each change, and the route and instrumentation.ts are
 // built apart; all of them share the one handler and its database connections.
-const shared = globalThis as typeof globalThis & { devbi?: ApiHandler };
+const shared = globalThis as typeof globalThis & { devbi?: ApiHandler; devbiRls?: ApiHandler };
 export const devbi = (shared.devbi ??= create());
+export const devbiRls = (shared.devbiRls ??= createRls());

@@ -1,6 +1,6 @@
 {
   "title": "担当の売上（行レベル制御）",
-  "description": "api/orders.sql が :user.region で絞るので、右上の「表示する利用者」で選んだ人の地域の数字になる",
+  "description": "api/orders.sql が :user.region で絞るので、ログインした人（開発サーバーでは右上の「表示する利用者」で選んだ人）の地域の数字になる",
   "metrics": "my_sales",
   "tiles": [
     {
