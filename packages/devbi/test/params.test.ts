@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   checkParamValues,
+  choiceValue,
   dashboardParams,
   dayWord,
   defineDashboard,
@@ -190,6 +191,27 @@ describe("defaults", () => {
     expect(resolveDefault(p({ type: "date", optional: true }), { now })).toBeNull();
     expect([hasValue(p({}), null), hasValue(p({ optional: true }), null), hasValue(p({ multiple: true }), [])]).toEqual([false, true, false]);
   });
+
+  it("works out day words in a list of dates, and reads `all` without choices as the text, as the server does", () => {
+    const dates = p({ type: "date", multiple: true, default: "month_start, today" });
+    expect(resolveDefault(dates, { now })).toEqual(["2026-11-01", "2026-11-23"]);
+    expect(resolveDefault(p({ type: "date", multiple: true, default: "today" }), { now })).toEqual(["2026-11-23"]);
+    expect(resolveDefault(p({ type: "date", multiple: true, default: ["today", "2026-01-05"] }), { now })).toEqual(["2026-11-23", "2026-01-05"]);
+    expect(resolveDefault(p({ type: "text", multiple: true, default: "all" }), { now })).toEqual(["all"]);
+    const ds = (def: string, type: "date" | "text" | "integer") => ({ parameters: [{ name: "x", type, multiple: true, default: def }] });
+    const problems = (info: DatasetInfo) => dashboardParams({ tiles: [tile("t", { dataset: "d" })] }, { d: info }).problems;
+    expect(problems(ds("month_start,today", "date"))).toEqual([]);
+    expect(problems(ds("all", "text"))).toEqual([]);
+    expect(problems(ds("all", "integer"))).toEqual(["パラメーター x の default: 「all」は整数ではありません"]);
+  });
+
+  it("takes a choice's value as the parameter's type reads it", () => {
+    const at = new Date(Date.UTC(2026, 3, 1, 0, 0));
+    expect([choiceValue(at, { type: "date" }), choiceValue(at, { type: "datetime" }), choiceValue(at)]).toEqual(["2026-04-01", "2026-04-01T00:00", "2026-04-01"]);
+    expect(choiceValue(new Date(Date.UTC(2026, 3, 1, 9, 0, 30)), { type: "datetime" })).toBe("2026-04-01T09:00:30");
+    expect(choiceValue("2026-04-01 09:00:00", { type: "datetime" })).toBe("2026-04-01T09:00");
+    expect([choiceValue(12n), choiceValue(2n ** 60n)]).toEqual([12, "1152921504606846976"]);
+  });
 });
 
 describe("values from outside", () => {
@@ -205,7 +227,15 @@ describe("values from outside", () => {
     expect(search).toBe("from=2026-04-01&to=&regions=%E9%96%A2%E6%9D%B1&regions=%E4%B9%9D%E5%B7%9E%E3%83%BB%E6%B2%96%E7%B8%84&regions=a%2Cb&customer=1024");
     expect(paramsFromSearch(params, `?${search}`)).toEqual({ from: "2026-04-01", to: null, regions: ["関東", "九州・沖縄", "a,b"], customer: 1024 });
     // what does not fit is left out (the default stays); names compare without case
-    expect(paramsFromSearch(params, "FROM=2026/04/01&customer=x&regions=&other=1")).toEqual({});
+    const problems: string[] = [];
+    expect(paramsFromSearch(params, "FROM=2026/04/01&customer=x&other=1", problems)).toEqual({});
+    expect(problems).toEqual([
+      'アドレスのパラメーター from の値 "2026/04/01" は日付（2024-04-01 の形）ではないので使いません',
+      'アドレスのパラメーター customer の値 "x" は整数ではないので使いません',
+    ]);
+    // none picked: written as an empty value, and read back as none (not the default)
+    expect(paramsToSearch(params, { regions: [] })).toBe("regions=");
+    expect(paramsFromSearch(params, "regions=")).toEqual({ regions: [] });
   });
 
   it("checks values given by the embed or React", () => {

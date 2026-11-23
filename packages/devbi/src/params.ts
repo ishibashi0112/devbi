@@ -275,22 +275,29 @@ function specFor(specs: Record<string, DashboardParamSpec>, key: string): Dashbo
   return k === undefined ? undefined : specs[k];
 }
 
-/** Why a default does not fit its parameter, or undefined. */
+/** A day word (`today`, `month_start-1`…) for a date or datetime parameter. */
+const isDayWord = (p: { type?: ParamType }, text: string) => (p.type === "date" || p.type === "datetime") && DAY_WORDS.test(text);
+
+/**
+ * Why a default does not fit its parameter, or undefined. As the server reads a `-- param:` line: each value of a
+ * list may be a day word; `all` is every choice with `values`, and the text "all" itself without (an error unless text).
+ */
 function defaultIssue(p: DashboardParam): string | undefined {
   const d = p.default;
   if (Array.isArray(d)) {
     if (!p.multiple) return "1 つの値のパラメーターに配列は書けません";
     for (const v of d) {
+      if (typeof v === "string" && isDayWord(p, v)) continue;
       const bad = scalarIssue(p, v);
       if (bad) return bad;
     }
     return undefined;
   }
   if (typeof d === "string") {
-    if ((p.type === "date" || p.type === "datetime") && DAY_WORDS.test(d)) return undefined;
-    if (p.multiple && d === "all") return p.values ? undefined : "all は候補（values）のあるパラメーターだけで使えます";
+    if (p.multiple && d === "all" && p.values) return undefined;
     const parts = p.multiple ? splitList(d) : [d];
     for (const part of parts) {
+      if (isDayWord(p, part)) continue;
       const v = fromText(p, part);
       if (v === undefined) return `「${part}」は${wants(p)}ではありません`;
     }
@@ -461,17 +468,21 @@ export function resolveDefault(
 ): ParamValue | undefined {
   const d = p.default;
   if (d === undefined) return p.optional && !p.multiple ? null : undefined;
-  if (Array.isArray(d)) return d.map((v) => (typeof v === "string" ? (fromText(p, v) ?? v) : v));
-  if (typeof d !== "string") return d;
-  if (p.type === "date" || p.type === "datetime") {
-    const day = dayWord(d, options.now, options.fiscalYearStart);
-    if (day !== undefined) return p.type === "date" ? day : `${day}T00:00`;
-  }
+  // One value as written: a day word worked out, else read as the type.
+  const one = (text: string): Exclude<ParamScalar, null> => {
+    if (p.type === "date" || p.type === "datetime") {
+      const day = dayWord(text, options.now, options.fiscalYearStart);
+      if (day !== undefined) return p.type === "date" ? day : `${day}T00:00`;
+    }
+    return fromText(p, text) ?? text;
+  };
+  if (Array.isArray(d)) return d.map((v) => (typeof v === "string" ? one(v) : v));
+  if (typeof d !== "string") return p.multiple && d !== null ? [d] : d;
   if (p.multiple) {
     if (d === "all" && p.values) return options.choices ? [...options.choices] : undefined;
-    return splitList(d).map((s) => fromText(p, s) ?? s);
+    return splitList(d).map(one);
   }
-  return fromText(p, d) ?? d;
+  return one(d);
 }
 
 /** Whether a parameter has a value a dataset can run with (an optional one may be null; a list needs one value). */
@@ -498,11 +509,13 @@ export function paramsFromSearch(
     if (p.multiple) {
       const list: Exclude<ParamScalar, null>[] = [];
       for (const t of texts) {
+        if (t.trim() === "") continue;
         const v = fromText(p, t);
         if (v === undefined || v === null) bad(p, t);
         else list.push(v);
       }
-      if (list.length) out[p.name] = list;
+      // `regions=` alone: none picked (not the default).
+      if (list.length || texts.every((t) => t.trim() === "")) out[p.name] = list;
     } else {
       const t = texts[texts.length - 1] ?? "";
       if (t.trim() === "") {
@@ -523,7 +536,10 @@ export function paramsToSearch(params: readonly DashboardParam[], values: Record
   for (const p of params) {
     const v = values[p.name];
     if (v === undefined) continue;
-    if (Array.isArray(v)) for (const x of v) q.append(p.name, paramText(x));
+    if (Array.isArray(v)) {
+      for (const x of v) q.append(p.name, paramText(x));
+      if (!v.length) q.append(p.name, ""); // none picked
+    }
     else q.append(p.name, v === null ? "" : paramText(v));
   }
   return q.toString();
@@ -563,13 +579,20 @@ export function checkParamValues(
 }
 
 /** A choice's value from a dataset's first column (a Date as `YYYY-MM-DD`, or with its time). */
-export function choiceValue(v: unknown): Exclude<ParamScalar, null> | undefined {
+export function choiceValue(v: unknown, p: { type?: ParamType } = {}): Exclude<ParamScalar, null> | undefined {
   if (v === null || v === undefined) return undefined;
   if (v instanceof Date) {
-    const iso = v.toISOString();
-    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso.slice(0, 16);
+    // Arrow's dates and timestamps without a zone come as UTC: the date and time as the database has them, written
+    // as the parameter's values are (`2026-04-01T00:00` for a datetime, with the seconds when there are some).
+    const iso = v.toISOString().replace(/Z$/, "").replace(/\.000$/, "");
+    if (p.type === "date") return iso.slice(0, 10);
+    if (p.type !== "datetime" && iso.endsWith("T00:00:00")) return iso.slice(0, 10);
+    return datetimeText(iso) ?? iso;
   }
-  if (typeof v === "bigint") return Number(v);
+  // Beyond 2^53 a number would not be the same id: the digits as text (an integer parameter then says so).
+  if (typeof v === "bigint") return Number.isSafeInteger(Number(v)) ? Number(v) : v.toString();
+  // Text from a database without dates (SQLite's `2026-04-01 09:00:00`): as the parameter's type reads it.
+  if (typeof v === "string" && p.type !== undefined && p.type !== "text") return fromText(p, v) ?? v;
   if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
   return String(v);
 }

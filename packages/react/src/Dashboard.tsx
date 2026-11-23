@@ -98,10 +98,13 @@ function RefreshButton() {
 function ParamsSync({
   given,
   onChange,
+  onValues,
   url,
 }: {
   given: Record<string, ParamValue> | undefined;
   onChange: ((values: Record<string, ParamValue>) => void) | undefined;
+  /** The values that are not their default, after each change (what a store made again starts with). */
+  onValues: (values: Record<string, ParamValue>) => void;
   url: string | undefined;
 }) {
   const { params: store } = useDevbi();
@@ -121,7 +124,8 @@ function ParamsSync({
       const [path = "", search = ""] = location.hash.replace(/^#\/?/, "").split("?");
       if (decodeURIComponent(path) !== url && path !== "") return;
       const problems: string[] = [];
-      store.setValues(paramsFromSearch(store.list, search, problems));
+      // The address leaves out the values that are their default: those go back to it.
+      store.setValues(paramsFromSearch(store.list, search, problems), { others: "default" });
       for (const p of problems) console.warn(`DevBI: ${p}`);
     };
     addEventListener("hashchange", on);
@@ -131,12 +135,16 @@ function ParamsSync({
   const last = useRef<string | undefined>(undefined);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onValuesRef = useRef(onValues);
+  onValuesRef.current = onValues;
   useEffect(() => {
     if (values === last.current) return;
     last.current = values;
     onChangeRef.current?.(JSON.parse(values) as Record<string, ParamValue>);
+    const changed = store.changedValues();
+    onValuesRef.current(changed);
     if (url !== undefined && store.list.length) {
-      const search = paramsToSearch(store.list, store.changedValues());
+      const search = paramsToSearch(store.list, changed);
       const hash = `#/${encodeURIComponent(url)}${search ? `?${search}` : ""}`;
       // Not a new history entry for each value (戻る goes to the page before), and no hashchange.
       if (location.hash !== hash) history.replaceState(history.state, "", hash);
@@ -257,6 +265,8 @@ export function Dashboard({
   });
   const [given] = useState(() => ({ ...fromUrl, ...checked?.values }));
   const givenLater = checked?.values;
+  // The values a store made again starts with (the dev server's project after a file is saved): the latest ones.
+  const seed = useRef(given);
   if (!dashboard) {
     const names = Object.keys(project.dashboards).sort();
     return (
@@ -268,8 +278,8 @@ export function Dashboard({
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   const readsDatasets = datasetTiles(dashboard.tiles).length > 0;
   return (
-    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard} params={given}>
-      <ParamsSync given={givenLater} onChange={onParamsChange} url={paramsInUrl ? name : undefined} />
+    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard} params={seed.current}>
+      <ParamsSync given={givenLater} onChange={onParamsChange} onValues={(v) => (seed.current = v)} url={paramsInUrl ? name : undefined} />
       <div className="devbi-root" ref={rootRef} {...root}>
         <div className="devbi-dashboard">
           {back && (

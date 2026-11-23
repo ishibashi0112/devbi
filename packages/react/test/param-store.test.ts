@@ -152,6 +152,43 @@ describe("DashboardParams", () => {
     expect(s.refreshes).toBe(1);
   });
 
+  it("`all` stops waiting when its choices cannot be read, or asks for what they need; more than 1,000 values is said", async () => {
+    // The choices fail: the tile asks for the value instead of waiting.
+    const failing = store({ tiles: [linesTile] }, { from: "2024-04-01" });
+    failing.read.mockImplementation(() => Promise.reject(new Error("API の regions を読めません（500）")));
+    failing.s.start();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(failing.s.choicesOf("regions")?.error?.message).toBe("API の regions を読めません（500）");
+    expect(failing.s.request({ dataset: "order_lines" }, datasets.order_lines!)).toEqual({ missing: ["地域"] });
+
+    // Choices that need a value not filled in: the tile asks for that one.
+    const cascade: Record<string, DatasetInfo> = {
+      ...datasets,
+      orders: { parameters: [{ name: "customers", type: "integer", multiple: true, label: "顧客", values: "customers", default: "all" }] },
+      customers: { parameters: [{ name: "region", type: "text", label: "地域" }] },
+    };
+    const r = reader();
+    const dashboard = defineDashboard({ title: "t", tiles: [{ ...linesTile, query: { dataset: "orders" } }] }, "t", "dashboards/t.dash.json");
+    const s = new DashboardParams(dashboard, cascade, r.read, {}, NOW);
+    s.start();
+    expect(s.request({ dataset: "orders" }, cascade.orders!)).toEqual({ missing: ["地域"] });
+
+    const many = store({ tiles: [linesTile] }, { from: "2024-04-01", regions: Array.from({ length: 1001 }, (_, i) => `r${i}`) });
+    const req = many.s.request({ dataset: "order_lines" }, datasets.order_lines!);
+    expect("error" in req && req.error).toMatch(/^地域（1,001 個）: 1 つのパラメーターで送れる値は 1,000 個までです/);
+  });
+
+  it("an address sets its values and puts the ones it leaves out back to their default", async () => {
+    const { s, settle } = store({ fiscalYearStart: 4, tiles: [linesTile] });
+    s.start();
+    await settle();
+    s.setValues({ from: "2024-04-01", regions: ["近畿"] });
+    s.setValues({ regions: [] }, { others: "default" });
+    expect([s.value("from"), s.value("regions")]).toEqual(["2026-04-01", []]);
+    s.setValues({}, { others: "default" });
+    expect(s.value("regions")).toEqual(["関東", "近畿"]);
+  });
+
   it("values from outside (the address, React's params) are applied at once, in the bar too", async () => {
     const { s, settle } = store({ apply: "button", tiles: [linesTile] });
     s.start();

@@ -70,12 +70,16 @@ export function exportFileName(title: string, now: Date, ext: string): string {
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** A date and time as parameters hold it (`2026-04-01T09:00`): written with a space. */
+const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
 /** A parameter's value as the sheets note it: `2026/4/1`, `関東・近畿`, `（指定なし）`. */
 function paramValueText(v: ParamValue | undefined, choices?: Map<string, string>): string {
   if (v === undefined) return "（未入力）";
   if (v === null) return "（指定なし）";
   const one = (x: Exclude<ParamValue, null | unknown[]>) =>
-    choices?.get(String(x)) ?? (typeof x === "boolean" ? (x ? "はい" : "いいえ") : String(x).replace("T", " "));
+    choices?.get(String(x)) ??
+    (typeof x === "boolean" ? (x ? "はい" : "いいえ") : typeof x === "string" && DATETIME.test(x) ? x.replace("T", " ") : String(x));
   return Array.isArray(v) ? v.map(one).join("・") : one(v);
 }
 

@@ -539,7 +539,11 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       const handleEditor = createEditorHandler({
         dir,
         allowedHost,
-        problems: (rel, d) => dashboardProblems(dir, rel, d),
+        // As readProject checks it (a save it would refuse is refused here, with the reason).
+        problems: async (rel, d) => [
+          ...dashboardProblems(dir, rel, d),
+          ...datasetProblems(rel, d, await readDatasets(dir, { ...process.env, ...loadEnv(config.mode, config.envDir || config.root, "DEVBI_") })),
+        ],
         onWrite: (file, version, client) => lastWrites.set(fileKey(file), { version, client }),
       });
       server.middlewares.use((req, res, next) => {

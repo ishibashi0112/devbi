@@ -109,12 +109,16 @@ export function DevbiProvider({
 }: {
   project: Project;
   dashboard: Dashboard & { path: string };
-  /** The parameters' first values (the URL's, the embed's, React's `params`), checked against their types. */
+  /**
+   * The values the parameters start with (the URL's, the embed's, React's `params`), checked against their types.
+   * Read when the store is made: later values go to the store (Dashboard's effect); a store made again (another
+   * project or dashboard) starts with the values given then.
+   */
   params?: Record<string, ParamValue>;
   children: ReactNode;
 }) {
-  // Only the first values: later ones go to the store (Dashboard's effect), not into a new store.
   const first = useRef(params);
+  first.current = params;
   const value = useMemo<DevbiContextValue>(() => {
     const selection = new DashboardSelection();
     const view = (name?: string) => {
@@ -204,6 +208,7 @@ async function runDataset(ctx: DevbiContextValue, query: Query): Promise<{ rows:
   const req = ctx.params.request(query, info);
   if ("missing" in req) throw new ParamsNeeded(req.missing);
   if ("waiting" in req) throw new ParamsWaiting();
+  if ("error" in req) throw new QueryError(req.error);
   const { rows, fields } = await ctx.readDataset(query.dataset!, req.params);
   return { rows, fields };
 }

@@ -154,8 +154,14 @@ function MultiField({ id, param: p, value, state, onCommit }: { id: string; para
   const close = (commit: boolean) => {
     setOpen(false);
     if (!commit) return;
-    const next = items.filter((c) => picked.has(String(c.value))).map((c) => c.value);
-    if (JSON.stringify(next) !== JSON.stringify(list)) onCommit(next);
+    // In the choices' order; values beyond a cut list (more than 10,000 choices) stay as they are.
+    const shown = new Set(items.map((c) => String(c.value)));
+    const next = [
+      ...items.filter((c) => picked.has(String(c.value))).map((c) => c.value),
+      ...(state?.truncated ? list.filter((v) => !shown.has(String(v))) : []),
+    ];
+    const key = (vs: readonly unknown[]) => JSON.stringify(vs.map(String).sort());
+    if (key(next) !== key(list)) onCommit(next);
   };
   const closeRef = useRef(close);
   closeRef.current = close;

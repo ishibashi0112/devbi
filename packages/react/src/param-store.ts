@@ -32,13 +32,18 @@ export interface ChoicesState {
 
 /** The most choices a parameter lists. */
 export const MAX_CHOICES = 10_000;
+/** The most values the API takes for one parameter (as @devbi/server's MAX_VALUES). */
+export const MAX_VALUES = 1000;
 
 const lower = (s: string) => s.toLowerCase();
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const key = (v: unknown) => String(v);
 
-/** What a dataset tile sends: its parameters' values, or the labels of those still to fill in, or wait (choices). */
-export type DatasetRequest = { params: Record<string, ParamValue> } | { missing: string[] } | { waiting: true };
+/**
+ * What a dataset tile sends: its parameters' values, or the labels of those still to fill in, or wait (choices), or
+ * why it cannot be sent (more values than the API takes).
+ */
+export type DatasetRequest = { params: Record<string, ParamValue> } | { missing: string[] } | { waiting: true } | { error: string };
 
 /** A tile's dataset has parameters to fill in first. Not an error: the tile says what to fill in. */
 export class ParamsNeeded extends Error {
@@ -91,7 +96,10 @@ export class DashboardParams {
     for (const p of params) {
       const g = Object.hasOwn(given, p.name) ? given[p.name] : undefined;
       let v: Value = g !== undefined ? g : this.defaultOf(p);
-      if (v === undefined && g === undefined && p.multiple && p.default === "all" && p.values) this.pendingAll.add(p.name);
+      // `all` waits for its choices (none when their dataset is not there: the bar says so, the tile asks for a value).
+      if (v === undefined && g === undefined && p.multiple && p.default === "all" && p.values && Object.hasOwn(datasets, p.values)) {
+        this.pendingAll.add(p.name);
+      }
       if (Array.isArray(v) && !p.multiple) v = v[0];
       this.applied[p.name] = v;
       this.draft[p.name] = v;
@@ -180,16 +188,35 @@ export class DashboardParams {
     this.changed();
   }
 
-  /** Values from outside (the URL, the embed, React's `params`): applied at once, in the bar too. */
-  setValues(values: Record<string, ParamValue>): void {
+  /**
+   * Values from outside (the URL, the embed, React's `params`): applied at once, in the bar too. With `others:
+   * "default"` (an address, which leaves out the values that are their default), the parameters not given go back to
+   * their default.
+   */
+  setValues(values: Record<string, ParamValue>, options: { others?: "keep" | "default" } = {}): void {
     let any = false;
+    const given = new Set<string>();
     for (const [name, v] of Object.entries(values)) {
       const p = this.find(name);
-      if (!p || (same(this.applied[p.name], v) && same(this.draft[p.name], v))) continue;
+      if (!p) continue;
+      given.add(p.name);
+      if (same(this.applied[p.name], v) && same(this.draft[p.name], v)) continue;
       this.applied[p.name] = v;
       this.draft[p.name] = v;
       this.pendingAll.delete(p.name);
       any = true;
+    }
+    if (options.others === "default") {
+      for (const p of this.list) {
+        if (given.has(p.name)) continue;
+        const def = this.defaultOf(p, this.choices.get(p.name)?.items);
+        const waits = def === undefined && p.multiple && p.default === "all" && !!p.values && Object.hasOwn(this.datasets, p.values);
+        if (same(this.applied[p.name], def) && same(this.draft[p.name], def) && !waits) continue;
+        this.applied[p.name] = def;
+        this.draft[p.name] = def;
+        if (waits) this.pendingAll.add(p.name);
+        any = true;
+      }
     }
     if (!any) return;
     this.changed();
@@ -209,10 +236,14 @@ export class DashboardParams {
     return p ? this.choices.get(p.name) : undefined;
   }
 
-  /** The values of a dataset's parameters, from `values` (by name, without case). */
-  private valuesFor(dataset: DatasetInfo, from: Record<string, Value>, query?: Query): DatasetRequest {
+  /**
+   * The values of a dataset's parameters, from `values` (by name, without case). `seen`: the choices' datasets asked
+   * on the way (a ring of choices, which the bar reports, does not loop).
+   */
+  private valuesFor(dataset: DatasetInfo, from: Record<string, Value>, query?: Query, seen = new Set<string>()): DatasetRequest {
     const params: Record<string, ParamValue> = {};
     const missing: string[] = [];
+    const tooMany: string[] = [];
     let waiting = false;
     const bindings = query
       ? tileBindings({ id: "", x: 0, y: 0, w: 1, h: 1, query }, dataset)
@@ -228,12 +259,23 @@ export class DashboardParams {
         continue;
       }
       const v = from[p.name];
-      if (this.pendingAll.has(p.name)) waiting = true;
-      else if (!hasValue(p, v)) missing.push(p.label);
+      if (this.pendingAll.has(p.name)) {
+        // `all` waits for its choices; when those need values not filled in yet, the tile asks for them.
+        const ds = p.values && !seen.has(p.values) ? this.datasets[p.values] : undefined;
+        const before = ds ? this.valuesFor(ds, this.draft, undefined, new Set([...seen, p.values!])) : undefined;
+        if (before && "missing" in before) missing.push(...before.missing.filter((m) => !missing.includes(m)));
+        else waiting = true;
+      } else if (!hasValue(p, v)) missing.push(p.label);
+      else if (Array.isArray(v) && v.length > MAX_VALUES) tooMany.push(`${p.label}（${v.length.toLocaleString("ja-JP")} 個）`);
       else params[b.name] = v!;
     }
-    if (waiting) return { waiting: true };
     if (missing.length) return { missing };
+    if (waiting) return { waiting: true };
+    if (tooMany.length) {
+      return {
+        error: `${tooMany.join("、")}: 1 つのパラメーターで送れる値は ${MAX_VALUES.toLocaleString("ja-JP")} 個までです。選ぶ値を減らしてください（すべてを読むなら、このパラメーターを使わない SQL にします）`,
+      };
+    }
     return { params };
   }
 
@@ -257,8 +299,13 @@ export class DashboardParams {
       if (!p.values) continue;
       const ds = Object.hasOwn(this.datasets, p.values) ? this.datasets[p.values]! : undefined;
       if (!ds) continue; // the bar shows the problem
-      const req = this.valuesFor(ds, this.draft);
+      const req = this.valuesFor(ds, this.draft, undefined, new Set([p.values]));
       const state = this.choices.get(p.name);
+      if ("error" in req) {
+        this.choicesKey.delete(p.name);
+        this.choicesFailed(p, new Error(req.error));
+        continue;
+      }
       if (!("params" in req)) {
         // waits for the values its choices need
         if (!state?.loading) this.setChoices(p.name, { loading: true, items: state?.items ?? [], truncated: false, error: null });
@@ -275,9 +322,10 @@ export class DashboardParams {
           const [first, second] = result.fields;
           const items: Choice[] = [];
           for (const row of result.rows.slice(0, MAX_CHOICES)) {
-            const value = first ? choiceValue(row[first.name]) : undefined;
+            const raw = first ? row[first.name] : undefined;
+            const value = choiceValue(raw, p);
             if (value === undefined) continue;
-            const label = second ? formatValue(row[second.name], second) : typeof value === "string" ? value : formatValue(row[first!.name], first);
+            const label = second ? formatValue(row[second.name], second) : typeof raw === "string" ? raw : formatValue(raw, first);
             items.push({ value, label });
           }
           this.setChoices(p.name, { loading: false, items, truncated: result.rows.length > MAX_CHOICES, error: null });
@@ -285,10 +333,16 @@ export class DashboardParams {
         },
         (e: unknown) => {
           if (this.choicesKey.get(p.name) !== k) return;
-          this.setChoices(p.name, { loading: false, items: [], truncated: false, error: e instanceof Error ? e : new Error(String(e)) });
+          this.choicesFailed(p, e instanceof Error ? e : new Error(String(e)));
         },
       );
     }
+  }
+
+  /** The choices could not be read: the bar says why; `all` stops waiting (the tile then asks for a value). */
+  private choicesFailed(p: DashboardParam, error: Error): void {
+    this.pendingAll.delete(p.name);
+    this.setChoices(p.name, { loading: false, items: [], truncated: false, error });
   }
 
   private setChoices(name: string, state: ChoicesState) {

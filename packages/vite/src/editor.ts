@@ -22,7 +22,7 @@ export interface EditorOptions {
   /** Whether a Host header names this dev server (Vite's allowedHosts): no DNS rebinding. */
   allowedHost(host: string): boolean | Promise<boolean>;
   /** Problems with the files a dashboard points at (metrics files, promoted tiles), as in the build. */
-  problems(rel: string, dashboard: Dashboard): string[];
+  problems(rel: string, dashboard: Dashboard): string[] | Promise<string[]>;
   /** After a save: the file, its content's version, and the page that saved it (from `X-DevBI-Client`). */
   onWrite?(file: string, version: string, client: string | undefined): void;
 }
@@ -237,7 +237,7 @@ export function createEditorHandler(options: EditorOptions) {
           if (e instanceof DashboardError) throw new HttpError(422, e.message, { issues: e.issues });
           throw e;
         }
-        const problems = options.problems(rel, dashboard);
+        const problems = await options.problems(rel, dashboard);
         if (problems.length) throw new HttpError(422, problems.join("\n"));
         const text = formatDashboardJson(body.spec);
         // Write next to it and rename: the dev server (and VS Code) never read half a file.
