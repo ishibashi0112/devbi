@@ -68,7 +68,7 @@ npm run build      # dist/ ができる（npm run preview で http://localhost:4
 - `data/` の Excel や CSV、スナップショット（`snapshots/*.arrows`）は、URL を知っていれば直接ダウンロードできます。
 - 読み取り API（`api/query`）に届く人は、`api/` の**どの SQL でも**、名前とパラメーターを自分で送って読めます（`api/schema` が一覧を返します）。ダッシュボードに出していない SQL も同じです。
 - パラメーター（`read_api('orders', from = '…')` の値）はブラウザが送るので、利用者が書き換えられます。見せてはいけない行を、パラメーターや絞り込みで隠さないでください。
-- 人によって見せる行を変えるには、ホストがログインした人を API に渡し、`api/*.sql` の中を `:user.region` のように絞ります（[行レベル制御](reference.md#利用者ごとに見える行を変える行レベル制御)）。今は Node のサーバー（`@devbi/server` を自分のアプリに組み込む形）で使えます。`devbi-serve` が前のサーバーからユーザー名を受け取る口と、C# と Next.js の見本はこのあと足します。それまでは、API はだれが開いても同じ行を返します。
+- 人によって見せる行を変えるには、ホストがログインした人を API に渡し、`api/*.sql` の中を `:user.region` のように絞ります（[行レベル制御](reference.md#利用者ごとに見える行を変える行レベル制御)）。今は Node のサーバー（`@devbi/server` を自分のアプリに組み込む形）と、`devbi-serve`（前に置いたサーバーからユーザー名を受け取る。[ログインした人ごとに見える行を変える](#ログインした人ごとに見える行を変える)）で使えます。C# と Next.js の見本はこのあと足します。使わないあいだは、API はだれが開いても同じ行を返します。
 
 なので、守るのは「サイト（と API）に入れる人」です。
 
@@ -333,8 +333,39 @@ location /reports/ {
 - **ホスト名**: `devbi-serve` は、IP アドレスと `localhost` のほかの名前で来たリクエストを断ります（DNS リバインディングの対策）。IIS の ARR も上の nginx の例も、利用者の開いた名前（`reports.corp.local`）を Host のまま渡すので、`--allowed-hosts reports.corp.local` を付けて起動します。`http://reports/` のような短い名前でも開くなら、`--allowed-hosts reports.corp.local,reports` のように両方書きます。ブラウザに「この名前 (…) では開けません。devbi-serve を --allowed-hosts … を付けて起動してください」と出たら、出ている名前を足します。
 - **待ち時間**: 前のサーバーの待ち時間の上限は、`devbi-serve` の `--timeout`（既定 60 秒）より長くします（nginx の `proxy_read_timeout` は既定 60 秒、IIS は ARR の「Server Proxy Settings」の「Time-out」）。短いと、重い SQL が終わる前に 502 や 504 になります。
 - **圧縮**: API の答えは `devbi-serve` が gzip にします。サイトのファイルは圧縮しないので、`.wasm`（約 34 MB）などは前のサーバーで圧縮させます。IIS では、ARR が転送した答えは「動的コンテンツの圧縮」で圧縮されるので、IIS の役割サービスの「動的コンテンツの圧縮」を入れ、`httpCompression` の `dynamicTypes` に `application/wasm` を足します（1 の静的圧縮の設定は、転送した答えには効きません）。
-- **ログイン**: IIS ならそのサイトで「Windows 認証」を有効、「匿名認証」を無効にします。ログインは前のサーバーだけで決まり、`devbi-serve` は利用者がだれかを知りません（だれが開いても同じ行を返します。[ログインと、データが見える範囲](#ログインとデータが見える範囲)）。
+- **ログイン**: IIS ならそのサイトで「Windows 認証」を有効、「匿名認証」を無効にします。ログインは前のサーバーだけで決まり、`devbi-serve` は利用者がだれかを知りません（だれが開いても同じ行を返します。[ログインと、データが見える範囲](#ログインとデータが見える範囲)）。人ごとに見える行を変えるときは、前のサーバーがユーザー名をヘッダーで渡します（次の節）。
 - 前にサーバーを置かず、部署の中のネットワークでログインなしに出すなら、`--host 0.0.0.0` で直接待ち受けることもできます（Windows ファイアウォールでそのポートを開けます）。名前で開くなら、その名前を `--allowed-hosts` に書きます。
+
+### ログインした人ごとに見える行を変える
+
+[行レベル制御](reference.md#利用者ごとに見える行を変える行レベル制御)（`api/*.sql` を `:user.region` のように絞る）を `devbi-serve` で使うときは、前のサーバーがログインを確かめ、ユーザー名をヘッダーで `devbi-serve` に渡します。
+
+```sh
+npx devbi-serve --dir . --user-header X-DevBI-User --allowed-hosts reports.corp.local
+```
+
+- **前のサーバーは、ブラウザから来た `X-DevBI-User` を必ず上書きするか消します。** そうしないと、利用者が自分でヘッダーを付けて、ほかの人になれます。同じヘッダーが 2 つ届いたリクエスト（上書きせずに足したとき）は、`devbi-serve` が `400` で断ります。
+- `devbi-serve` が信じるのは、`--trusted-proxy`（既定は `127.0.0.1` と `::1`）からつながってきたリクエストのヘッダーだけです。前のサーバーが別のコンピューターなら、その IP アドレスを書きます（`--trusted-proxy 10.0.0.5`）。`devbi-serve` には、前のサーバーからだけ届くようにします（`--host 127.0.0.1` か、ファイアウォール）。
+- 同じコンピューターでほかのプログラムも動く、リモート デスクトップでほかの人もログインするときは、合言葉を足します: `--proxy-secret-file C:\devbi\proxy-secret.txt` を付け、前のサーバーが同じ文字を `X-DevBI-Proxy-Secret` ヘッダーに入れます。ファイルは、サービスのアカウントと管理者だけが読めるようにします。
+- 属性（地域など）と役割は、`access/user.sql` で表から引きます（[リファレンス](reference.md#利用者の属性と役割を表から引くaccessusersql)）。
+- 置いたあと、`pnpm exec devbi-check --url https://reports.corp.local/reports/` で、置いた先の API が行レベル制御を知っているかを確かめられます（サイトのログインの前で止まるときは確かめられません）。
+
+nginx と oauth2-proxy（Entra ID・Okta・Google・Keycloak などの OpenID Connect）の例:
+
+```nginx
+location /reports/ {
+    auth_request /oauth2/auth;
+    auth_request_set $devbi_user $upstream_http_x_auth_request_user;
+    proxy_set_header X-DevBI-User $devbi_user;   # ブラウザから来た X-DevBI-User は、ここで上書きされる
+    proxy_set_header Host $host;
+    proxy_pass http://127.0.0.1:8080/;
+}
+# /oauth2/ の location と oauth2-proxy の設定（--set-xauthrequest など）は、oauth2-proxy の説明のとおりに書く
+```
+
+`X-Auth-Request-User` にどのクレームが入るかは、oauth2-proxy の設定で決まります。メールアドレスではなく、変わらない ID（Entra ID の `oid` など）が入るようにします。
+
+**IIS の Windows 認証で人ごとに行を変えるなら、[ASP.NET のアプリに埋め込む形](#3-社内のアプリに埋め込む)を勧めます**（C# の対応は、このあと足します）。IIS の URL Rewrite でログインした人の名前（`{LOGON_USER}`）をヘッダーに入れると空になるという報告があり、IIS から `devbi-serve` に Windows のユーザー名を渡す方法は、まだ確かめていません。
 
 ### 動かし続ける
 

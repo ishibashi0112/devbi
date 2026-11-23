@@ -4,7 +4,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { isIP } from "node:net";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { createApiHandler, type ApiOptions } from "./handler.js";
+import { createApiHandler, type ApiOptions, type RequestOptions } from "./handler.js";
+import { proxyUser } from "./proxy-user.js";
 
 export interface ServeOptions extends ApiOptions {
   /** The built site (`vite build` output) to serve. Default `<dir>/dist`. */
@@ -25,6 +26,18 @@ export interface ServeOptions extends ApiOptions {
    * missing or out of date. Default true. They are saved in `snapshotDir` (default `<staticDir>/snapshots`).
    */
   schedule?: boolean;
+  /**
+   * The header in which the server in front (IIS, nginx with oauth2-proxy) puts the signed-in user's name
+   * (`X-DevBI-User`). It becomes `:user.id`; roles and attributes come from `access/user.sql`. Setting it also sets
+   * `requireUser`. Believed only from `trustedProxies` (and with `proxySecret`). Default: no user from headers.
+   */
+  userHeader?: string;
+  /** The servers in front whose `userHeader` is believed: IP addresses or ranges (`10.0.0.0/24`). Default `127.0.0.1`, `::1`. */
+  trustedProxies?: string[];
+  /** When set, only requests with this in `X-DevBI-Proxy-Secret` are believed (other programs on the same computer). */
+  proxySecret?: string;
+  /** The user name in lower case (`CORP\Yamada` and `corp\yamada` as one user). */
+  userLowercase?: boolean;
 }
 
 export interface RunningServer {
@@ -175,7 +188,28 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
     throw new Error(`${root} に index.html がありません。先にビルドしてください（pnpm build）`);
   }
   const snapshotDir = options.snapshotDir ?? path.join(root, "snapshots");
-  const api = createApiHandler({ ...options, snapshotDir });
+  const fromHeader =
+    options.userHeader === undefined
+      ? undefined
+      : proxyUser({
+          header: options.userHeader,
+          ...(options.trustedProxies ? { trustedProxies: options.trustedProxies } : {}),
+          ...(options.proxySecret !== undefined ? { secret: options.proxySecret } : {}),
+          ...(options.userLowercase ? { lowercase: true } : {}),
+        });
+  if (options.proxySecret !== undefined && !options.proxySecret.trim()) throw new Error("合言葉（proxySecret）が空です");
+  const api = createApiHandler({ ...options, snapshotDir, ...(fromHeader ? { requireUser: true } : {}) });
+  // A header not believed goes in the log once a minute for each address (a client cannot fill the log with it).
+  const lastLogged = new Map<string, number>();
+  const quiet = (from: string) => {
+    const now = Date.now();
+    if ((lastLogged.get(from) ?? -Infinity) > now - 60_000) return false;
+    lastLogged.delete(from);
+    lastLogged.set(from, now);
+    if (lastLogged.size > 1000) lastLogged.delete(lastLogged.keys().next().value!);
+    return true;
+  };
+  const apiPath = options.describe ? /\/api\/(schema|query|describe)$|\/snapshots\/[^/]+\.arrows$/ : /\/api\/(schema|query)$|\/snapshots\/[^/]+\.arrows$/;
   // Snapshots are sent by the API only (`…/snapshots/<file>.arrows`), which checks who asks: never as plain files.
   const hidden = [...new Set([path.join(root, "snapshots"), path.resolve(snapshotDir)])];
   const host = options.host ?? "127.0.0.1";
@@ -190,7 +224,22 @@ export async function serve(options: ServeOptions): Promise<RunningServer> {
           res.end(`この名前 (${name}) では開けません。devbi-serve を --allowed-hosts ${name} を付けて起動してください`);
           return;
         }
-        if (await api.handle(req, res)) return;
+        // Who asks, from the header of the server in front (API paths only: the site's files are the same for all).
+        let asked: RequestOptions = {};
+        if (fromHeader && apiPath.test(new URL(req.url ?? "/", "http://localhost").pathname)) {
+          const got = fromHeader(req);
+          if ("refuse" in got) {
+            options.log?.(`リクエストを断りました: ${got.refuse}`);
+            res.writeHead(400, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+            res.end(JSON.stringify({ error: got.refuse }));
+            return;
+          }
+          if (got.ignored && quiet(req.socket.remoteAddress ?? "")) {
+            options.log?.(`${options.userHeader} を使いませんでした（${got.ignored}）。ログインしていない人として答えます（同じ相手は 1 分に 1 回だけ書きます）`);
+          }
+          asked = got.options;
+        }
+        if (await api.handle(req, res, asked)) return;
         if (req.method !== "GET" && req.method !== "HEAD") {
           res.writeHead(405, { Allow: "GET, HEAD" });
           res.end();

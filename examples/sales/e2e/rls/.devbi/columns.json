@@ -1,6 +1,6 @@
 {
   "orders": {
-    "sql": "a7134327447d9f29",
+    "sql": "cd9d39854325429a",
     "columns": [
       { "name": "受注日" },
       { "name": "受注番号", "type": "string" },
