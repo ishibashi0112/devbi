@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { optionsFromAttributes } from "../src/embed.js";
 import { exportKinds } from "../src/ExportMenu.js";
+import { exportFileName } from "../src/export/tile-data.js";
 
 describe("exportKinds", () => {
   it("offers every kind by default, none for false, and only those listed (in the menu's order)", () => {
@@ -9,6 +10,25 @@ describe("exportKinds", () => {
     expect(exportKinds(false)).toEqual([]);
     expect(exportKinds(["csv", "xlsx"])).toEqual(["xlsx", "csv"]);
     expect(exportKinds([])).toEqual([]);
+    // null from plain JavaScript: as false
+    expect(exportKinds(null)).toEqual([]);
+  });
+});
+
+describe("exportFileName", () => {
+  const now = new Date(2026, 10, 23, 20, 33);
+  it("is the title, the tile's name and the time, without characters file systems refuse", () => {
+    expect(exportFileName("売上ダッシュボード", now, "xlsx")).toBe("売上ダッシュボード_20261123-2033.xlsx");
+    expect(exportFileName("売上/月次", now, "csv", "地域: 関東")).toBe("売上_月次_地域_ 関東_20261123-2033.csv");
+    expect(exportFileName("  ", now, "zip")).toBe("dashboard_20261123-2033.zip");
+  });
+
+  it("stays under 255 bytes however long the titles are (日本語 is 3 bytes a character)", () => {
+    const long = "売".repeat(200);
+    const bytes = (s: string) => new TextEncoder().encode(s).length;
+    expect(bytes(exportFileName(long, now, "csv", long))).toBeLessThan(255);
+    expect(bytes(exportFileName(long, now, "xlsx"))).toBeLessThan(255);
+    expect(exportFileName(long, now, "xlsx")).toMatch(/^売+_20261123-2033\.xlsx$/);
   });
 });
 

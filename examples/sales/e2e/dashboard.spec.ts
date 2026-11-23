@@ -326,10 +326,18 @@ test("ファイル出力 → CSV: a tile's rows with the values as they are, or 
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(button).toBeFocused();
-  // and opened again from the keyboard
+  // and opened again from the keyboard: ↓ at the first item, ↑ at the last
   await page.keyboard.press("ArrowDown");
   await expect(items.first()).toBeFocused();
   await page.keyboard.press("Escape");
+  await page.keyboard.press("ArrowUp");
+  await expect(items.last()).toBeFocused();
+  // A press on the menu between its items keeps it open, and Esc still closes it.
+  await menu.getByText("CSV（.csv）", { exact: true }).click();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(button).toBeFocused();
 
   // One tile: its rows, months as dates (2026-04-01), numbers without their format.
   const [one] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "月別売上")]);

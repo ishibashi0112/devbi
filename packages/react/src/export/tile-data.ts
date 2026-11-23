@@ -43,13 +43,35 @@ const pad = (n: number) => String(n).padStart(2, "0");
 /** `20261108-1023` (local time). */
 const stamp = (d: Date) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
 
-/** A name without characters file systems refuse (`\ / : * ? " < > |`): for files and the names inside a ZIP. */
-export const safeFileName = (name: string, fallback: string) => name.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").trim().slice(0, 100) || fallback;
+const encoder = new TextEncoder();
 
-/** A file name for an export: the dashboard's title (and a part of it, such as a tile's) and the time. */
+/** At most `max` bytes of UTF-8 (file systems count a name in bytes: 255 on macOS and Linux; 日本語 is 3 a character). */
+function cutBytes(text: string, max: number): string {
+  if (encoder.encode(text).length <= max) return text;
+  let out = "";
+  let bytes = 0;
+  for (const ch of text) {
+    bytes += encoder.encode(ch).length;
+    if (bytes > max) break;
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * A name without characters file systems refuse (`\ / : * ? " < > |`), at most `maxBytes` bytes: for files and the
+ * names inside a ZIP.
+ */
+export const safeFileName = (name: string, fallback: string, maxBytes = 150) =>
+  cutBytes(name.replace(/[\\/:*?"<>|\x00-\x1f]+/g, "_").trim(), maxBytes).trim() || fallback;
+
+/**
+ * A file name for an export: the dashboard's title (and a part of it, such as a tile's) and the time. Under 255 bytes
+ * however long the titles are.
+ */
 export function exportFileName(title: string, now: Date, ext: string, part?: string): string {
-  const name = safeFileName(title, "dashboard");
-  return `${name}${part === undefined ? "" : `_${safeFileName(part, "tile")}`}_${stamp(now)}.${ext}`;
+  const name = safeFileName(title, "dashboard", part === undefined ? 200 : 120);
+  return `${name}${part === undefined ? "" : `_${safeFileName(part, "tile", 90)}`}_${stamp(now)}.${ext}`;
 }
 
 export const message = (e: unknown) => (e instanceof Error ? e.message : String(e));

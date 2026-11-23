@@ -82,3 +82,28 @@ describe("writeZip", () => {
     expect([time >> 11, (time >> 5) & 63, (time & 31) * 2]).toEqual([20, 33, 40]);
   });
 });
+
+describe("csvParts: headers and time columns", () => {
+  it("guards a header from running as a formula, as a value (a column name from the data)", () => {
+    const text = csvParts([{ a: 1 }], [{ name: "a", label: '=HYPERLINK("http://x","y")' }]).join("");
+    expect(text.split("\r\n")[0]).toBe(`${CSV_BOM}"'=HYPERLINK(""http://x"",""y"")"`);
+  });
+
+  it("writes a column's dates in one format: with the time when one has it, milliseconds when one has them", () => {
+    const fields = [
+      { name: "d", label: "日" },
+      { name: "t", label: "日時" },
+      { name: "m", label: "ミリ秒" },
+    ];
+    const rows = [
+      { d: new Date("2026-04-01T00:00:00Z"), t: new Date("2026-04-01T00:00:00Z"), m: new Date("2026-04-01T00:00:00Z") },
+      { d: new Date("2026-04-02T00:00:00Z"), t: new Date("2026-04-02T09:30:00Z"), m: new Date("2026-04-02T09:30:00.250Z") },
+    ];
+    expect(csvParts(rows, fields).join("").slice(1).split("\r\n")).toEqual([
+      "日,日時,ミリ秒",
+      "2026-04-01,2026-04-01 00:00:00,2026-04-01 00:00:00.000",
+      "2026-04-02,2026-04-02 09:30:00,2026-04-02 09:30:00.250",
+      "",
+    ]);
+  });
+});
