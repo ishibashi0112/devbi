@@ -100,20 +100,32 @@ async function deflate(data: Uint8Array | string | TextParts): Promise<{ deflate
   return { deflated, crc, size };
 }
 
-/** Build a ZIP archive. Entries are deflated. */
-export async function writeZip(files: { name: string; data: Uint8Array | string | TextParts }[]): Promise<Uint8Array> {
+/** A time as ZIP keeps it (MS-DOS: local time, to 2 seconds, from 1980): `[time, date]`. None: zeros. */
+function dosTime(d: Date | undefined): [number, number] {
+  if (!d || Number.isNaN(d.getTime()) || d.getFullYear() < 1980) return [0, 0];
+  return [
+    (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1),
+    ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(),
+  ];
+}
+
+/** Build a ZIP archive. Entries are deflated. `modified`: the time a file shows once extracted. */
+export async function writeZip(files: { name: string; data: Uint8Array | string | TextParts; modified?: Date }[]): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;
   for (const f of files) {
     const { deflated, crc, size } = await deflate(f.data);
     const name = textEncoder.encode(f.name);
+    const [time, date] = dosTime(f.modified);
     const local = new Uint8Array(30 + name.length);
     const lv = new DataView(local.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
     lv.setUint16(6, 0x0800, true); // UTF-8 names
     lv.setUint16(8, 8, true);
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, date, true);
     lv.setUint32(14, crc, true);
     lv.setUint32(18, deflated.length, true);
     lv.setUint32(22, size, true);
@@ -126,6 +138,8 @@ export async function writeZip(files: { name: string; data: Uint8Array | string 
     cv.setUint16(6, 20, true);
     cv.setUint16(8, 0x0800, true);
     cv.setUint16(10, 8, true);
+    cv.setUint16(12, time, true);
+    cv.setUint16(14, date, true);
     cv.setUint32(16, crc, true);
     cv.setUint32(20, deflated.length, true);
     cv.setUint32(24, size, true);

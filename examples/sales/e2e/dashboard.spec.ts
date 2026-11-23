@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { listSheets, readXlsx } from "devbi";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { chooseExport, unzipText } from "./file-menu.js";
 
 const tile = (page: Page, id: string) => page.locator(`[data-tile="${id}"]`);
 const kpi = (page: Page, id: string) => tile(page, id).getByTestId("kpi-value");
@@ -240,7 +241,7 @@ test("Excel saves each tile's data as filtered now: a sheet per tile, numbers an
   await expect(kpi(page, "kpi-revenue")).not.toHaveText(all);
   await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
 
-  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Excel" }).click()]);
+  const [download] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "Excel（.xlsx）")]);
   expect(download.suggestedFilename()).toMatch(/^売上ダッシュボード_\d{8}-\d{4}\.xlsx$/);
   const file = readFileSync((await download.path())!);
   // The summary, then the tiles that read data, in the dashboard's order (not the period picker or the text).
@@ -284,7 +285,82 @@ test("Excel saves each tile's data as filtered now: a sheet per tile, numbers an
   expect(pivot.slice(1, -1).every((c) => /^\d{4}年Q\d$/.test(c.name) && c.type === "BIGINT")).toBe(true);
 });
 
-/** Instead of the print dialog: keeps what the 印刷・PDF button's hidden frame holds when it prints. */
+/** The tiles that read data, in the dashboard's order: an Excel sheet and a CSV each. */
+const DATA_TILES = [
+  "売上",
+  "受注件数",
+  "平均受注額",
+  "数量",
+  "月別売上",
+  "地域別売上",
+  "売上と前年同月",
+  "商品分類別の推移",
+  "上位顧客（自作タイル）",
+  "地域 × 四半期",
+  "商品分類",
+  "商品別",
+];
+
+const csvLines = (text: string) => text.replace(/^\uFEFF/, "").split("\r\n").filter(Boolean);
+
+test("ファイル出力 → CSV: a tile's rows with the values as they are, or every tile's in a ZIP; the menu by keyboard", async ({ page }) => {
+  await ready(page);
+  const all = await kpi(page, "kpi-revenue").innerText();
+  await tile(page, "region").getByRole("button", { name: /関東/ }).click();
+  await expect(kpi(page, "kpi-revenue")).not.toHaveText(all);
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0);
+
+  // Excel, 印刷・PDF, then CSV: every tile's, and each tile that reads data.
+  const button = page.getByRole("button", { name: "ファイル出力" });
+  await button.click();
+  const menu = page.getByRole("menu", { name: "ファイル出力" });
+  const items = menu.getByRole("menuitem");
+  await expect(items).toHaveText([/^Excel（\.xlsx）/, /^印刷・PDF/, /^すべてのタイル（\.zip）/, ...DATA_TILES]);
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(items.last()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(button).toBeFocused();
+  // and opened again from the keyboard
+  await page.keyboard.press("ArrowDown");
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  // One tile: its rows, months as dates (2026-04-01), numbers without their format.
+  const [one] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "月別売上")]);
+  expect(one.suggestedFilename()).toMatch(/^売上ダッシュボード_月別売上_\d{8}-\d{4}\.csv$/);
+  const text = readFileSync((await one.path())!, "utf8");
+  expect(text.charCodeAt(0)).toBe(0xfeff);
+  expect(text.endsWith("\r\n")).toBe(true);
+  const monthly = csvLines(text);
+  expect(monthly[0]).toBe("受注日,売上");
+  expect(monthly.slice(1).every((l) => /^\d{4}-\d{2}-01,\d+$/.test(l))).toBe(true);
+
+  // Every tile: a CSV each, in the dashboard's order, filtered as on the screen.
+  const [zip] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "すべてのタイル（.zip）")]);
+  expect(zip.suggestedFilename()).toMatch(/^売上ダッシュボード_\d{8}-\d{4}\.zip$/);
+  const files = unzipText(readFileSync((await zip.path())!));
+  expect([...files.keys()]).toEqual(DATA_TILES.map((n) => `${n}.csv`));
+  expect(files.get("月別売上.csv")).toBe(text);
+  const [head, row] = csvLines(files.get("売上.csv")!);
+  expect(head).toBe("売上,売上 前年,売上 前年比");
+  const [revenue, , yoy] = row!.split(",");
+  await expect(kpi(page, "kpi-revenue")).toHaveText(`¥${Number(revenue).toLocaleString("ja-JP")}`);
+  expect(yoy).toMatch(/^\d\.\d+$/); // the ratio itself (1.2975…), not 129.8%
+  // The pivot as its rows, not its cross table; the tile that was clicked is not filtered by its own selection.
+  const pivot = csvLines(files.get("地域 × 四半期.csv")!);
+  expect(pivot[0]!.split(",").sort()).toEqual(["受注日", "地域", "売上"].sort());
+  expect(pivot.length).toBeGreaterThan(2);
+  expect(pivot.slice(1).every((l) => l.includes("関東"))).toBe(true);
+  expect(csvLines(files.get("地域別売上.csv")!)).toHaveLength(7);
+});
+
+/** Instead of the print dialog: keeps what 印刷・PDF's hidden frame holds when it prints. */
 async function catchPrint(page: Page) {
   await page.evaluate(() => {
     new MutationObserver((records) => {
@@ -309,9 +385,9 @@ test("印刷・PDF prints a copy of the dashboard: light, without the buttons, t
   // a project's own color, as the reference shows
   await page.addStyleTag({ content: ".devbi-root { --devbi-accent: #0a7f6f; }" });
   await catchPrint(page);
-  await page.getByRole("button", { name: "印刷・PDF" }).click();
+  await chooseExport(page, "印刷・PDF");
   await expect.poll(() => page.evaluate(() => (window as unknown as { printed?: string }).printed)).toMatch(/^売上ダッシュボード_\d{8}$/);
-  await expect(page.getByRole("button", { name: "印刷・PDF" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "ファイル出力" })).toBeEnabled();
 
   const frame = page.frameLocator("iframe[data-devbi-print-frame]");
   const copy = frame.locator(".devbi-root");

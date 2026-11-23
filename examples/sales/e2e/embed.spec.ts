@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { chooseExport } from "./file-menu.js";
 
 // public/embed-demo.html: "another app's page" with its own CSS, one <div data-devbi="sales-db"> and devbi-embed.js.
 const tile = (page: Page, id: string) => page.locator(`[data-tile="${id}"]`);
@@ -74,7 +75,7 @@ async function catchPrint(page: Page) {
 
 const printed = (page: Page) => page.evaluate(() => (window as unknown as { printed?: string }).printed);
 
-test("印刷・PDF prints the dashboard alone, not the page around it; data-devbi-exports=\"false\" leaves the buttons out", async ({ page }) => {
+test("印刷・PDF prints the dashboard alone, not the page around it; data-devbi-exports chooses what the menu offers", async ({ page }) => {
   const { errors } = await open(page);
   // The page's rule kept out of the dashboard as the reference says (:not([data-devbi] *)), and styles added in script
   // as CSS-in-JS libraries add them: to an empty <style>, and as a sheet made in script.
@@ -88,7 +89,7 @@ test("印刷・PDF prints the dashboard alone, not the page around it; data-devb
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
   });
   await catchPrint(page);
-  await report(page).getByRole("button", { name: "印刷・PDF" }).click();
+  await chooseExport(report(page), "印刷・PDF");
   await expect.poll(() => printed(page)).toContain("売上ダッシュボード（DB から）");
   const body = page.frameLocator("iframe[data-devbi-print-frame]").locator("body");
   await expect(body.locator(":scope > *")).toHaveCount(1);
@@ -100,13 +101,20 @@ test("印刷・PDF prints the dashboard alone, not the page around it; data-devb
   await expect(body.locator(".devbi-printed")).toHaveCSS("word-spacing", "4px");
   await page.emulateMedia({ media: "screen" });
 
-  // Options left out come from the attributes: mounting again with data-devbi-exports="false".
-  await page.evaluate(() => {
-    document.getElementById("report-area")!.setAttribute("data-devbi-exports", "false");
-    (window as unknown as { DevBI: Devbi }).DevBI.mount("#report-area");
-  });
-  await expect(report(page).getByRole("button", { name: "Excel" })).toHaveCount(0);
-  await expect(report(page).getByRole("button", { name: "印刷・PDF" })).toHaveCount(0);
+  // Options left out come from the attributes: mounting again with data-devbi-exports="xlsx, pdf" (no CSV), then "false".
+  const exportsOf = (value: string) =>
+    page.evaluate((v) => {
+      document.getElementById("report-area")!.setAttribute("data-devbi-exports", v);
+      (window as unknown as { DevBI: Devbi }).DevBI.mount("#report-area");
+    }, value);
+  await exportsOf("xlsx, pdf");
+  await report(page).getByRole("button", { name: "ファイル出力" }).click();
+  await expect(report(page).getByRole("menuitem")).toHaveText([/^Excel（\.xlsx）/, /^印刷・PDF/]);
+  await expect(report(page).getByRole("menu")).not.toContainText("CSV");
+  await page.keyboard.press("Escape");
+  await expect(report(page).getByRole("menu")).toHaveCount(0);
+  await exportsOf("false");
+  await expect(report(page).getByRole("button", { name: "ファイル出力" })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -122,7 +130,7 @@ test("in a narrow part of the page the tiles go in one column, as on a phone", a
   expect(Math.round(a.width)).toBe(Math.round(b.width));
   // Printed so too, each tile a band of its own (pages break between any two).
   await catchPrint(page);
-  await report(page).getByRole("button", { name: "印刷・PDF" }).click();
+  await chooseExport(report(page), "印刷・PDF");
   await expect.poll(() => printed(page)).toContain("売上ダッシュボード（DB から）");
   const copy = page.frameLocator("iframe[data-devbi-print-frame]").locator(".devbi-root");
   await expect(copy).toHaveAttribute("data-devbi-narrow", "");

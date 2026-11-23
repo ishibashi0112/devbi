@@ -210,6 +210,18 @@ html perspective-viewer, html perspective-dropdown {
 .devbi-button:disabled { opacity: 0.5; cursor: default; }
 .devbi-button.devbi-button-primary { background: var(--devbi-accent); border-color: var(--devbi-accent); color: #fff; }
 .devbi-button:focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 2px; }
+/* The ファイル出力 menu: under its button, at its right edge (the heading's right). */
+.devbi-export { position: relative; }
+.devbi-caret { margin-left: 4px; color: var(--devbi-muted); font-size: 11px; }
+.devbi-menu { position: absolute; z-index: 30; top: calc(100% + 4px); right: 0; width: max-content; min-width: 280px; max-width: min(360px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow: auto; background: var(--devbi-card); color: var(--devbi-text); border: 1px solid var(--devbi-border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16); padding: 4px; box-sizing: border-box; }
+.devbi-menu [role="menuitem"] { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; box-sizing: border-box; text-align: left; border: 0; background: none; color: inherit; font: inherit; font-size: 13px; line-height: 1.5; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.devbi-menu [role="menuitem"]:hover, .devbi-menu [role="menuitem"]:focus { background: var(--devbi-accent-soft); outline: none; }
+.devbi-menu [role="menuitem"] small, .devbi-menu-hint { color: var(--devbi-muted); font-size: 11.5px; }
+.devbi-menu-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.devbi-menu-heading { font-size: 13px; font-weight: 600; padding: 6px 10px 0; }
+.devbi-menu-hint { display: block; padding: 0 10px 4px; }
+.devbi-menu .devbi-menu-tile { padding-left: 20px; }
+.devbi-menu [role="separator"] { height: 1px; background: var(--devbi-border); margin: 4px 6px; }
 /* The parameters (SSRS's toolbar): under the heading, a row of labelled inputs. */
 .devbi-params { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 16px; margin-bottom: 12px; padding: 10px 12px; background: var(--devbi-card); border: 1px solid var(--devbi-border); border-radius: var(--devbi-radius); }
 .devbi-param { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -247,7 +259,7 @@ html perspective-viewer, html perspective-dropdown {
 .devbi-root[data-devbi-narrow] .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
 .devbi-actions > .devbi-error { align-self: center; }
 .devbi-printed { display: none; }
-/* On paper (the 印刷・PDF button's copy of the dashboard, or the browser's own print of the page): light colors on white,
+/* On paper (ファイル出力 → 印刷・PDF's copy of the dashboard, or the browser's own print of the page): light colors on white,
    with the bars' and chips' colors kept, no buttons, and a tile kept on one page. Light colors only where the dark ones
    would apply (the same selectors, after them), so a project's own colors (.devbi-root { --devbi-accent: … }) stay. */
 @media print {

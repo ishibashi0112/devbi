@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { listSheets, readXlsx } from "devbi";
 import { readFileSync } from "node:fs";
+import { chooseExport } from "./file-menu.js";
 
 // dashboards/sales-report.dash.json: a table of api/order_lines.sql with the parameter bar its `-- param:` lines make
 // (SSRS-like). The rows come from the API with the values; the browser does not aggregate them (no DuckDB-wasm).
@@ -180,7 +181,7 @@ test("the viewer's changes to a table stay while the parameters change, through 
   await expect(headers).toHaveText(grouped);
 });
 
-test("the viewer searches and filters a column; Excel writes the table as it is then, with its totals", async ({ page }) => {
+test("the viewer searches and filters a column; Excel writes the table as it is then, with its totals, CSV without them", async ({ page }) => {
   await page.goto("/#/sales-report?from=2024-04-01&to=2024-04-30");
   await expect(lines(page)).toContainText("J10001");
   await lines(page).getByPlaceholder("表の中を検索").fill("グリス");
@@ -196,7 +197,7 @@ test("the viewer searches and filters a column; Excel writes the table as it is 
   await expect.poll(async () => [...new Set(await cells(lines(page), "地域"))]).toEqual(["関東"]);
   const shown = await cells(lines(page), "受注番号");
 
-  const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Excel" }).click()]);
+  const [download] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "Excel（.xlsx）")]);
   const file = readFileSync((await download.path())!);
   expect(await listSheets(file)).toEqual(["概要", "顧客別（行をクリックで、その顧客の明細）", "受注明細"]);
   // Each cell as text (header: false reads every column as text; empty rows are left out).
@@ -216,4 +217,13 @@ test("the viewer searches and filters a column; Excel writes the table as it is 
   // The customers' sheet: the group's column first, the hidden column left out.
   const by = await readXlsx(file, { sheet: "顧客別（行をクリックで、その顧客の明細）", range: "A4:E100" });
   expect(by.columns.map((c) => c.name)).toEqual(["地域", "顧客", "受注数", "数量", "金額"]);
+
+  // CSV: the same rows and columns, the values as they are (dates as 2024-04-01), without the totals row.
+  const [csv] = await Promise.all([page.waitForEvent("download"), chooseExport(page, "受注明細")]);
+  expect(csv.suggestedFilename()).toMatch(/^受注明細レポート_受注明細_\d{8}-\d{4}\.csv$/);
+  const text = readFileSync((await csv.path())!, "utf8");
+  const csvRows = text.replace(/^\uFEFF/, "").split("\r\n").filter(Boolean).map((l) => l.split(","));
+  expect(csvRows[0]).toEqual(rows[at]);
+  expect(csvRows.slice(1).map((r) => r[1])).toEqual(shown);
+  expect(csvRows[1]![0]).toMatch(/^2024-04-\d\d$/);
 });

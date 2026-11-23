@@ -1,6 +1,7 @@
 import type { ParamValue } from "devbi";
 import { createRoot, type Root } from "react-dom/client";
 import { Dashboard, type Theme } from "./Dashboard.js";
+import type { ExportKind } from "./ExportMenu.js";
 import type { Project } from "./project.js";
 
 export interface MountOptions {
@@ -14,8 +15,11 @@ export interface MountOptions {
   fetch?: typeof fetch;
   /** Keep the page's CSS for plain elements (h1 { … }, td { … }) out of the dashboard. Default `true`. */
   isolate?: boolean;
-  /** The Excel and 印刷・PDF buttons in the dashboard's heading. Default `true`. */
-  exports?: boolean;
+  /**
+   * The ファイル出力 menu in the dashboard's heading (Excel, 印刷・PDF, CSV). Default `true`; `false` leaves it out, a
+   * list such as `["xlsx", "pdf"]` offers only those.
+   */
+  exports?: boolean | readonly ExportKind[];
   /**
    * Values of the dashboard's parameters (`{ customer: 1024 }`). Mounting again with other values sets them, keeping
    * the rest of the dashboard as it is.

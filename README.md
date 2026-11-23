@@ -6,7 +6,7 @@
 
 **ライブデモ: <https://ishibashi0112.github.io/devbi/demo/>**（作者の OSS の npm のダウンロード数と GitHub のリポジトリの数字。毎朝 GitHub Actions が取り直して GitHub Pages に置く静的サイト。中身は [`examples/oss`](examples/oss)）
 
-構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）、§5 の 2（埋め込みと読み取り API）、§5 の 3（GUI エディタと npm に出す準備）ができました。§5 の 4（広げる）は、ダッシュボードの Excel・PDF への書き出しから始めています（見出しの右の「Excel」「印刷・PDF」）。
+構想と決定事項は [docs/handoff.md](docs/handoff.md)。§5 の 1（ランタイム）、§5 の 2（埋め込みと読み取り API）、§5 の 3（GUI エディタと npm に出す準備）ができました。§5 の 4（広げる）は、ダッシュボードの Excel・PDF への書き出しから始めています（見出しの右の「ファイル出力」のメニュー。Excel・印刷・PDF・CSV）。
 
 ## 動かす
 
@@ -39,7 +39,7 @@ e2e の `@playwright/test` は 1.63.0 に固定しています（Claude Code on 
 | パス | npm 名 | 中身 |
 | --- | --- | --- |
 | `packages/devbi` | `devbi` | ファイル形式（metrics.yaml / dash.json の検証）、指標 → DuckDB SQL のコンパイラ、Malloy のクエリを SQL にする（Malloy は使うときだけ読み込む）、xlsx の読み書き（依存なし。書式つきの書き出しは ashiato のものを流用）、書式、`TileProps` などの型。ブラウザでも Node でも動く |
-| `packages/react` | `@devbi/react` | DuckDB-wasm のエンジン、Mosaic の Selection でのクロスフィルタ、組み込みタイル、`<Dashboard>` / `<DevbiApp>`、Excel・PDF（印刷）への書き出し、ほかのページへの埋め込み（`mountDashboard`、`startEmbed`） |
+| `packages/react` | `@devbi/react` | DuckDB-wasm のエンジン、Mosaic の Selection でのクロスフィルタ、組み込みタイル、`<Dashboard>` / `<DevbiApp>`、「ファイル出力」（Excel・CSV・PDF（印刷））、ほかのページへの埋め込み（`mountDashboard`、`startEmbed`） |
 | `packages/vite` | `@devbi/vite` | Vite プラグイン。`virtual:devbi` で dashboards/ と models/ と昇格タイルを渡し、ビルドで data/ をコピー。`embed: true` で埋め込み用の `devbi-embed.js` も作る |
 | `packages/editor` | `@devbi/editor` | GUI エディタ。Vite の開発サーバーでだけ動き、react-grid-layout でタイルを並べ、設定欄でタイルの種類・データを変えて、dash.json を手書きと同じ形で保存する。「コードにする」でタイルを .tsx に書き出す（書き込み口は `@devbi/vite`）。ビルドには入らない |
 | `packages/server` | `@devbi/server` | 読み取り API（サーバーの `api/*.sql` を読み取り専用で実行し、Arrow で返す。SQLite・PostgreSQL・SQL Server・Oracle・MySQL）、`devbi-serve`（ビルドしたサイトと API を 1 つのプロセスで出し、毎朝のスナップショットを作る）、`devbi-snapshot`（スナップショットをいま作る。タスクスケジューラ用）。DB への接続は ashiato のアダプタの作りを流用 |

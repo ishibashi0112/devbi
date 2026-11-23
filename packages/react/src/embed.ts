@@ -1,4 +1,5 @@
 import type { Theme } from "./Dashboard.js";
+import { EXPORT_KINDS } from "./ExportMenu.js";
 import { mountDashboard, unmountDashboard, type MountOptions, type MountedDashboard } from "./mount.js";
 import { loadProject, type Project, type ProjectInput } from "./project.js";
 
@@ -52,8 +53,21 @@ export function optionsFromAttributes(el: Element): MountOptions {
     ...(values ? { params: values } : {}),
     ...(api ? { apiUrl: api } : {}),
     ...(THEMES.includes(theme) ? { theme: theme as Theme } : {}),
-    ...(exports === "false" ? { exports: false } : {}),
+    ...(exports === null ? {} : exportsFromAttribute(exports)),
   };
+}
+
+/**
+ * `data-devbi-exports`: `false` (no ファイル出力 menu), or the kinds to offer (`xlsx,pdf`). A name it does not know is
+ * left out, with an error in the console (so a mistyped list offers less, not more).
+ */
+function exportsFromAttribute(value: string): Pick<MountOptions, "exports"> {
+  const words = value.trim().toLowerCase().split(/[\s,]+/).filter(Boolean);
+  if (words.length === 0 || (words.length === 1 && words[0] === "true")) return {};
+  if (words.length === 1 && words[0] === "false") return { exports: false };
+  const unknown = words.filter((w) => !(EXPORT_KINDS as readonly string[]).includes(w));
+  if (unknown.length) console.error(`DevBI: data-devbi-exports の ${unknown.join(", ")} は使えません（${EXPORT_KINDS.join("・")}、または false）`);
+  return { exports: EXPORT_KINDS.filter((k) => words.includes(k)) };
 }
 
 /**
