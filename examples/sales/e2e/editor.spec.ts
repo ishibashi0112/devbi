@@ -7,6 +7,8 @@ import path from "node:path";
 const root = path.resolve(import.meta.dirname, "..");
 const work = path.join(root, "e2e-work");
 const original = readFileSync(path.join(root, "dashboards/sales.dash.json"), "utf8");
+const report = readFileSync(path.join(root, "dashboards/sales-report.dash.json"), "utf8");
+const reportFile = path.join(work, "dashboards/sales-report.dash.json");
 const metrics = readFileSync(path.join(root, "models/sales.metrics.yaml"), "utf8");
 const salesFile = path.join(work, "dashboards/sales.dash.json");
 const newFile = path.join(work, "dashboards/monthly.dash.json");
@@ -17,6 +19,7 @@ test.describe.configure({ mode: "serial" });
 
 test.beforeEach(() => {
   writeFileSync(salesFile, original);
+  rmSync(reportFile, { force: true });
   writeFileSync(path.join(work, "models/sales.metrics.yaml"), metrics);
   rmSync(newFile, { force: true });
   for (const f of readdirSync(tilesDir)) if (f !== "TopCustomers.tsx") rmSync(path.join(tilesDir, f));
@@ -445,6 +448,42 @@ test("the property panel: an explore tile reads the rows, its first layout writt
     options: { layout: { group_by: ["地域"], columns: ["金額"] } },
   });
   expect(errors).toEqual([]);
+});
+
+test("the property panel: a report's table, its columns and groups written as JSON lists", async ({ page }) => {
+  // The report (a second dashboard) only for this test: #/ opens the only one in the others.
+  writeFileSync(reportFile, report);
+  await page.goto("/#/sales-report");
+  await expect(page.getByRole("heading", { name: "受注明細レポート", level: 1 })).toBeVisible();
+  await page.getByRole("button", { name: "編集", exact: true }).click();
+  await expect(page.getByText("dashboards/sales-report.dash.json")).toBeVisible();
+  const headers = item(page, "customers").locator("[role=columnheader] .ssg-header-label");
+  await expect(headers).toHaveText(["地域", "顧客", "受注数", "数量", "金額"]);
+  await pick(page, "customers");
+  const p = panel(page);
+
+  // A list, not an object: what is wrong shows under it, and nothing is written.
+  const groups = p.getByLabel("グループ");
+  await expect(groups).toHaveValue(JSON.stringify(["地域"], null, 2));
+  await groups.fill('{ "地域": true }');
+  await groups.blur();
+  await expect(p.getByText("[ ] で囲んだ JSON の配列にしてください")).toBeVisible();
+  await groups.fill("[]");
+  await groups.blur();
+  await expect(p.getByText("[ ] で囲んだ JSON の配列にしてください")).toHaveCount(0);
+  await expect(headers).toHaveText(["顧客", "受注数", "数量", "金額"]);
+
+  const columns = p.getByLabel("列", { exact: true });
+  await columns.fill('[{ "field": "顧客ID", "hidden": true }, "顧客", { "field": "金額", "format": "¥#,##0" }]');
+  await columns.blur();
+  await expect(headers).toHaveText(["顧客", "金額"]);
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const saved = JSON.parse(readFileSync(reportFile, "utf8")) as { tiles: { id: string; options?: Record<string, unknown> }[] };
+  const options = saved.tiles.find((t) => t.id === "customers")?.options;
+  expect(options?.columns).toEqual([{ field: "顧客ID", hidden: true }, "顧客", { field: "金額", format: "¥#,##0" }]);
+  expect(options).not.toHaveProperty("groupBy");
+  expect(options?.click).toEqual({ params: { customer: "顧客ID" } });
 });
 
 test("the property panel: a query written in Malloy or SQL shows on the tile at once, and so does what is wrong with it", async ({ page }) => {

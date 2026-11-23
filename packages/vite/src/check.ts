@@ -18,6 +18,7 @@ import {
   customTable,
   customViews,
   dashboardParams,
+  tableOptions,
   tileBindings,
   sqlColumns,
   withSources,
@@ -437,6 +438,13 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
             continue;
           }
           const info = TILE_TYPES[t.type as keyof typeof TILE_TYPES];
+          // The options of a report's table (columns, groupBy…) on a table of the metrics files: the table shows every
+          // column of its query and ignores them.
+          const datasetOnly = Object.entries((info as TileTypeInfo).options ?? {})
+            .filter(([k, o]) => o.dataset && t.options !== undefined && Object.hasOwn(t.options, k))
+            .map(([k]) => `options.${k}`);
+          if (datasetOnly.length && t.query?.dataset === undefined)
+            fail(`${datasetOnly.join("・")} はデータセットの表（query.dataset）だけで使えます。指標ファイルの表は query の列をすべて出します`);
           if (!info.query) {
             tile.note = "データを読まないタイル";
             if (t.type === "date-range") {
@@ -516,6 +524,16 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
                   `${t.component} の query: パラメーター ${lost.map((b) => b.param).join("・")} の欄がありません（dash.json のタイルの query に dataset を書くか、params に type を書いてください）`,
                 );
             }
+          }
+          if (t.type === "table") {
+            // The table's options as the tile reads them; the columns they name are checked when the page reads the rows.
+            const { options: opts, problems } = tableOptions(t.options);
+            for (const p of problems) fail(p);
+            const lost = Object.keys(opts.click?.params ?? {}).filter((n) => !bar.some((p) => p.name.toLowerCase() === n.toLowerCase()));
+            if (lost.length)
+              fail(
+                `options.click の ${lost.join("・")} はこのダッシュボードのパラメーターにありません（dash.json の params に type を書くか、そのパラメーターを使うデータセットの表を置いてください）`,
+              );
           }
           tile.note ??= info
             ? `データセット ${name}（api/${name}.sql）を読むタイル（データベースから読むため行は数えていません）`

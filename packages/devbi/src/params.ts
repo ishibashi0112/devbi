@@ -596,3 +596,74 @@ export function choiceValue(v: unknown, p: { type?: ParamType } = {}): Exclude<P
   if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return v;
   return String(v);
 }
+
+/**
+ * A parameter's default when it is one fixed value (no day word, no `all`, no list; null for an optional one without a
+ * default): the same every day, so a morning snapshot can hold it. Undefined otherwise.
+ */
+function fixedDefault(p: DashboardParam): ParamScalar | undefined {
+  if (p.multiple) return undefined;
+  const d = p.default;
+  if (d === undefined) return p.optional ? null : undefined;
+  if (Array.isArray(d) || (typeof d === "string" && isDayWord(p, d)) || defaultIssue(p)) return undefined;
+  const v = resolveDefault(p, { now: new Date(0) });
+  return v === undefined || Array.isArray(v) ? undefined : v;
+}
+
+/**
+ * What a dataset query (a tile's, or a parameter's choices: `{ dataset }`) sends while every parameter is its default,
+ * when that is the same every day: each value fixed (see {@link fixedDefault}) and none a list. What its morning
+ * snapshot (`-- snapshot:`) is made with. Undefined when there is no such set.
+ */
+export function defaultRequest(
+  params: readonly DashboardParam[],
+  query: { dataset: string; params?: Record<string, ParamBinding> },
+  dataset: DatasetInfo,
+): Record<string, ParamScalar> | undefined {
+  const out: Record<string, ParamScalar> = {};
+  for (const b of tileBindings({ id: "", x: 0, y: 0, w: 1, h: 1, query }, dataset)) {
+    if (b.param === undefined) {
+      // The tile's own value, as it sends it.
+      if (Array.isArray(b.value) || b.value === undefined) return undefined;
+      out[b.name] = b.value;
+      continue;
+    }
+    const p = params.find((x) => lower(x.name) === lower(b.param!));
+    const v = p ? fixedDefault(p) : undefined;
+    if (v === undefined) return undefined;
+    out[b.name] = v;
+  }
+  return out;
+}
+
+/** A dataset query a dashboard sends as it opens, with the same values every day. */
+export interface DefaultRequest {
+  dataset: string;
+  params: Record<string, ParamScalar>;
+  /** A tile reads it (`tile`), or a parameter's choices (`choices`). */
+  for: "tile" | "choices";
+}
+
+/**
+ * The dataset queries a dashboard sends as it opens that are the same every day (its tiles' and its parameters'
+ * choices', at their defaults): those a morning snapshot can answer. One per dataset and set of values.
+ */
+export function defaultRequests(
+  dashboard: { tiles: readonly TileSpec[]; params?: Record<string, DashboardParamSpec> },
+  datasets: Record<string, DatasetInfo>,
+): DefaultRequest[] {
+  const { params } = dashboardParams(dashboard, datasets);
+  const out = new Map<string, DefaultRequest>();
+  const add = (query: { dataset: string; params?: Record<string, ParamBinding> }, kind: DefaultRequest["for"]) => {
+    const info = Object.hasOwn(datasets, query.dataset) ? datasets[query.dataset] : undefined;
+    const values = info ? defaultRequest(params, query, info) : undefined;
+    if (!values) return;
+    const key = JSON.stringify([query.dataset, Object.keys(values).sort().map((k) => [k, values[k]])]);
+    const seen = out.get(key);
+    if (!seen) out.set(key, { dataset: query.dataset, params: values, for: kind });
+    else if (kind === "tile") seen.for = "tile";
+  };
+  for (const t of datasetTiles(dashboard.tiles)) add(t.query as { dataset: string; params?: Record<string, ParamBinding> }, "tile");
+  for (const p of params) if (p.values) add({ dataset: p.values }, "choices");
+  return [...out.values()];
+}

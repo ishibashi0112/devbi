@@ -52,11 +52,27 @@ export function resultCell(value: unknown, field: FieldFormat | undefined, fisca
 
 /**
  * Write a query result as a table from the sheet's next row: a header of the fields' labels, then a row per result
- * row, with an auto filter and the header kept in view. Returns the header's zero-based row.
+ * row, with an auto filter and the header kept in view. Returns the header's zero-based row. `total`: a totals row
+ * under the table (in bold, outside the filter), labelled 合計 in its first column when that has no value.
  */
-export function addResultTable(sheet: Sheet, rows: readonly Row[], fields: readonly FieldInfo[], options: { fiscalYearStart?: number } = {}): number {
+export function addResultTable(
+  sheet: Sheet,
+  rows: readonly Row[],
+  fields: readonly FieldInfo[],
+  options: { fiscalYearStart?: number; total?: Row } = {},
+): number {
   const header = sheet.add(...fields.map((f) => ({ v: f.label, s: TABLE_STYLES.header })));
   for (const row of rows) sheet.add(...fields.map((f) => resultCell(row[f.name], f, options.fiscalYearStart)));
+  const total = options.total;
+  if (total) {
+    sheet.add(
+      ...fields.map((f, i) =>
+        i === 0 && (total[f.name] === null || total[f.name] === undefined)
+          ? { v: "合計", s: TABLE_STYLES.total }
+          : resultCell(total[f.name], f, options.fiscalYearStart, TABLE_STYLES.total),
+      ),
+    );
+  }
   sheet.freeze = { rows: header + 1 };
   if (rows.length > 0 && fields.length > 0) sheet.filter = [header, header + rows.length, fields.length];
   return header;

@@ -23,6 +23,21 @@ test("a dashboard on a morning snapshot reads the saved file, not the database, 
   expect(errors).toEqual([]);
 });
 
+test("a report's choices on a morning snapshot: the page reads the saved file, not the database", async ({ page }) => {
+  // api/regions.sql (the regions' choices of sales-report) has "-- snapshot: 06:00" and no parameters: one file.
+  const requests: string[] = [];
+  page.on("request", (r) => {
+    if (/\/(api|snapshots)\//.test(r.url())) requests.push(`${r.method()} ${new URL(r.url()).pathname} ${r.postDataJSON()?.name ?? ""}`.trim());
+  });
+  await page.goto("/#/sales-report?from=2024-04-01");
+  await expect(page.locator('[data-param="regions"]').getByRole("button")).toHaveText("すべて（6）");
+  await expect(tile(page, "lines")).toContainText("J10001");
+  expect(requests).toContain("GET /snapshots/regions.arrows");
+  expect(requests).not.toContain("POST /api/query regions");
+  // Choices are not a tile: no "as of" note on the tiles.
+  await expect(page.locator(".devbi-tile-note")).toHaveCount(0);
+});
+
 test("the list of dashboards says which ones are taken every morning", async ({ page }) => {
   await page.goto("/");
   const items = page.locator(".devbi-index li");

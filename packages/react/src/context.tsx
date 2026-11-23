@@ -11,6 +11,8 @@ import {
   customTable,
   customViews,
   QueryError,
+  defaultRequests,
+  snapshotFile,
   sqlColumns,
   withSources,
   formatValue,
@@ -47,10 +49,23 @@ export interface DevbiContextValue {
   params: DashboardParams;
   /** The rows of a dataset (`api/<name>.sql`) with these parameter values: the last few are kept until 更新. */
   readDataset(name: string, params: Record<string, ParamValue>): Promise<DatasetResult>;
-  /** 更新: read the datasets again (the tiles and the choices). */
+  /** 更新: read the datasets again from the database (the tiles and the choices; no morning snapshots from then on). */
   refresh(): void;
   /** The metrics view a query uses (its own `metrics`, else the dashboard's, else the only one). */
   view(name?: string): MetricsView;
+  /** The dataset tables on the page, by tile id: what each shows now, for the Excel export. */
+  tables: Map<string, () => TableExport | undefined>;
+}
+
+/** What a dataset table shows now: its columns, and its rows as the viewer filtered and sorted them. */
+export interface TableExport {
+  /** The columns shown, in their order, with their labels and formats. */
+  fields: FieldInfo[];
+  rows: Row[];
+  /** The totals row (`options.totals`), of the rows shown. */
+  total?: Row;
+  /** The viewer has filtered the table (its search box or a column's filter). */
+  filtered: boolean;
 }
 
 /** How many dataset results a dashboard keeps (a result may be a million rows). */
@@ -130,6 +145,20 @@ export function DevbiProvider({
     };
     let engine: Promise<Engine> | undefined;
     const results = new Map<string, Promise<DatasetResult>>();
+    // The dataset queries the dashboard opens with that a morning snapshot answers (`-- snapshot:`): read from its
+    // file while the values are those; any other values ask the API.
+    const snapshots = new Set(
+      defaultRequests(dashboard, project.datasets)
+        .filter((r) => Object.hasOwn(project.snapshots, r.dataset))
+        .map((r) => snapshotFile(r.dataset, r.params)),
+    );
+    // 更新 reads the database: from then on, no snapshot files.
+    let refreshed = false;
+    const snapshotOf = (name: string, values: Record<string, ParamValue>): string | undefined => {
+      if (refreshed || !snapshots.size || Object.values(values).some(Array.isArray)) return undefined;
+      const file = snapshotFile(name, values as Record<string, Exclude<ParamValue, unknown[]>>);
+      return snapshots.has(file) ? file : undefined;
+    };
     const readDataset = (name: string, values: Record<string, ParamValue>): Promise<DatasetResult> => {
       const k = JSON.stringify([name, values]);
       let p = results.get(k);
@@ -140,6 +169,7 @@ export function DevbiProvider({
         return p;
       }
       const info = Object.hasOwn(project.datasets, name) ? project.datasets[name] : undefined;
+      const snapshot = snapshotOf(name, values);
       p = loadChunk(() => import("./dataset.js")).then((m) =>
         m.readDataset({
           name,
@@ -147,6 +177,7 @@ export function DevbiProvider({
           ...apiFolder(project),
           fetch: project.fetch ?? fetch.bind(globalThis),
           ...(info?.key ? { key: info.key } : {}),
+          ...(snapshot ? { snapshot } : {}),
         }),
       );
       results.set(k, p);
@@ -165,10 +196,12 @@ export function DevbiProvider({
       params: store,
       readDataset,
       refresh() {
+        refreshed = true;
         results.clear();
         store.refresh();
       },
       view,
+      tables: new Map(),
     };
   }, [project, dashboard]);
   // The choices (and `default=all`) are read once the dashboard is on the page, with or without the bar (the GUI
@@ -202,15 +235,22 @@ function datasetOf(ctx: DevbiContextValue, name: string) {
   return info;
 }
 
-/** The rows of a dataset tile, with the dashboard's parameters. */
-async function runDataset(ctx: DevbiContextValue, query: Query): Promise<{ rows: Row[]; fields: FieldInfo[] }> {
+/** The rows of a dataset tile, with the dashboard's parameters (and the snapshot they came from, when they did). */
+async function runDataset(ctx: DevbiContextValue, query: Query): Promise<QueryResult> {
   const info = datasetOf(ctx, query.dataset!);
   const req = ctx.params.request(query, info);
   if ("missing" in req) throw new ParamsNeeded(req.missing);
   if ("waiting" in req) throw new ParamsWaiting();
   if ("error" in req) throw new QueryError(req.error);
-  const { rows, fields } = await ctx.readDataset(query.dataset!, req.params);
-  return { rows, fields };
+  const { rows, fields, snapshot } = await ctx.readDataset(query.dataset!, req.params);
+  return { rows, fields, ...(snapshot ? { snapshot } : {}) };
+}
+
+/** A query's rows and fields; for a dataset read from a morning snapshot, which file and when it was made. */
+export interface QueryResult {
+  rows: Row[];
+  fields: FieldInfo[];
+  snapshot?: { file: string; at: Date };
 }
 
 export interface QueryState {
@@ -220,6 +260,8 @@ export interface QueryState {
   filters: Filter[];
   loading: boolean;
   error: Error | null;
+  /** A dataset's rows read from its morning snapshot: the file and when it was made. */
+  snapshot?: { file: string; at: Date };
 }
 
 /** The fields of a view that selections are on: its dimensions and its time. */
@@ -273,7 +315,7 @@ export function crossFilters(ctx: DevbiContextValue, query: Query, tileId: strin
 }
 
 /** Run a query on the dashboard's data with these filters (from {@link crossFilters}) besides its own. */
-export async function runQuery(ctx: DevbiContextValue, query: Query, filters: Filter[]): Promise<{ rows: Row[]; fields: FieldInfo[] }> {
+export async function runQuery(ctx: DevbiContextValue, query: Query, filters: Filter[]): Promise<QueryResult> {
   if (query.dataset !== undefined) return runDataset(ctx, query);
   if (customQuery(query)) return runCustom(ctx, query, filters);
   const view = ctx.view(query.metrics);
@@ -391,15 +433,15 @@ export function useDevbiQuery(query: Query | null | undefined, options: { tileId
     }
     setState((s) => ({ ...s, loading: true }));
     runQuery(ctx, query, filters).then(
-      ({ rows, fields }) => {
-        if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null });
+      ({ rows, fields, snapshot }) => {
+        if (seq.current === mine) setState({ rows, fields, filters, loading: false, error: null, ...(snapshot ? { snapshot } : {}) });
       },
       (e: unknown) => {
         if (seq.current !== mine) return;
         // Waiting for the choices (default=all): still loading. Parameters to fill in: no rows (the tile says which).
         if (e instanceof ParamsWaiting) return;
         if (e instanceof ParamsNeeded) setState({ rows: [], fields: [], filters, loading: false, error: e });
-        else setState((s) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
+        else setState(({ snapshot: _, ...s }) => ({ ...s, loading: false, error: e instanceof Error ? e : new Error(String(e)) }));
       },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -57,15 +57,15 @@ namespace DevBI.Server.Tests
             Assert.Contains("受注の明細", text);
             using var doc = JsonDocument.Parse(text);
             var all = doc.RootElement.GetProperty("datasets").EnumerateArray().ToList();
-            Assert.Equal(new[] { "order_lines", "orders", "regions", "sales_daily" }, all.Select(d => d.GetProperty("name").GetString()));
-            var orders = all[1];
+            Assert.Equal(new[] { "customer_totals", "customers", "order_lines", "orders", "regions", "sales_daily" }, all.Select(d => d.GetProperty("name").GetString()));
+            var orders = all[3];
             Assert.Equal(new[] { "name", "description", "params", "parameters", "connection" }, orders.EnumerateObject().Select(p => p.Name));
             Assert.Equal("[{\"name\":\"from\",\"type\":\"date\",\"label\":\"受注日（から）\"}]", orders.GetProperty("parameters").GetRawText());
             Assert.Equal("DEVBI_DB", orders.GetProperty("connection").GetString());
             Assert.Equal(new[] { "from" }, orders.GetProperty("params").EnumerateArray().Select(p => p.GetString()));
-            Assert.Equal(new[] { "受注番号", "行番号" }, all[0].GetProperty("key").EnumerateArray().Select(p => p.GetString()));
-            Assert.Equal(new[] { "06:00" }, all[3].GetProperty("snapshot").EnumerateArray().Select(p => p.GetString()));
-            Assert.StartsWith("日・地域・商品分類", all[3].GetProperty("description").GetString());
+            Assert.Equal(new[] { "受注番号", "行番号" }, all[2].GetProperty("key").EnumerateArray().Select(p => p.GetString()));
+            Assert.Equal(new[] { "06:00" }, all[5].GetProperty("snapshot").EnumerateArray().Select(p => p.GetString()));
+            Assert.StartsWith("日・地域・商品分類", all[5].GetProperty("description").GetString());
             // devbi-snapshot makes snapshots: none here
             Assert.Equal(0, doc.RootElement.GetProperty("snapshots").GetArrayLength());
         }

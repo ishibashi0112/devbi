@@ -12,6 +12,8 @@ import {
   resultCell,
   sheetRef,
   TABLE_STYLES,
+  tableOptions,
+  tableView,
   tileBindings,
   TILE_TYPES,
   Workbook,
@@ -28,7 +30,7 @@ import {
   type TileSpec,
   type TileTypeInfo,
 } from "devbi";
-import { crossFilters, fieldInfo, queryView, runQuery, type DevbiContextValue } from "../context.js";
+import { crossFilters, fieldInfo, queryView, runQuery, type DevbiContextValue, type TableExport } from "../context.js";
 import { describeFilter, snapshotText } from "../describe.js";
 import { tableToRows } from "../arrow-rows.js";
 import { viewsOf } from "../project.js";
@@ -219,8 +221,13 @@ async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
   const view = queryView(ctx, query);
   const fy = view?.time?.fiscalYearStart ?? 1;
   const result = await runQuery(ctx, query, filters);
-  const cut = result.rows.length > MAX_ROWS - ROOM;
-  if (cut) result.rows = result.rows.slice(0, MAX_ROWS - ROOM);
+  // A report's table: as the viewer has it on the page (the columns shown, filtered, sorted, its totals row), else as
+  // its options first show it. (A table written out as code is on the page as a table too.)
+  const table =
+    query.dataset !== undefined && (tile.type === "table" || ctx.tables.has(tile.id)) ? datasetTable(ctx, tile, result.rows, result.fields) : undefined;
+  const out = table ?? result;
+  const cut = out.rows.length > MAX_ROWS - ROOM;
+  if (cut) out.rows = out.rows.slice(0, MAX_ROWS - ROOM);
   // before the sheet: a pivot too wide for Excel has none
   const pivot = tile.type === "pivot" ? await pivotTable(ctx, tile, query, result, filters, fy) : undefined;
 
@@ -234,13 +241,26 @@ async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
     const own = bound.filter((b) => b.param === undefined).map((b) => `${b.name} ${paramValueText(b.value)}`);
     const fromBar = paramsText(ctx, bound.flatMap((b) => (b.param === undefined ? [] : [b.param])));
     sheet.add({ v: `パラメーター: ${[fromBar, ...own].filter(Boolean).join("、") || "なし"}`, s: S.note, noWidth: true });
+    if (table?.filtered) sheet.add({ v: "表の検索・列のフィルターで絞った行です", s: S.note, noWidth: true });
   } else {
     sheet.add({ v: `絞り込み: ${filtersText(view, result.fields, [...(query.filters ?? []), ...filters])}`, s: S.note, noWidth: true });
   }
   sheet.skip();
   if (pivot) pivot.write(sheet);
-  else addResultTable(sheet, result.rows, result.fields, { fiscalYearStart: fy });
-  return { tile, sheet, rows: pivot?.rows ?? result.rows.length, ...(cut ? { note: "Excel の行数の上限までです" } : {}) };
+  else addResultTable(sheet, out.rows, out.fields, { fiscalYearStart: fy, ...(table?.total ? { total: table.total } : {}) });
+  return { tile, sheet, rows: pivot?.rows ?? out.rows.length, ...(cut ? { note: "Excel の行数の上限までです" } : {}) };
+}
+
+/** A dataset table's sheet: what the table on the page shows, else its rows with its options (no options: undefined). */
+function datasetTable(ctx: DevbiContextValue, tile: TileSpec, rows: readonly Row[], fields: FieldInfo[]): TableExport | undefined {
+  const shown = ctx.tables.get(tile.id)?.();
+  if (shown && shown.fields.length) return shown;
+  // A table written out as code has its options in its file: its rows as they came.
+  if (tile.type !== "table") return undefined;
+  const { options, problems } = tableOptions(tile.options);
+  if (problems.length) return undefined;
+  const view = tableView(fields, rows, options);
+  return { ...view, rows: [...view.rows], filtered: false };
 }
 
 /**

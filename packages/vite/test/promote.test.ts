@@ -107,6 +107,16 @@ describe("promoted tile files", () => {
       ].join("\n"),
     );
     expect(source).toContain("指標と軸の名前で書く");
+    // A report's table (a dataset): its SQL file, not the metrics' names; its options in the file.
+    const report = promotedTileSource(
+      { id: "c", type: "table", query: { dataset: "customer_totals" }, options: { columns: ["顧客", { field: "金額", format: "¥#,##0" }], totals: true } },
+      { name: "C" },
+    );
+    expect(report).toContain("// 何を出すか（api/customer_totals.sql の SQL の結果。パラメーターはダッシュボードの欄の値）");
+    expect(report).toContain(`export const query = defineQuery({ dataset: "customer_totals" });`);
+    expect(report).toContain("// 列は api/customer_totals.sql の SELECT の列。");
+    expect(report).not.toContain("指標と軸の名前で書く");
+    expect(report).toContain("return <Builtin {...props} tile={{ ...props.tile, options }} />;");
     // A key that is not a name, and one that would set the prototype.
     const options = promotedTileSource({ id: "m", type: "markdown", options: { "a-b": 1, ["__proto__"]: 2 } }, { name: "M" });
     expect(options).toContain(`const options = { "a-b": 1, ["__proto__"]: 2 };`);

@@ -4,6 +4,7 @@ import {
   choiceValue,
   dashboardParams,
   dayWord,
+  defaultRequests,
   defineDashboard,
   hasValue,
   paramsFromSearch,
@@ -211,6 +212,42 @@ describe("defaults", () => {
     expect(choiceValue(new Date(Date.UTC(2026, 3, 1, 9, 0, 30)), { type: "datetime" })).toBe("2026-04-01T09:00:30");
     expect(choiceValue("2026-04-01 09:00:00", { type: "datetime" })).toBe("2026-04-01T09:00");
     expect([choiceValue(12n), choiceValue(2n ** 60n)]).toEqual([12, "1152921504606846976"]);
+  });
+});
+
+describe("the requests a morning snapshot can answer", () => {
+  const fixed: Record<string, DatasetInfo> = {
+    ...datasets,
+    by_month: {
+      parameters: [
+        { name: "month", type: "date", default: "2026-04-01" },
+        { name: "region", type: "text", optional: true, values: "regions" },
+        { name: "top", type: "integer", default: "10" },
+      ],
+    },
+    this_month: { parameters: [{ name: "month", type: "date", default: "month_start" }] },
+  };
+  it("the tiles' and the choices' queries whose defaults are fixed values, once each", () => {
+    const d = { tiles: [tile("a", { dataset: "by_month" }), tile("b", { dataset: "by_month" }, 4), tile("c", { dataset: "regions" }, 8)] };
+    expect(defaultRequests(d, fixed)).toEqual([
+      { dataset: "by_month", params: { month: "2026-04-01", region: null, top: 10 }, for: "tile" },
+      // a tile reads it, and a parameter's choices: once, as a tile's
+      { dataset: "regions", params: {}, for: "tile" },
+    ]);
+  });
+  it("none with a day word, `all` or a list; a tile's own values count, a list of its own does not", () => {
+    expect(defaultRequests({ tiles: [tile("a", { dataset: "this_month" })] }, fixed)).toEqual([]);
+    // order_lines: fiscal_year_start and all. Its choices (regions) have no parameters: those can.
+    expect(defaultRequests({ tiles: [tile("a", { dataset: "order_lines" })] }, fixed)).toEqual([{ dataset: "regions", params: {}, for: "choices" }]);
+    const own = (params: Record<string, unknown>) =>
+      defaultRequests({ tiles: [tile("a", { dataset: "order_lines", params } as TileSpec["query"])] }, fixed);
+    expect(own({ from: "2024-04-01", regions: "関東" })).toEqual([{ dataset: "order_lines", params: { from: "2024-04-01", to: null, regions: "関東" }, for: "tile" }]);
+    expect(own({ from: "2024-04-01", regions: ["関東", "近畿"] })).toEqual([]);
+    // dash.json's default over the SQL's (the region's choices still can)
+    const over = { params: { month: { default: "today" } }, tiles: [tile("a", { dataset: "by_month" })] };
+    expect(defaultRequests(over, fixed)).toEqual([{ dataset: "regions", params: {}, for: "choices" }]);
+    // a required parameter without a default: the page asks for it
+    expect(defaultRequests({ tiles: [tile("a", { dataset: "with_customer" })] }, fixed)).toEqual([]);
   });
 });
 

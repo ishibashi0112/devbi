@@ -123,16 +123,18 @@ function TextInput({
 }
 
 /**
- * An object written as JSON (an explore tile's layout). It is written to dash.json when the box loses focus, when
- * another tile is pressed and on ⌘S (through `registerFlush`), and only when the text is a JSON object; empty removes
- * the key. Until then the text stays as typed, with what is wrong under it.
+ * An object or a list written as JSON (an explore tile's layout, a report table's columns). It is written to dash.json
+ * when the box loses focus, when another tile is pressed and on ⌘S (through `registerFlush`), and only when the text
+ * is JSON of the option's kind (`array`: a list, else an object); empty removes the key. Until then the text stays as
+ * typed, with what is wrong under it.
  */
 function JsonInput({
   value,
+  kind,
   onChange,
   registerFlush,
   ...rest
-}: Ids & { value: unknown; onChange(value: Record<string, unknown> | undefined): void; registerFlush(flush: Flush): () => void }) {
+}: Ids & { value: unknown; kind: "object" | "array"; onChange(value: unknown): void; registerFlush(flush: Flush): () => void }) {
   const shown = value === undefined ? "" : JSON.stringify(value, null, 2);
   const [text, setText] = useState(shown);
   const [error, setError] = useState<string>();
@@ -151,6 +153,11 @@ function JsonInput({
       if (value !== undefined) onChange(undefined);
       return;
     }
+    // Not changed (a groupBy written by hand as one name stays as it is).
+    if (text === shown) {
+      setError(undefined);
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -158,8 +165,8 @@ function JsonInput({
       setError(`JSON として読めません（${(e as Error).message}）`);
       return;
     }
-    if (!isObj(parsed)) {
-      setError("{ } で囲んだ JSON のオブジェクトにしてください");
+    if (kind === "array" ? !Array.isArray(parsed) : !isObj(parsed)) {
+      setError(kind === "array" ? "[ ] で囲んだ JSON の配列にしてください" : "{ } で囲んだ JSON のオブジェクトにしてください");
       return;
     }
     setError(undefined);
@@ -312,7 +319,7 @@ function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemo
         }}
       />
       {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} />}
-      {builtin && Object.keys(TILE_TYPES[builtin].options).length > 0 && (
+      {builtin && shownOptions(builtin, tile).length > 0 && (
         <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} registerFlush={registerFlush} />
       )}
       {builtin && <Promote folder={`dashboards/${name}/`} dirty={dirty} onPromote={() => onPromote(tile.id)} />}
@@ -974,6 +981,13 @@ function SortEditor({ view, query, set }: { view: MetricsView; query: Query; set
 }
 
 /** The tile type's options (TILE_TYPES[type].options). Left at 既定, an option is not written. */
+/** A tile type's options the panel shows: those of a report's table (`dataset`) only for a dataset tile, or once written. */
+function shownOptions(type: BuiltinTileType, tile: RawTile): [string, TileOptionSchema][] {
+  const options = isObj(tile.options) ? tile.options : {};
+  const dataset = isObj(tile.query) && typeof tile.query.dataset === "string";
+  return (Object.entries(TILE_TYPES[type].options) as [string, TileOptionSchema][]).filter(([k, o]) => !o.dataset || dataset || Object.hasOwn(options, k));
+}
+
 function OptionsEditor({
   metrics,
   spec,
@@ -992,7 +1006,7 @@ function OptionsEditor({
   registerFlush(flush: Flush): () => void;
 }) {
   const options = isObj(tile.options) ? tile.options : {};
-  const entries = Object.entries(TILE_TYPES[type].options) as [string, TileOptionSchema][];
+  const entries = shownOptions(type, tile);
   const name = metricsNameOf(metrics, spec, tile);
   const view = name && Object.hasOwn(metrics, name) ? metrics[name] : undefined;
   // The period picker takes its default when it starts: start it over so the change shows.
@@ -1041,7 +1055,8 @@ function OptionsEditor({
       );
     }
     if (o.input === "metrics") return <MetricsSelect {...ids} metrics={metrics} value={str(value)} empty="ダッシュボードと同じ" onChange={(v) => set(key, v)} />;
-    if (o.input === "json") return <JsonInput {...ids} value={value} onChange={(v) => set(key, v)} registerFlush={registerFlush} />;
+    if (o.input === "json")
+      return <JsonInput {...ids} value={value} kind={o.type === "array" ? "array" : "object"} onChange={(v) => set(key, v)} registerFlush={registerFlush} />;
     return <TextInput {...ids} multiline={o.input === "text"} value={str(value)} onChange={(v, merge) => set(key, v, merge)} />;
   };
   return (

@@ -250,6 +250,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
 
   const snapshots = createSnapshots({
     dir: options.dir,
+    env,
     run,
     log,
     exposeErrors: options.exposeErrors ?? false,

@@ -1,40 +1,17 @@
 import { createSpreadsheetGrid, columnAutosizeFeature, columnMenuFeature, type GridColumn } from "@ishibashi0112/spreadsheet-grid/lite";
 import "@ishibashi0112/spreadsheet-grid/style.css";
 import type { Row, TileProps } from "devbi";
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useMemo, useRef, type KeyboardEvent } from "react";
+import { popups, useTheme } from "./grid-theme.js";
 import { dimensions, filterFor, isSelected } from "./util.js";
 
 // Built once, at module level: only the features the table tile uses (sorting from the column menu,
 // fitting column widths). This file loads with the first table on the page, as its own chunk.
 const Grid = createSpreadsheetGrid({ features: { columnMenu: columnMenuFeature, columnAutosize: columnAutosizeFeature } });
-// The column menu and the tooltip sit at the end of the page, outside .devbi-root: give them DevBI's font. (Their colors
-// come from the --ssg-* the grid copies over from the table.)
-const popups = { popover: "devbi-grid-popup", tooltip: "devbi-grid-popup" };
 
 function sameRow(selection: TileProps["selection"], row: Row): boolean | undefined {
   if (!selection.length) return undefined;
   return selection.every((f) => isSelected(selection, f.field, row[f.field] ?? null));
-}
-
-/**
- * The grid follows the dashboard's light / dark, like DevBI's CSS: `data-theme="light"` or `"dark"` on
- * `.devbi-root`, otherwise the OS setting. Watches the attribute, so switching it later works too.
- */
-function useTheme(ref: React.RefObject<HTMLElement | null>): "light" | "dark" | "auto" {
-  const [theme, setTheme] = useState<"light" | "dark" | "auto">("auto");
-  useLayoutEffect(() => {
-    const root = ref.current?.closest(".devbi-root");
-    if (!root) return;
-    const read = () => {
-      const t = root.getAttribute("data-theme");
-      setTheme(t === "light" || t === "dark" ? t : "auto");
-    };
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => observer.disconnect();
-  }, [ref]);
-  return theme;
 }
 
 /** A row's identity: its dimension and time values (each row of a grouped result has its own). */

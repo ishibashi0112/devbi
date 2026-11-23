@@ -36,7 +36,7 @@ namespace DevBI.Server.Tests
             Assert.Equal("application/json; charset=utf-8", r.Content.Headers.ContentType!.ToString());
             Assert.Equal("no-store", r.Headers.CacheControl!.ToString());
             using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
-            Assert.Equal(4, doc.RootElement.GetProperty("datasets").GetArrayLength());
+            Assert.Equal(6, doc.RootElement.GetProperty("datasets").GetArrayLength());
             Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/schema")).StatusCode);
             Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/reports/api/other")).StatusCode);
             // HEAD: the headers without the body

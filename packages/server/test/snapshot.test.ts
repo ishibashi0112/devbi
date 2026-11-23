@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -67,7 +67,7 @@ describe("snapshots (SQLite)", () => {
   it("are the read_api calls in models/ whose SQL has a snapshot line, each once", async () => {
     const { jobs, problems } = await snapshotJobs(dir);
     expect(problems).toEqual([]);
-    expect(jobs).toEqual([{ name: "daily", params: { from: "2026-04-01" }, file: daily, times: ["06:00"], models: ["a", "b"] }]);
+    expect(jobs).toEqual([{ name: "daily", params: { from: "2026-04-01" }, file: daily, times: ["06:00"], models: ["a", "b"], dashboards: [] }]);
   });
 
   it("devbi-serve makes a missing one when asked for it, and sends it with its time", async () => {
@@ -94,7 +94,7 @@ describe("snapshots (SQLite)", () => {
   it("refuses files no read_api in models/ makes, and other methods", async () => {
     const other = await fetch(new URL(`snapshots/${snapshotFile("daily", { from: "2000-01-01" })}`, running.url));
     expect(other.status).toBe(404);
-    expect(((await other.json()) as { error: string }).error).toMatch(/models\/ の read_api で使っているものだけ/);
+    expect(((await other.json()) as { error: string }).error).toMatch(/models\/ の read_api か dashboards\/ のデータセットの表が既定のパラメーターで読むものだけ/);
     expect((await fetch(new URL("snapshots/unused.arrows", running.url))).status).toBe(404);
     expect((await fetch(new URL("snapshots/live.arrows", running.url))).status).toBe(404);
     expect((await fetch(new URL(`snapshots/${daily}`, running.url), { method: "POST" })).status).toBe(405);
@@ -107,7 +107,7 @@ describe("snapshots (SQLite)", () => {
     };
     expect(body.datasets.find((d) => d.name === "daily")?.snapshot).toEqual(["06:00"]);
     expect(body.datasets.find((d) => d.name === "live")?.snapshot).toBeUndefined();
-    expect(body.snapshots).toEqual([expect.objectContaining({ file: daily, models: ["a", "b"], updatedAt: expect.any(String) })]);
+    expect(body.snapshots).toEqual([expect.objectContaining({ file: daily, models: ["a", "b"], dashboards: [], updatedAt: expect.any(String) })]);
   });
 
   it("devbi-serve makes them when it starts", async () => {
@@ -191,6 +191,44 @@ describe("snapshots (SQLite)", () => {
     } finally {
       await few.close();
       await blocked.close();
+    }
+  });
+
+  it("dashboards add their dataset tables and choices with fixed defaults; a word, all or a list makes none", async () => {
+    const d = mkdtempSync(path.join(tmpdir(), "devbi-dash-snapshot-"));
+    for (const f of ["api", "dashboards"]) mkdirSync(path.join(d, f));
+    const sql = (name: string, text: string) => writeFileSync(path.join(d, "api", `${name}.sql`), text);
+    sql("regions", "-- snapshot: 06:00\nSELECT DISTINCT region FROM orders\n");
+    sql("by_region", "-- snapshot: 06:00\n-- param: from date default=2026-04-01\n-- param: region text optional values=regions\nSELECT region FROM orders WHERE order_date >= :from AND (:region IS NULL OR region = :region)\n");
+    sql("this_year", "-- snapshot: 06:00\n-- param: since date default=fiscal_year_start\nSELECT 1 AS one WHERE :since IS NOT NULL\n");
+    sql("live", "-- param: n integer default=3\nSELECT :n AS n\n");
+    const dash = (name: string, spec: unknown) => writeFileSync(path.join(d, "dashboards", `${name}.dash.json`), JSON.stringify(spec));
+    const table = (id: string, query: unknown, y = 0) => ({ id, x: 0, y, w: 12, h: 4, type: "table", query });
+    dash("report", { title: "r", tiles: [table("a", { dataset: "by_region" }), table("b", { dataset: "this_year" }, 4), table("c", { dataset: "live" }, 8)] });
+    // The tile's own values: one more set, under the same file name rules.
+    dash("kanto", { title: "k", tiles: [table("a", { dataset: "by_region", params: { region: "関東" } })] });
+    dash("broken", { title: "b", tiles: "none" });
+    try {
+      const { jobs, problems } = await snapshotJobs(d, {});
+      const job = (name: string, params: Record<string, string | null>, dashboards: string[]) => ({
+        name,
+        params,
+        file: snapshotFile(name, params),
+        times: ["06:00"],
+        models: [],
+        dashboards,
+      });
+      const byFile = (a: { file: string }, b: { file: string }) => a.file.localeCompare(b.file);
+      expect([...jobs].sort(byFile)).toEqual(
+        [
+          job("by_region", { from: "2026-04-01", region: null }, ["report"]),
+          job("by_region", { from: "2026-04-01", region: "関東" }, ["kanto"]),
+          job("regions", {}, ["report"]),
+        ].sort(byFile),
+      );
+      expect(problems).toEqual([expect.stringMatching(/^dashboards\/broken\.dash\.json: tiles/)]);
+    } finally {
+      rmSync(d, { recursive: true, force: true });
     }
   });
 

@@ -24,12 +24,15 @@ function tidy(node: unknown): unknown {
 
 /** An option as JSON Schema: the GUI editor's `label` and `input` stay out; `enumLabels` is VS Code's `enumDescriptions`. */
 function optionSchema(info: TileTypeInfo): JsonSchema {
-  const option = (o: TileOptionSchema): JsonSchema => ({
-    ...(o.type ? { type: o.type } : {}),
-    ...(o.enum ? { enum: o.enum } : {}),
-    ...(o.enumLabels ? { enumDescriptions: o.enumLabels } : {}),
-    description: o.description,
-  });
+  const option = (o: TileOptionSchema): JsonSchema =>
+    o.schema
+      ? { ...o.schema, description: o.description }
+      : {
+          ...(o.type ? { type: o.type } : {}),
+          ...(o.enum ? { enum: o.enum } : {}),
+          ...(o.enumLabels ? { enumDescriptions: o.enumLabels } : {}),
+          description: o.description,
+        };
   return {
     type: "object",
     properties: Object.fromEntries(Object.entries(info.options).map(([k, o]) => [k, option(o)])),

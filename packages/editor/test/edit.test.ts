@@ -102,6 +102,9 @@ describe("changeType", () => {
     expect(changeType(spec, pivot, "pivot", metrics)).toBe(pivot);
     const select = changeType(spec, pivot, "select", metrics);
     expect(select).not.toHaveProperty("options");
+    // A report's table's columns and totals are not a pivot's (and back): neither way keeps them.
+    const report = tile({ type: "table", query: { measures: ["revenue"] }, options: { columns: [{ field: "d" }, "e"], totals: true, search: false } });
+    expect(changeType(spec, report, "pivot", metrics)).not.toHaveProperty("options");
   });
 
   it("takes the tile's own metrics file along: query.metrics to the period picker's options.metrics, and back", () => {

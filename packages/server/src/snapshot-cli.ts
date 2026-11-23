@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // devbi-snapshot [--dir <project>] [--out <site>] [--max-rows N] [--timeout <seconds>] [--debug] [<name>...]
 // Makes the snapshots now (for Windows Task Scheduler or cron, when no devbi-serve runs): each read_api(...) in
-// models/ whose api/<name>.sql has a "-- snapshot:" line, saved as <site>/snapshots/<file>.arrows.
+// models/, and each dataset table of dashboards/ with its default parameters, whose api/<name>.sql has a
+// "-- snapshot:" line, saved as <site>/snapshots/<file>.arrows.
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { loadEnv } from "./env.js";
@@ -12,7 +13,7 @@ const usage = (message?: string): never => {
   console.error(
     [
       "使い方: devbi-snapshot [--dir <プロジェクトのフォルダ>] [--out <サイトのフォルダ>] [--max-rows 1000000] [--timeout 60] [--debug] [<SQL の名前>...]",
-      "api/<名前>.sql に「-- snapshot: 06:00」の行があり、models/ の read_api で使っているものを、いま作ります。",
+      "api/<名前>.sql に「-- snapshot: 06:00」の行があり、models/ の read_api か dashboards/ のデータセットの表（既定のパラメーター）で使っているものを、いま作ります。",
       "置き場所は <サイトのフォルダ>/snapshots/（既定は <プロジェクト>/dist/snapshots/）。接続先は devbi-serve と同じです。",
     ].join("\n"),
   );
@@ -63,8 +64,8 @@ try {
   if (results.length === 0) {
     console.error(
       positionals.length
-        ? `${positionals.join(", ")} のスナップショットはありません（api/ の SQL に -- snapshot: の行があり、models/ の read_api で使っているものだけ作ります）`
-        : "作るスナップショットがありません（api/ の SQL に -- snapshot: 06:00 のような行を書き、models/ の read_api で使います）",
+        ? `${positionals.join(", ")} のスナップショットはありません（api/ の SQL に -- snapshot: の行があり、models/ の read_api か dashboards/ のデータセットの表が既定のパラメーターで読むものだけ作ります）`
+        : "作るスナップショットがありません（api/ の SQL に -- snapshot: 06:00 のような行を書き、models/ の read_api か dashboards/ のデータセットの表で使います）",
     );
     process.exitCode = 1;
   } else {
