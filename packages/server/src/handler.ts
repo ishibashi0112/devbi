@@ -198,12 +198,46 @@ async function* chunksOf(stream: ReadableStream<Uint8Array> | null): AsyncIterab
   }
 }
 
-/** The read-only API: `GET …/api/schema` lists the SQL files, `POST …/api/query` runs one and returns Arrow. */
 /** Row-level mode, and why it is on (for the messages). */
-interface Mode {
+export interface RowLevelMode {
   on: boolean;
   why?: string;
 }
+type Mode = RowLevelMode;
+
+/**
+ * Whether a project is in row-level mode, and why: the host's `requireUser`, an `access/` folder, or the text of an
+ * `api/*.sql` (`:user.`, `roles:` / `access:` in a `--` comment). A file that cannot be read now puts it on.
+ */
+export async function rowLevelMode(dir: string, options: { requireUser?: boolean } = {}): Promise<RowLevelMode> {
+  if (options.requireUser) return { on: true, why: "ホストの設定 requireUser" };
+  if (existsSync(path.join(dir, "access"))) return { on: true, why: "access/ フォルダがあるため" };
+  for (const name of await listDatasets(dir)) {
+    let text: string;
+    try {
+      text = await readDatasetText(dir, name);
+    } catch {
+      // a file that cannot be read now may be one that filters: on, rather than off
+      return { on: true, why: `api/${name}.sql を読めないため` };
+    }
+    const signal = rowLevelSignal(text);
+    if (signal) return { on: true, why: `api/${name}.sql に ${signal} があるため` };
+  }
+  return { on: false };
+}
+
+/** What row-level mode refuses in a file (it does not say who sees which rows, or has a bare `:user`), or undefined. */
+export function rowLevelProblem(dataset: Dataset, mode: RowLevelMode): string | undefined {
+  if (!mode.on) return undefined;
+  const rel = `api/${dataset.name}.sql`;
+  const bare = dataset.params.find(isBareUser);
+  if (bare !== undefined) return `${rel}: 行レベルのモードでは :${bare} は使えません。ログインした人の ID なら :user.id と書きます（行レベルのモード: ${mode.why}）`;
+  if (!dataset.user?.length && dataset.access !== "all") {
+    return `${rel} は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: ${mode.why}）`;
+  }
+  return undefined;
+}
+
 
 /**
  * Who asks: a snapshot job inside DevBI (it runs only `-- access: all` SQL in row-level mode), or a request with the
@@ -261,22 +295,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
    * Row-level mode: the host's `requireUser`, or the project's files using row-level security (an `access/` folder,
    * `:user.`, `-- roles` or `-- access` in the text of an `api/*.sql`). Read again for each request, like the SQL.
    */
-  const modeOf = async (): Promise<Mode> => {
-    if (options.requireUser) return { on: true, why: "ホストの設定 requireUser" };
-    if (existsSync(path.join(options.dir, "access"))) return { on: true, why: "access/ フォルダがあるため" };
-    for (const name of await listDatasets(options.dir)) {
-      let text: string;
-      try {
-        text = await readDatasetText(options.dir, name);
-      } catch {
-        // a file that cannot be read now may be one that filters: on, rather than off
-        return { on: true, why: `api/${name}.sql を読めないため` };
-      }
-      const signal = rowLevelSignal(text);
-      if (signal) return { on: true, why: `api/${name}.sql に ${signal} があるため` };
-    }
-    return { on: false };
-  };
+  const modeOf = (): Promise<Mode> => rowLevelMode(options.dir, options);
   const modeFor = async (asker: Asker): Promise<Mode> => {
     const mode = await modeOf();
     if (!mode.on && !asker.job && asker.viewer && !warnedNoMode) {
@@ -359,18 +378,8 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
 
   /** Row-level mode's rules for one file: it says who sees which rows, and no bare `:user`. Throws DatasetError (400). */
   const checkRowLevel = (dataset: Dataset, mode: Mode) => {
-    if (!mode.on) return;
-    const rel = `api/${dataset.name}.sql`;
-    const bare = dataset.params.find(isBareUser);
-    if (bare !== undefined) {
-      throw new DatasetError(`${rel}: 行レベルのモードでは :${bare} は使えません。ログインした人の ID なら :user.id と書きます（行レベルのモード: ${mode.why}）`, 400);
-    }
-    if (!dataset.user?.length && dataset.access !== "all") {
-      throw new DatasetError(
-        `${rel} は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: ${mode.why}）`,
-        400,
-      );
-    }
+    const problem = rowLevelProblem(dataset, mode);
+    if (problem) throw new DatasetError(problem, 400);
   };
 
   /** Whether the asker may read a file with these `-- roles:` (none: anyone the mode lets in). */
@@ -626,7 +635,8 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       const status = e instanceof HttpError || e instanceof DatasetError ? e.status : 500;
       const message = (e as Error).message;
       if (status >= 500) log(message);
-      a = json(status, { error: message });
+      // A 401 of DevBI's own says it knows row-level security (devbi-check --url; a login in front has its own 401).
+      a = json(status, status === 401 ? { error: message, access: 1 } : { error: message });
     }
     if (method === "HEAD" && a.body) {
       if (a.body instanceof Readable) a.body.destroy();

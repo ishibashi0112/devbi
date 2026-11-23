@@ -1,4 +1,4 @@
-export { createApiHandler, ARROW_STREAM, type ApiHandler, type ApiOptions, type DatasetColumns, type RequestOptions } from "./handler.js";
+export { createApiHandler, rowLevelMode, rowLevelProblem, ARROW_STREAM, type ApiHandler, type ApiOptions, type DatasetColumns, type RequestOptions, type RowLevelMode } from "./handler.js";
 export { viewerOf, accessLines, rowLevelSignal, type DevBIUser, type AccessLines } from "./access.js";
 export { serve, isHostAllowed, type ServeOptions, type RunningServer } from "./serve.js";
 export { connect, dialectOf, loadDriver, type Connection, type ColumnType, type DescribedColumn, type Dialect, type ResultColumn, type ResultSet } from "./connect.js";

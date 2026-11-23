@@ -115,7 +115,10 @@ export async function inspectData(dir: string, target: string | InspectSql, opti
   if ((options.sheet || options.range) && !(file && /\.xlsx$/i.test(file))) {
     throw new Error(`${options.sheet ? "--sheet" : "--range"} は Excel のファイル（.xlsx）を読むときだけです`);
   }
-  const engine = await createNodeEngine(dir, options.env ? { env: options.env } : {});
+  const engine = await createNodeEngine(dir, {
+    ...(options.env ? { env: options.env } : {}),
+    ...(options.user ? { user: options.user, ...(options.userName ? { userName: options.userName } : {}) } : {}),
+  });
   try {
     let from: string;
     if (view) {

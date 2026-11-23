@@ -565,7 +565,7 @@ interface DatasetRegistry {
 
 確かめること:
 
-1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか。[データセットのタイル](#データセットを読むタイルquerydataset)の `api/` の SQL があって読めるか、`query.params` の名前、パラメーターの欄にまとめられるか（型の違い、候補の輪など）
+1. 開発サーバーが読むときと同じ検証。metrics.yaml・dash.json の書き方、`model` が読むデータのファイルと `api/` の SQL があるか、自作タイルのファイルがあるか。`api/*.sql` は、どのダッシュボードも使っていないものも読み、読めないもの（SELECT か WITH の文でない、`-- roles:`・`-- access:` の書き間違いなど）はその SQL ファイルのエラーにします（`devbi-serve` が `api/schema` でエラーを返すもの）。[データセットのタイル](#データセットを読むタイルquerydataset)の `api/` の SQL があって読めるか、`query.params` の名前、パラメーターの欄にまとめられるか（型の違い、候補の輪など）
 2. 指標ファイルごとに、`model` の SQL をデータに流す（行数を出し、0 行なら注意）。`time` の列（日付か日時になっているか）、軸を一つずつ、指標を一つずつ流す（`compare` と `running` の指標は `time: month` でも）
 3. タイルごとに、`query` を SQL にしてデータに流す（行数を出し、0 行なら注意）。`date-range` に最初の期間（`options.default`）があれば、画面を開いたときと同じく、その `time` の列を持つ指標ファイルのタイルをその期間で流す（比較の指標にも値が出る）。`"period": false` のタイルは期間なしで流す。画面が使わない `default`（ない期間の名前や、`fiscal_year_start` のない指標ファイルでの年度）は注意。タイルの種類が要る形か（kpi には指標、bar・line・area には指標と時間か軸、barlist には軸と指標、select には軸、pivot には指標と `options.columns` の列）。自作タイルは、画面と同じく dash.json の `query`、なければファイルの `export const query`（Vite で読む）を流す。`explore` は明細の行を読む SQL を流し、行数を出す（`limit` を超えるときと、`query` に使わないキー（`measures` など）があるときは注意。`--values` では最初の行を `model` の列のまま出す）
 
@@ -605,13 +605,46 @@ dashboards/sales.dash.json: タイル 14（クエリを実行 12、date-range �
     受注日 2026年5月、売上 ¥7,855,210 …
 ```
 
-`devbi-check [--dir <フォルダ>] [--values [行数]] [--json]`:
+### 行レベル制御のプロジェクトを確かめる
+
+[行レベルのモード](#行レベルのモード絞り忘れを止める)のプロジェクトでは、データを読むのにログインした人が要ります。`devbi-check` は、`vite.config.ts` の [`devUsers`](#開発サーバーでこの人として見るdevusers) に書いた人ごとに、その人としてデータを流します（`--as suzuki` なら、その人だけ）。
+
+```
+$ pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts
+行レベルのモードです（api/orders.sql に :user. があるため）。データを yamada・suzuki・sato として流しました
+models/my_sales.metrics.yaml（yamada として）: 2,322 行、指標 2・軸 2
+models/my_sales.metrics.yaml（suzuki として）: 1,325 行、指標 2・軸 2
+models/my_sales.metrics.yaml（sato として）: 確かめていません（sato は API の orders を読めません: 利用者 sato に属性 region がありません（api/orders.sql の :user.region））
+dashboards/my-sales.dash.json（yamada として）: タイル 3（クエリを実行 2）
+  kpi-revenue 1 行、region 1 行
+…
+
+⚠ models/my_sales.metrics.yaml: sato として: 確かめていません: sato は API の orders を読めません: 利用者 sato に属性 region がありません（api/orders.sql の :user.region）
+
+エラー 0 件、注意 1 件
+```
+
+- 最初の行に、行レベルのモードになったわけと、だれとして流したかを出します。人ごとに結果が違うので、指標ファイルとダッシュボードの行は人ごとに出します（`date-range` の最初の期間も、その人の行の最終日から数えるので人ごと）。エラーと注意は、一部の人だけのものに「sato として: 」を付けます（全員に出たものは 1 回）
+- `devUsers` は、今のフォルダかプロジェクトのフォルダの `vite.config.*` の `devbi()` のうち、`--dir` のフォルダを指すもの（`devbi({ dir })` を Vite の root から）から読みます。ほかの名前や場所の設定ファイルは `--config` で指します。`devUsers` がないときはデータを読まず、指標ファイルとタイルは「確かめていません」（注意）です。ファイルの検査（下）はします
+- その人が読めない SQL（`:user.region` の属性がない、`-- roles:` にない役割）は、その人の「確かめていません」の注意です。画面では、その人に 403 が出ます
+- 行レベルのモードでの検査（データベースは使いません）:
+  - だれにどの行を見せるかが書いていない `api/*.sql`（`:user.` も `-- access: all` もない）と、`:user` だけの名前はエラーです
+  - `:user_id`・`:login`・`:社員番号` のような、ログインした人の値らしい名前のふつうのパラメーターは注意です。ブラウザが値を変えられるので、`:user.id` か `:user.<属性>` を使います
+  - `model` が `read_api` の外のファイル（`read_xlsx('data/…')` など）を読むときは注意です。だれが開いても同じ行が届きます（マスタなら問題ありません）
+  - `snapshots/` と `dist/snapshots/` に、今は作らないスナップショットのファイル（人で絞るようになった SQL の全員の行、`-- snapshot:` を消した SQL のものなど）があればエラーです（行レベルのモードでなければ注意）。`devbi-serve` か `devbi-snapshot` を動かすと消えます。IIS などに写したものは、写し先からも消します
+- 二人以上として読めたときは、`:user.` を使う SQL（パラメーターのないもの）、`model` の `read_api`、ダッシュボードの最初の画面のデータセットを、人ごとに流して比べます。その人の値をくり返すだけの列（`SELECT :user.region AS 地域, …`）を除いて、全員に同じ行を返したら、その SQL に注意を出します（`:user.` を書いたのに `WHERE` で絞っていないなど。属性の値が同じ人どうしや、絞っても同じ行になるときは問題ありません。全員 0 行のときは比べません）
+- `--url https://intra.example.com/devbi/` を付けると、置いた先の `api/schema` に、ログインせずに聞いて、API が行レベル制御を知っているか（`"access": 1`）を確かめます。DevBI の `401`（`{ "error": "ログインしていません", "access": 1 }`）なら、行レベルのモードで動いています。行レベルのモードのプロジェクトで、ログインしていない人に SQL の一覧を返したら、置いた先は行レベルのモードで動いていない（新しい `api/*.sql` を置いていない、ホストがログインした人を渡していない、など）ので、エラーです。知らない古い API（アプリにコピーしたままの C# など）は、行レベルのモードならエラー、そうでなければ注意です。DevBI の答えでないとき（サイトのログインの画面や、ほかのログインの `401` が返るなど）、つながらないとき（20 秒まで待ちます）は注意です。サイトのログインが要る場所は、`devbi-check` からは聞けません
+
+`devbi-check [--dir <フォルダ>] [--values [行数]] [--as <devUsers の名前>] [--config <vite.config.ts>] [--url <置いた場所>] [--json]`:
 
 | オプション | 中身 |
 | --- | --- |
 | `--dir` | `models/` のあるフォルダ。既定は今のフォルダ |
 | `--values` | タイルごとに結果の最初の行を、画面と同じ書式で出す。既定は 5 行（`--values 1` で 1 行） |
-| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message }` の一覧）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ。`--values` なら `values` に最初の行）、`periods`（ダッシュボードごとの、流した期間の一覧） |
+| `--as` | `devUsers` のこの人としてだけデータを読む。行レベルのモードでは、付けなければ `devUsers` の全員 |
+| `--config` | `devUsers` を読む Vite の設定ファイル。既定は今のフォルダかプロジェクトのフォルダの `vite.config.*` |
+| `--url` | 置いた先の API が行レベル制御を知っているかを確かめる（上） |
+| `--json` | 結果を JSON で出す。`findings`（`{ level: "error" \| "warning", file, message, as? }` の一覧。`as` は一部の人だけに出たときのその人たち）、`views`（指標ファイルごとの行数）、`tiles`（タイルごとの行数か、流さなかったわけ。`--values` なら `values` に最初の行）、`periods`（ダッシュボードごとの、流した期間の一覧）。行レベルのモードでは `rowLevel`（モードになったわけ）と `as`（流した人）、`views` と `tiles` にも `as`。二人以上なら、期間は `periodsAs`（人ごとの `periods`）で、`periods` は空。`--url` なら `url`（`{ url, access, status, note }`） |
 
 エラーがあれば終了コード 1、注意だけなら 0 です。フォルダに `models/` がないときや、確かめること自体ができなかったとき（DuckDB が動かないなど）は 2 です。
 
@@ -641,7 +674,7 @@ data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列
 - ファイルは、今のフォルダからのパスか、プロジェクトのフォルダからのパスで書きます。プロジェクトの外のファイルも読めます。xlsx・CSV・TSV・Parquet・Arrow・JSON（Parquet と JSON は DuckDB の拡張をインターネットから取ってきます）
 - 値がそのまま出ます。人に渡すときは気をつけてください（`pnpm try-xlsx` は値を出しません）
 
-`devbi-inspect <ファイル | 指標ファイル> [--sheet <シート名>] [--range <セル範囲>] [--values <数>] [--rows <数>] [--dir <フォルダ>] [--json]`、`devbi-inspect --sql "<SELECT>" [...]`:
+`devbi-inspect <ファイル | 指標ファイル> [--sheet <シート名>] [--range <セル範囲>] [--values <数>] [--rows <数>] [--as <devUsers の名前>] [--config <vite.config.ts>] [--dir <フォルダ>] [--json]`、`devbi-inspect --sql "<SELECT>" [...]`:
 
 | オプション | 中身 |
 | --- | --- |
@@ -651,6 +684,8 @@ data/sales.xlsx（シート「明細」の A1:I6045）: 6,044 行、9 列
 | `--sql` | ファイルの代わりに、この SELECT の結果を見る |
 | `--values` | 文字の列に出す多い値の数。既定は 8。0 で出さない |
 | `--rows` | 出す最初の行の数。既定は 10。0 で出さない |
+| `--as` | 行レベルのモードで、`model` の `read_api` を `devUsers` のこの人として読む（[`devbi-check` と同じ](#行レベル制御のプロジェクトを確かめる)）。付けないと、`read_api` の指標ファイルは読めません |
+| `--config` | `devUsers` を読む Vite の設定ファイル（`devbi-check` と同じ） |
 | `--json` | 結果を JSON で出す（`head` に最初の行、`notes` に ⚠ の中身） |
 
 読めないときは終了コード 1 です。
@@ -1112,7 +1147,7 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - `metrics.yaml` と `dash.json` の書き方は変わりません。同じダッシュボードが、人ごとに違う行で動きます。
 - いちばん確かな守りは、今と同じくデータベースの権限です（DevBI のユーザーは SELECT だけ）。
 
-今は、Node のサーバー（`@devbi/server` の `createApiHandler`・`devbi-serve`）と、開発サーバーの「[この人として見る](#開発サーバーでこの人として見るdevusers)」でこの形が動きます。`devbi-check` の確かめ、`devbi-serve` が前のサーバーからユーザー名を受け取る口、C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。それまで `devbi-serve` は利用者を受け取れないので、行レベルのモードでは、どのリクエストも `401` になります。
+今は、Node のサーバー（`@devbi/server` の `createApiHandler`・`devbi-serve`）と、開発サーバーの「[この人として見る](#開発サーバーでこの人として見るdevusers)」、[`devbi-check` の確かめ](#行レベル制御のプロジェクトを確かめる)でこの形が動きます。`devbi-serve` が前のサーバーからユーザー名を受け取る口、C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。それまで `devbi-serve` は利用者を受け取れないので、行レベルのモードでは、どのリクエストも `401` になります。
 
 #### `:user.<属性>` と `:user.id`
 
@@ -1336,7 +1371,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - 名前が `user.` で始まるパラメーターは、いつも `400` です（ログインした人の値のために取ってあります）。行レベルのモードでは、名前が `user` そのもののパラメーターも `400` です。
 
 - 成功: `200`、`Content-Type: application/vnd.apache.arrow.stream`（Arrow IPC のストリーム）。8 KB を超えて `Accept-Encoding: gzip` なら gzip で返す。行数は `X-DevBI-Rows` ヘッダー。
-- 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`401`（ログインしていない）、`403`（その SQL を読む役割がない、`:user.` の属性がない）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
+- 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`401`（ログインしていない。`"access": 1` も付く）、`403`（その SQL を読む役割がない、`:user.` の属性がない）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
 - `Content-Type: application/json` 以外は受け付けません。ほかのサイトのページから、ブラウザに確かめさせずに送ることができないようにするためです。
 
 `POST <場所>/api/describe`（`Content-Type: application/json`。開発サーバーだけ）
