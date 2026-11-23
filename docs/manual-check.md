@@ -488,6 +488,17 @@ rm api/my_customers.sql
 cd ../..
 ```
 
+### 行レベル制御（開発サーバーで、この人として見る）
+
+`vite.config.ts` の `devbi({ devUsers })` に書いた人として、開発サーバーの API を読む画面です（[リファレンス](reference.md#開発サーバーでこの人として見るdevusers)）。見本は、`api/orders.sql` が `:user.region` で絞る小さなプロジェクト（`examples/sales/e2e/rls/`）です。`examples/sales` で `pnpm exec vite --config e2e/rls.vite.config.ts` を動かし、<http://127.0.0.1:5180> を開きます。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 204 | 開いたまま、何も選ばない | 右上に「表示する利用者 （ログインなし）」。タイルに「API の orders を読めません（401）: ログインしていません（上の『表示する利用者』で選びます）」 |
+| 205 | 「表示する利用者」で `yamada（CORP\yamada・営業・region 関東）` を選ぶ | ページが読み込み直され、「担当の売上」が ¥72,393,280、「地域別」は関東だけ。「全社の地域別」（`-- access: all`）は 6 つの地域が全部出る。ターミナルに `devbi: CORP\yamada api/orders.sql: 2,322 行、… ms` |
+| 206 | `suzuki` を選び、次に `sato` を選ぶ | suzuki は ¥42,290,840 で近畿だけ。sato は「API の orders を読めません（403）: 利用者 sato に属性 region がありません（api/orders.sql の :user.region）」 |
+| 207 | 開発サーバーを止め、`pnpm exec vite --config e2e/rls.vite.config.ts --host` で動かし直して、同じネットワークのスマホかほかのパソコンで、ターミナルに出た Network の URL を開き、yamada を選ぶ | 「…ログインしていません（『表示する利用者』は、開発サーバーを動かしているパソコンで開いたページからだけ使えます）」。このパソコンで開いたページでは今までどおり読める |
+
 ## 4. 自分の Excel で試す
 
 会社の Excel でも試せます。**ファイルは PC の外に出ません**（ブラウザはこの PC の開発サーバーから読むだけで、作ったファイルは git にも入りません）。

@@ -262,6 +262,10 @@ html perspective-viewer, html perspective-dropdown {
 .devbi-root[data-devbi-narrow] .devbi-param input, .devbi-root[data-devbi-narrow] .devbi-param select, .devbi-root[data-devbi-narrow] .devbi-multi-button { width: 100%; max-width: none; }
 .devbi-root[data-devbi-narrow] .devbi-grid > .devbi-tile { grid-column: 1 / -1 !important; grid-row: auto !important; height: var(--devbi-mobile-h, 240px); }
 .devbi-actions > .devbi-error { align-self: center; }
+.devbi-dev-user { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--devbi-muted); }
+.devbi-dev-user select { font: inherit; color: var(--devbi-text); background: var(--devbi-card); border: 1px solid var(--devbi-border); border-radius: 6px; padding: 3px 8px; min-height: 30px; max-width: 20em; }
+.devbi-dev-user select:focus-visible { outline: 2px solid var(--devbi-accent); outline-offset: 1px; }
+.devbi-index-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .devbi-printed { display: none; }
 /* On paper (ファイル出力 → 印刷・PDF's copy of the dashboard, or the browser's own print of the page): light colors on white,
    with the bars' and chips' colors kept, no buttons, and a tile kept on one page. Light colors only where the dark ones

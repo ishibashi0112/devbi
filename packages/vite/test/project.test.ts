@@ -211,3 +211,73 @@ describe("snapshot files", () => {
     for (const p of ["/src/snapshots/view.ts", "/data/x.arrows", "/snapshots.arrows", "/my-snapshots/x.arrows", "/assets/index.js"]) expect(isSnapshotPath(p), p).toBe(false);
   });
 });
+
+describe("devUsers (「表示する利用者」)", () => {
+  it("answers as the user the cookie names, for this computer only", async () => {
+    const { devUserRequest } = await import("../src/index.js");
+    const users = { yamada: { id: "CORP\\yamada", roles: ["営業"], attrs: { region: "関東" } }, sato: {} };
+    expect(devUserRequest(users, "a=1; devbi-dev-user=yamada", true)).toEqual({ user: { id: "CORP\\yamada", roles: ["営業"], attrs: { region: "関東" } } });
+    expect(devUserRequest(users, "devbi-dev-user=sato", true)).toEqual({ user: { id: "sato" } });
+    // Another computer (vite --host) sending the cookie itself: nobody.
+    expect(devUserRequest(users, "devbi-dev-user=yamada", false)).toEqual({ signInHint: expect.stringContaining("動かしているパソコン") });
+    expect(devUserRequest(users, undefined, true)).toEqual({ signInHint: "上の『表示する利用者』で選びます" });
+    expect(devUserRequest(users, "devbi-dev-user=", true)).toEqual({ signInHint: "上の『表示する利用者』で選びます" });
+    expect(devUserRequest(users, "devbi-dev-user=toString", true)).toEqual({ signInHint: expect.stringContaining("devUsers に toString がありません") });
+    expect(devUserRequest(undefined, "devbi-dev-user=yamada", true)).toEqual({ signInHint: expect.stringContaining("devUsers") });
+    expect(devUserRequest("preview", "devbi-dev-user=yamada", true)).toEqual({ signInHint: expect.stringContaining("vite preview") });
+  });
+
+  it("filters the API's rows by the user picked, and tells the page whom it can pick", async () => {
+    const { createServer } = await import("vite");
+    const { DatabaseSync } = await import("node:sqlite");
+    const devbi = (await import("../src/index.js")).default;
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-devusers-"));
+    for (const d of ["api", "db"]) mkdirSync(path.join(dir, d));
+    const db = new DatabaseSync(path.join(dir, "db", "shop.sqlite"));
+    db.exec("CREATE TABLE sales (region TEXT, amount INTEGER); INSERT INTO sales VALUES ('関東', 10), ('関東', 5), ('近畿', 7);");
+    db.close();
+    writeFileSync(path.join(dir, "api", "mine.sql"), "SELECT region, amount FROM sales WHERE region = :user.region");
+    writeFileSync(path.join(dir, ".env"), "DEVBI_DB=sqlite:db/shop.sqlite\n");
+    const devUsers = { yamada: { roles: ["営業"], attrs: { region: "関東" } }, suzuki: { attrs: { region: "近畿" } }, sato: {} };
+    const server = await createServer({ root: dir, configFile: false, logLevel: "silent", plugins: [devbi({ devUsers })], server: { port: 0 } });
+    await server.listen();
+    try {
+      const base = server.resolvedUrls!.local[0]!;
+      const { tableFromIPC } = await import("apache-arrow");
+      const ask = async (cookie?: string) => {
+        const res = await fetch(new URL("api/query", base), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+          body: JSON.stringify({ name: "mine" }),
+        });
+        if (!res.ok) return `${res.status} ${((await res.json()) as { error: string }).error}`;
+        return tableFromIPC(new Uint8Array(await res.arrayBuffer()))
+          .toArray()
+          .map((r) => `${r.region} ${r.amount}`)
+          .join(", ");
+      };
+      expect(await ask("devbi-dev-user=yamada")).toBe("関東 10, 関東 5");
+      expect(await ask("devbi-dev-user=suzuki")).toBe("近畿 7");
+      expect(await ask()).toBe("401 ログインしていません（上の『表示する利用者』で選びます）");
+      expect(await ask("devbi-dev-user=sato")).toBe("403 利用者 sato に属性 region がありません（api/mine.sql の :user.region）");
+      // The page's list (virtual:devbi on the dev server): names and what each is, not the cookie's value.
+      const mod = await server.transformRequest("virtual:devbi");
+      expect(mod?.code).toContain(JSON.stringify([{ name: "yamada", note: "営業・region 関東" }, { name: "suzuki", note: "region 近畿" }, { name: "sato" }]));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("stops the dev server on a user the API would not take", async () => {
+    const { createServer } = await import("vite");
+    const devbi = (await import("../src/index.js")).default;
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-devusers-"));
+    mkdirSync(path.join(dir, "api"));
+    writeFileSync(path.join(dir, "api", "mine.sql"), "SELECT 1 AS one -- access: all");
+    const start = (devUsers: Record<string, unknown>) =>
+      createServer({ root: dir, configFile: false, logLevel: "silent", plugins: [devbi({ devUsers } as never)], server: { port: 0 } });
+    await expect(start({ yamada: { attrs: { id: "x" } } })).rejects.toThrow("devbi: devUsers の yamada: ");
+    await expect(start({ yamada: { id: "" } })).rejects.toThrow("devbi: devUsers の yamada: id は空でない文字で書いてください");
+    await expect(start({ yamada: "営業" })).rejects.toThrow("devbi: devUsers の yamada: { roles, attrs } の形で書いてください");
+  });
+});

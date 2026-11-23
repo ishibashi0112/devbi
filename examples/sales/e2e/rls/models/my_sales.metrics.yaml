@@ -1,0 +1,10 @@
+# 担当の地域の売上。read_api('orders') は、api/orders.sql がログインした人の地域で絞った行を受け取る。
+label: 担当の売上
+model: SELECT * FROM read_api('orders', from = '2024-04-01')
+time: { column: 受注日, label: 受注日, fiscal_year_start: 4 }
+dimensions:
+  customer: { column: 顧客, label: 顧客 }
+  region: { column: 地域, label: 地域 }
+measures:
+  revenue: { sql: SUM(金額), label: 売上, format: "¥#,##0" }
+  orders: { sql: COUNT(DISTINCT 受注番号), label: 受注件数, format: "#,##0" }

@@ -11,7 +11,7 @@ import {
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { DevbiProvider, fieldInfo, useDevbi, useParamsVersion, useSelectionVersion } from "./context.js";
 import { describeFilter, snapshotText } from "./describe.js";
-import type { DevServer, EditorModule, SavedDashboard } from "./dev.js";
+import { readDevUser, writeDevUser, type DevServer, type DevUserInfo, type EditorModule, type SavedDashboard } from "./dev.js";
 import type { SnapshotInfo } from "./engine.js";
 import { ExportMenu, exportKinds, type ExportKind } from "./ExportMenu.js";
 import { formatTimesOfDay, loadProject, snapshotTimesOf, viewsOf, type Project, type ProjectInput } from "./project.js";
@@ -387,6 +387,34 @@ function EditorHost({ dev, theme, children }: { dev: DevServer; theme?: Theme; c
 }
 
 /**
+ * 「表示する利用者」 (the dev server's devUsers): the API answers as the one picked. The page loads again, so no rows
+ * of the user before stay in its tables.
+ */
+function DevUserPicker({ users }: { users: readonly DevUserInfo[] }) {
+  const [current] = useState(readDevUser);
+  const known = users.some((u) => u.name === current) ? current : "";
+  return (
+    <label className="devbi-dev-user" title="開発サーバーだけのものです。選んだ人として API が答えます">
+      表示する利用者
+      <select
+        value={known}
+        onChange={(e) => {
+          writeDevUser(e.target.value);
+          location.reload();
+        }}
+      >
+        <option value="">（ログインなし）</option>
+        {users.map((u) => (
+          <option key={u.name} value={u.name}>
+            {u.note ? `${u.name}（${u.note}）` : u.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/**
  * A whole static site: a list of dashboards, and each dashboard at `#/<name>`.
  * With one dashboard it is shown directly. On the dev server with `@devbi/editor` installed, each dashboard has
  * an 編集 button (the GUI editor) and new dashboards can be made.
@@ -403,6 +431,7 @@ export function DevbiApp({
 }) {
   useInsertionEffect(injectStyles, []);
   const dev = input.dev?.editor ? input.dev : undefined;
+  const users = input.dev?.users?.length ? input.dev.users : undefined;
   // The editor's saves, shown without reloading the page (the dev server reloads it for changes made elsewhere).
   const [saved, setSaved] = useState<Record<string, SavedDashboard>>({});
   const merged = useMemo(() => (Object.keys(saved).length ? { ...input, dashboards: { ...input.dashboards, ...saved } } : input), [input, saved]);
@@ -477,12 +506,16 @@ export function DevbiApp({
       ＋ 新しいダッシュボード
     </button>
   );
+  const picker = users && <DevUserPicker users={users} />;
   if (shown !== null) {
-    const actions = dev && (
+    const actions = (dev || picker) && (
       <>
-        <button type="button" className="devbi-button devbi-button-primary" onClick={() => setEditing(shown)}>
-          編集
-        </button>
+        {picker}
+        {dev && (
+          <button type="button" className="devbi-button devbi-button-primary" onClick={() => setEditing(shown)}>
+            編集
+          </button>
+        )}
         {newButton}
       </>
     );
@@ -503,7 +536,12 @@ export function DevbiApp({
     <div className="devbi-root" {...themeAttribute(theme)}>
       <div className="devbi-index">
         <h1>ダッシュボード</h1>
-        {newButton && <p>{newButton}</p>}
+        {(newButton || picker) && (
+          <p className="devbi-index-actions">
+            {picker}
+            {newButton}
+          </p>
+        )}
         {names.length === 0 ? (
           <p className="devbi-hint">dashboards/ に *.dash.json を置くとここに並びます</p>
         ) : (

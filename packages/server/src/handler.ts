@@ -68,6 +68,11 @@ export interface ApiOptions {
 export interface RequestOptions {
   /** The signed-in user. `undefined` or `null`: nobody signed in. */
   user?: DevBIUser | null;
+  /**
+   * Added in parentheses to the message of a `401` (nobody signed in): how to sign in. The dev server's
+   * 「上の『表示する利用者』で選びます」.
+   */
+  signInHint?: string;
 }
 
 /** `api/describe`'s answer: the columns of a dataset's result, without running it for rows. */
@@ -205,9 +210,11 @@ interface Mode {
  * signed-in user the host handed over (none: not signed in), read with `access/user.sql` only when a check needs it.
  */
 type Asker = { job: true } | RequestAsker;
-type RequestAsker = { job?: false; viewer: Viewer | undefined; resolved(): Promise<Viewer> };
+type RequestAsker = { job?: false; viewer: Viewer | undefined; resolved(): Promise<Viewer>; hint?: string | undefined };
 
 const NOT_SIGNED_IN = "ログインしていません";
+/** The 401 for a request without a user, with the host's hint (how to sign in). */
+const notSignedIn = (asker: { hint?: string | undefined }) => new HttpError(401, asker.hint ? `${NOT_SIGNED_IN}（${asker.hint}）` : NOT_SIGNED_IN);
 const USER_FILE = "access/user.sql";
 /** Users kept from access/user.sql at most (the oldest go first). */
 const MAX_CACHED_USERS = 10_000;
@@ -336,13 +343,15 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
   };
 
   /** The asker of a request: the host's user, checked (a TypeError for a wrong shape). */
-  const askerOf = (user: DevBIUser | null | undefined): RequestAsker => {
-    const viewer = viewerOf(user);
+  const askerOf = (request: RequestOptions): RequestAsker => {
+    const viewer = viewerOf(request.user);
+    const hint = typeof request.signInHint === "string" && request.signInHint.trim() ? request.signInHint.trim() : undefined;
     let full: Promise<Viewer> | undefined;
     return {
       viewer,
+      hint,
       resolved: () => {
-        if (!viewer) return Promise.reject(new HttpError(401, NOT_SIGNED_IN));
+        if (!viewer) return Promise.reject(notSignedIn({ hint }));
         return (full ??= tableUser(viewer.id).then((t) => mergeViewer(viewer, t)));
       },
     };
@@ -373,7 +382,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
   };
 
   const schema = async (asker: Asker, mode: Mode) => {
-    if (mode.on && !asker.job && !asker.viewer) throw new HttpError(401, NOT_SIGNED_IN);
+    if (mode.on && !asker.job && !asker.viewer) throw notSignedIn(asker);
     const datasets = [];
     for (const name of await listDatasets(options.dir)) {
       try {
@@ -421,11 +430,11 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
    * with the attributes the SQL uses. Throws HttpError / DatasetError (401, 403, 400, 404, 500).
    */
   const authorize = async (name: string, asker: Asker, mode: Mode): Promise<{ conn: Connection; dataset: Dataset; user?: BindUser }> => {
-    if (mode.on && !asker.job && !asker.viewer) throw new HttpError(401, NOT_SIGNED_IN);
+    if (mode.on && !asker.job && !asker.viewer) throw notSignedIn(asker);
     const { conn, dataset } = await prepare(name);
     checkRowLevel(dataset, mode);
     if (asker.job || !asker.viewer) {
-      if (dataset.roles) throw new HttpError(asker.job ? 403 : 401, asker.job ? `api/${name}.sql には -- roles: があるので、ジョブでは実行できません` : NOT_SIGNED_IN);
+      if (dataset.roles) throw new HttpError(asker.job ? 403 : 401, asker.job ? `api/${name}.sql には -- roles: があるので、ジョブでは実行できません` : notSignedIn(asker).message);
       return { conn, dataset };
     }
     // access/user.sql only when a check needs more than the id
@@ -454,7 +463,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     }
     return { bytes: toArrowStream(result), rows: result.rows.length };
   };
-  const run = (name: string, params: Record<string, unknown> = {}, request: RequestOptions = {}) => runAs(name, params, askerOf(request.user));
+  const run = (name: string, params: Record<string, unknown> = {}, request: RequestOptions = {}) => runAs(name, params, askerOf(request));
   const job: Asker = { job: true };
   const runJob = (name: string, params: Record<string, unknown>) => runAs(name, params, job);
 
@@ -497,7 +506,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
 
   const query = async (asked: Asked, asker: Asker, mode: Mode): Promise<Answer> => {
     // Signed in before anything else is read (the body, the file's name).
-    if (mode.on && !asker.job && !asker.viewer) throw new HttpError(401, NOT_SIGNED_IN);
+    if (mode.on && !asker.job && !asker.viewer) throw notSignedIn(asker);
     const { name, params = {} } = ((await jsonBody(asked)) ?? {}) as { name?: unknown; params?: unknown };
     if (typeof name !== "string" || !name) throw new HttpError(400, "name（api/ の SQL ファイルの名前）がありません");
     if (typeof params !== "object" || params === null || Array.isArray(params)) throw new HttpError(400, "params はオブジェクトで送ってください");
@@ -530,7 +539,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
   // GET …/snapshots/<file>: the saved file (made first when missing), or in the dev server the rows as they are now.
   const snapshot = async (asked: Asked, file: string, asker: Asker, mode: Mode): Promise<Answer> => {
     // Signed in before it is made or read (only `-- access: all` SQL has snapshots in row-level mode).
-    if (mode.on && !asker.job && !asker.viewer) throw new HttpError(401, NOT_SIGNED_IN);
+    if (mode.on && !asker.job && !asker.viewer) throw notSignedIn(asker);
     const found = await snapshots.get(file);
     let handle: FileHandle | undefined;
     try {
@@ -589,7 +598,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     const { method } = asked;
     let a: Answer;
     try {
-      const asker = askerOf(request.user);
+      const asker = askerOf(request);
       const mode = await modeFor(asker);
       if (m[2]) {
         if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "GET で呼んでください");
@@ -605,7 +614,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
         a = json(200, await schema(asker, mode));
       } else if (m[1] === "describe") {
         if (method !== "POST") throw new HttpError(405, "POST で呼んでください");
-        if (mode.on && !asker.viewer) throw new HttpError(401, NOT_SIGNED_IN);
+        if (mode.on && !asker.viewer) throw notSignedIn(asker);
         const { name } = ((await jsonBody(asked)) ?? {}) as { name?: unknown };
         if (typeof name !== "string" || !name) throw new HttpError(400, "name（api/ の SQL ファイルの名前）がありません");
         a = json(200, await describeAs(name, asker));

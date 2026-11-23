@@ -1,0 +1,29 @@
+{
+  "title": "担当の売上（行レベル制御）",
+  "description": "api/orders.sql が :user.region で絞るので、右上の「表示する利用者」で選んだ人の地域の数字になる",
+  "metrics": "my_sales",
+  "tiles": [
+    {
+      "id": "kpi-revenue",
+      "x": 0, "y": 0, "w": 6, "h": 2,
+      "type": "kpi",
+      "title": "担当の売上",
+      "query": { "measures": ["revenue"] }
+    },
+    {
+      "id": "region",
+      "x": 6, "y": 0, "w": 6, "h": 2,
+      "type": "barlist",
+      "title": "地域別（担当の地域だけ）",
+      "query": { "measures": ["revenue"], "dimensions": ["region"] }
+    },
+    {
+      "id": "all-regions",
+      "x": 0, "y": 2, "w": 12, "h": 5,
+      "type": "table",
+      "title": "全社の地域別（api/region_totals.sql、-- access: all）",
+      "query": { "dataset": "region_totals" },
+      "options": { "columns": ["地域", { "field": "金額", "format": "¥#,##0" }] }
+    }
+  ]
+}

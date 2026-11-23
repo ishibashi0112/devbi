@@ -1,0 +1,23 @@
+{
+  "orders": {
+    "sql": "a7134327447d9f29",
+    "columns": [
+      { "name": "受注日" },
+      { "name": "受注番号", "type": "string" },
+      { "name": "顧客", "type": "string" },
+      { "name": "地域", "type": "string" },
+      { "name": "商品分類", "type": "string" },
+      { "name": "商品", "type": "string" },
+      { "name": "数量", "type": "int" },
+      { "name": "単価", "type": "int" },
+      { "name": "金額" }
+    ]
+  },
+  "region_totals": {
+    "sql": "cede2e18d490f1e1",
+    "columns": [
+      { "name": "地域", "type": "string" },
+      { "name": "金額" }
+    ]
+  }
+}

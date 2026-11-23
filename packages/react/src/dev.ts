@@ -68,4 +68,41 @@ export interface DevServer {
    * reloads. Returns the function that stops listening.
    */
   onChange(listener: (change: FileChange) => boolean | void): () => void;
+  /**
+   * `devUsers` of `@devbi/vite` (row-level security): the page's 「表示する利用者」 picks one, and the dev server's
+   * API answers as that user.
+   */
+  users?: DevUserInfo[];
+}
+
+/** One of `devUsers`, as the page lists it. */
+export interface DevUserInfo {
+  name: string;
+  /** What the user is: `営業・region 関東`. */
+  note?: string;
+}
+
+/** The cookie that tells the dev server who the page views as (`@devbi/vite` reads it from this computer only). */
+export const DEV_USER_COOKIE = "devbi-dev-user";
+
+/** The user of devUsers the page views as: its cookie, or "" for nobody. */
+export function readDevUser(): string {
+  if (typeof document === "undefined") return "";
+  for (const part of document.cookie.split(";")) {
+    const at = part.indexOf("=");
+    if (at < 0 || part.slice(0, at).trim() !== DEV_USER_COOKIE) continue;
+    try {
+      return decodeURIComponent(part.slice(at + 1).trim());
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+/** View the page as this user of devUsers ("" for nobody): for the dev server's requests from now on. */
+export function writeDevUser(name: string): void {
+  document.cookie = name
+    ? `${DEV_USER_COOKIE}=${encodeURIComponent(name)}; path=/; SameSite=Strict`
+    : `${DEV_USER_COOKIE}=; path=/; max-age=0; SameSite=Strict`;
 }
