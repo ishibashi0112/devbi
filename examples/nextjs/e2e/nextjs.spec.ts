@@ -62,15 +62,15 @@ test("moving between pages in the app (no reload) puts the other dashboard in, a
 
 test("the route answers like devbi-serve: the SQL files, Japanese errors, and only known host names", async ({ request }) => {
   const schema = await (await request.get("/devbi/api/schema")).json();
-  expect(schema.datasets.map((d: { name: string }) => d.name)).toEqual(["order_lines", "orders", "regions", "sales_daily"]);
+  expect(schema.datasets.map((d: { name: string }) => d.name)).toEqual(["customer_totals", "customers", "order_lines", "orders", "regions", "sales_daily"]);
   const wrongType = await request.post("/devbi/api/query", { headers: { "Content-Type": "text/plain" }, data: "{}" });
   expect([wrongType.status(), (await wrongType.json()).error]).toEqual([415, "Content-Type: application/json で送ってください"]);
   const noName = await request.post("/devbi/api/query", { data: { name: "nope" } });
   expect([noName.status(), (await noName.json()).error]).toEqual([404, "API の SQL nope はありません（api/nope.sql）"]);
   expect((await request.get("/devbi/api/query")).status()).toBe(405);
-  const typed = await request.post("/devbi/api/query", { data: { name: "order_lines", params: { from: "2024-04-01", to: null, regions: ["関東", "近畿"] } } });
+  const typed = await request.post("/devbi/api/query", { data: { name: "order_lines", params: { from: "2024-04-01", to: null, regions: ["関東", "近畿"], customer: null } } });
   expect([typed.status(), typed.headers()["x-devbi-rows"]]).toEqual([200, "3647"]);
-  const badDate = await request.post("/devbi/api/query", { data: { name: "order_lines", params: { from: "2024/04/01", to: null, regions: ["関東"] } } });
+  const badDate = await request.post("/devbi/api/query", { data: { name: "order_lines", params: { from: "2024/04/01", to: null, regions: ["関東"], customer: null } } });
   expect([badDate.status(), (await badDate.json()).error]).toEqual([
     400,
     "api/order_lines.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（\"2024/04/01\" が来ました）",

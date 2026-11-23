@@ -1,6 +1,20 @@
-import { checkQuery, componentProblem, customQuery, customSelectable, resolveComponent, type BuiltinTileType, type Filter, type Query, type TileProps, type TileSpec } from "devbi";
+import {
+  checkQuery,
+  componentProblem,
+  customQuery,
+  customSelectable,
+  resolveComponent,
+  tableOptions,
+  withColumnOptions,
+  type BuiltinTileType,
+  type Filter,
+  type Query,
+  type TileProps,
+  type TileSpec,
+} from "devbi";
 import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { makeFormatters, queryView, useDevbi, useDevbiQuery, useSelectionVersion } from "./context.js";
+import { formatMadeAt } from "./describe.js";
 import { ParamsNeeded } from "./param-store.js";
 import type { TileModule } from "./project.js";
 import { builtinTiles } from "./tiles/index.js";
@@ -99,7 +113,12 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
     },
     [ctx.selection, tile.id, selectable, isDataset],
   );
-  const { format, label } = useMemo(() => makeFormatters(view, data.fields), [view, data.fields]);
+  // A dataset table's columns take their labels and formats from its options (`columns`).
+  const fields = useMemo(
+    () => (isDataset && tile.type === "table" ? withColumnOptions(data.fields, tableOptions(tile.options).options) : data.fields),
+    [isDataset, tile.type, tile.options, data.fields],
+  );
+  const { format, label } = useMemo(() => makeFormatters(view, fields), [view, fields]);
   const [ref, size] = useSize();
 
   const unknownType = tile.type && !builtin;
@@ -111,7 +130,7 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
     data.error;
   const props: TileProps = {
     rows: data.rows,
-    fields: data.fields,
+    fields,
     query: query ?? {},
     selection,
     filters: data.filters,
@@ -132,6 +151,11 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
       {tile.title && (
         <header className="devbi-tile-title">
           <h2>{tile.title}</h2>
+          {data.snapshot && !data.loading && (
+            <small className="devbi-tile-note" title={`毎朝のスナップショット（snapshots/${data.snapshot.file}）を読んでいます。「更新」を押すか、パラメーターを変えると、データベースから読みます`}>
+              {formatMadeAt(data.snapshot.at)} の時点
+            </small>
+          )}
           {selection.length > 0 && (
             <button type="button" className="devbi-clear" onClick={() => select(null)} aria-label={`${tile.title}の選択を解除`}>
               解除

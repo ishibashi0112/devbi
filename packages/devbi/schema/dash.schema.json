@@ -159,7 +159,7 @@
               "折れ線グラフ。軸の決め方は bar と同じ。点をクリックで選択",
               "積み上げ面グラフ。軸の決め方は bar と同じ。系列は大きい順に積む",
               "横棒のランキング。最初の軸を最初の指標で並べる。行をクリックで選択",
-              "表。すべての列を出す。見出しで並べ替え、行をクリックでその行の軸の値を選択",
+              "表。すべての列を出す。見出しで並べ替え、行をクリックでその行の軸の値を選択。データセット（query.dataset）の表は、options で列・グループ・合計・検索・行のクリックを決められ、列の見出しのメニューで絞り込める",
               "クロス集計。1 つの項目を列に、残りの軸を行に、最初の指標をセルに。合計の行と列つき",
               "指標ファイルの model の行（明細）を、見る人が自由に並べて集計する表とグラフ（Perspective）。期間やほかのタイルの選択で絞る。query は metrics・filters・limit（既定は 100,000 行）・period だけ",
               "最初の軸の値の一覧から選ぶ。9 件以上で検索欄が出る",
@@ -554,7 +554,151 @@
               "properties": {
                 "options": {
                   "type": "object",
-                  "properties": {},
+                  "properties": {
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "列の名前（SQL の結果の列）"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "field": {
+                                "type": "string",
+                                "description": "列の名前（SQL の結果の列）"
+                              },
+                              "label": {
+                                "type": "string",
+                                "description": "見出し（既定は列の名前）"
+                              },
+                              "format": {
+                                "type": "string",
+                                "description": "数の書式（\"¥#,##0\"、\"#,##0\"、\"0.0%\" など）"
+                              },
+                              "width": {
+                                "type": "number",
+                                "minimum": 20,
+                                "description": "幅（px）。書かなければ中身に合わせる"
+                              },
+                              "align": {
+                                "enum": [
+                                  "left",
+                                  "center",
+                                  "right"
+                                ],
+                                "description": "寄せ（既定は数が右、ほかは左）"
+                              },
+                              "pin": {
+                                "enum": [
+                                  "left",
+                                  "right"
+                                ],
+                                "description": "左か右に固定（横にスクロールしても動かない）"
+                              },
+                              "hidden": {
+                                "type": "boolean",
+                                "description": "最初は隠す（見る人が列の一覧から出せる）"
+                              },
+                              "filter": {
+                                "type": "boolean",
+                                "description": "false で列の絞り込みを出さない"
+                              },
+                              "agg": {
+                                "enum": [
+                                  "sum",
+                                  "avg",
+                                  "min",
+                                  "max",
+                                  "count"
+                                ],
+                                "description": "グループと合計の行の集計（count は行の数）"
+                              },
+                              "style": {
+                                "anyOf": [
+                                  {
+                                    "enum": [
+                                      "bar",
+                                      "scale"
+                                    ],
+                                    "description": "bar はデータバー、scale は色の濃さ"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "chips": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "enum": [
+                                            "neutral",
+                                            "info",
+                                            "good",
+                                            "warning",
+                                            "critical"
+                                          ]
+                                        },
+                                        "description": "値ごとの色のチップ（{ \"遅れ\": \"critical\" }）"
+                                      }
+                                    },
+                                    "required": [
+                                      "chips"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "field"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "description": "出す列と順（データセットの表）。列の名前か { \"field\": 列の名前, \"label\", \"format\", \"width\", \"align\", \"pin\", \"hidden\", \"filter\", \"agg\", \"style\" }。書かなければ全部の列を SQL の順に"
+                    },
+                    "groupBy": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "行をまとめる列（順に階層。[\"地域\", \"顧客\"]）。小計は agg の列（どの列にも agg がなければ数の列の合計）"
+                    },
+                    "totals": {
+                      "type": "boolean",
+                      "description": "表の下に合計の行（agg の列。どの列にも agg がなければ数の列の合計）。絞り込むと見えている行の合計"
+                    },
+                    "search": {
+                      "type": "boolean",
+                      "description": "上の検索欄（全部の列から探して絞る）。false で消す。既定は出す"
+                    },
+                    "click": {
+                      "type": "object",
+                      "properties": {
+                        "params": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "パラメーターの名前 → 入れる列の名前"
+                        }
+                      },
+                      "required": [
+                        "params"
+                      ],
+                      "additionalProperties": false,
+                      "description": "行をクリックすると、その行の列の値をダッシュボードのパラメーターに入れる: { \"params\": { \"customer\": \"顧客ID\" } }。もう一度クリックで既定値に戻す"
+                    }
+                  },
                   "additionalProperties": false
                 }
               }

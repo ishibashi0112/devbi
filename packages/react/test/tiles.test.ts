@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { trendClass } from "../src/tiles/Kpi.js";
-import { filterFor } from "../src/tiles/util.js";
+import { dateKey, filterFor, fromDateKey } from "../src/tiles/util.js";
 
 describe("trendClass", () => {
   it("colours a change by which way is good, and no change not at all", () => {
@@ -28,5 +28,16 @@ describe("filterFor", () => {
       unit: "month",
     });
     expect(filterFor({ name: "region", label: "地域", kind: "dimension" }, "関東")).toEqual({ field: "region", in: ["関東"] });
+  });
+});
+
+describe("dates in a report's table", () => {
+  it("go to the grid as text of the database's date (its filters read text by the date, not the viewer's zone)", () => {
+    // DevBI keeps the database's date and time as UTC: 15:00 UTC would be the next day in Tokyo.
+    expect(dateKey(new Date(Date.UTC(2026, 3, 1)))).toBe("2026-04-01");
+    expect(dateKey(new Date(Date.UTC(2026, 3, 1, 15, 30, 5)))).toBe("2026-04-01 15:30:05");
+    expect(fromDateKey("2026-04-01 15:30:05")).toEqual(new Date(Date.UTC(2026, 3, 1, 15, 30, 5)));
+    expect(fromDateKey("2026-04-01")).toEqual(new Date(Date.UTC(2026, 3, 1)));
+    expect(fromDateKey("4月1日")).toBeUndefined();
   });
 });

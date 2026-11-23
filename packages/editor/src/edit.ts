@@ -1,4 +1,4 @@
-import { GRAINS, ident, plainColumn, TILE_TYPES, type BuiltinTileType, type Filter, type Grain, type MetricsView, type Scalar, type SortSpec, type TileTypeInfo } from "devbi";
+import { GRAINS, ident, plainColumn, TILE_TYPES, type BuiltinTileType, type Filter, type Grain, type MetricsView, type Scalar, type SortSpec, type TileOptionSchema, type TileTypeInfo } from "devbi";
 import { newTile, type RawDashboard, type RawTile } from "./layout.js";
 
 /** Where each key goes in a hand-written file, so a key the panel adds lands where a person would put it. */
@@ -115,7 +115,15 @@ export function changeType(spec: RawDashboard, tile: RawTile, type: BuiltinTileT
     const metricsKey = Object.hasOwn(query, "metrics") ? keep("metrics") : m !== undefined ? { metrics: m } : {};
     next = setTileKey(next, "query", { ...metricsKey, ...rest, ...keep("filters"), ...keep("period") });
   }
-  const merged: Obj = { ...(isObj(fresh.options) ? fresh.options : {}), ...Object.fromEntries(Object.entries(old).filter(([k]) => Object.hasOwn(info.options, k))) };
+  // The options the new type has too; a report's table's (columns, totals… of a dataset) only from one of those
+  // (a pivot's columns and totals mean something else).
+  const before: Record<string, TileOptionSchema> =
+    typeof tile.type === "string" && Object.hasOwn(TILE_TYPES, tile.type) ? TILE_TYPES[tile.type as BuiltinTileType].options : {};
+  const keeps = (k: string) => {
+    const o = (info.options as Record<string, TileOptionSchema>)[k];
+    return o !== undefined && (!o.dataset || before[k]?.dataset === true);
+  };
+  const merged: Obj = { ...(isObj(fresh.options) ? fresh.options : {}), ...Object.fromEntries(Object.entries(old).filter(([k]) => keeps(k))) };
   const metricsName = own ?? (base.needsMetrics ? base.view?.name : undefined);
   if (!info.query && Object.hasOwn(info.options, "metrics") && metricsName) merged.metrics = metricsName;
   const options = Object.fromEntries(Object.keys(info.options).flatMap((k) => (Object.hasOwn(merged, k) ? [[k, merged[k]]] : [])));

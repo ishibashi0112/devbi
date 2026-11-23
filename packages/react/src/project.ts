@@ -1,6 +1,7 @@
 import {
   apiCalls,
   customViews,
+  defaultRequests,
   defineDashboard,
   defineMetricsView,
   type Dashboard,
@@ -126,6 +127,10 @@ export function snapshotTimesOf(project: Project, dashboard: Dashboard): string[
     for (const call of calls) {
       if (Object.hasOwn(project.snapshots, call.name)) for (const t of project.snapshots[call.name]!) times.add(t);
     }
+  }
+  // The report tables the dashboard opens with (a dataset with `-- snapshot:`, its parameters at their defaults).
+  for (const r of defaultRequests(dashboard, project.datasets)) {
+    if (r.for === "tile" && Object.hasOwn(project.snapshots, r.dataset)) for (const t of project.snapshots[r.dataset]!) times.add(t);
   }
   return [...times].sort();
 }

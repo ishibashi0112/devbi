@@ -221,8 +221,8 @@ importers:
         specifier: ^3.8.0
         version: 3.8.0
       '@ishibashi0112/spreadsheet-grid':
-        specifier: ^1.1.0
-        version: 1.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: ^1.4.0
+        version: 1.4.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@observablehq/plot':
         specifier: ^0.6.19
         version: 0.6.19
@@ -1136,12 +1136,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@ishibashi0112/spreadsheet-grid-core@1.1.0':
-    resolution: {integrity: sha512-8qUphRuHKJA5RzxVx3gtxMgbgjZalL+SWpRdyG7KDDlV/BtwkflkWn8ett/p+2uofkOui9udAu22Wb5tFOn2xw==}
+  '@ishibashi0112/spreadsheet-grid-core@1.4.0':
+    resolution: {integrity: sha512-Nlhbd3gG2wUODZnMzOGe1+UPeFI6GWa7ODI0kwbD4lc+3qzybh/4ZKCdhTSFnOvwv6UIYrDaC+uqTFlAXslsww==}
     engines: {node: '>=18'}
 
-  '@ishibashi0112/spreadsheet-grid@1.1.0':
-    resolution: {integrity: sha512-0aJ2R7kuLF+pWsjQFtRMu6Pov4W1MVDCDFpQ0+RPLOSDe/ZBxNvzj1hkxGRB0fu4O2TrIRi9Fmdu7S4/MpC0Dg==}
+  '@ishibashi0112/spreadsheet-grid@1.4.0':
+    resolution: {integrity: sha512-JXfZ1y4acSb+jaYMucadK9ckjgOMLJZ1HpV/o9laQKX6eDOP8Z+q5sU8Cf/Cl7ZerfxrpRVjPS7SkjsMbO6PsA==}
     engines: {node: '>=18'}
     peerDependencies:
       react: ^18.3.0 || ^19.0.0
@@ -4175,11 +4175,11 @@ snapshots:
   '@img/sharp-win32-x64@0.35.5':
     optional: true
 
-  '@ishibashi0112/spreadsheet-grid-core@1.1.0': {}
+  '@ishibashi0112/spreadsheet-grid-core@1.4.0': {}
 
-  '@ishibashi0112/spreadsheet-grid@1.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@ishibashi0112/spreadsheet-grid@1.4.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@ishibashi0112/spreadsheet-grid-core': 1.1.0
+      '@ishibashi0112/spreadsheet-grid-core': 1.4.0
       '@tanstack/virtual-core': 3.19.11
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)

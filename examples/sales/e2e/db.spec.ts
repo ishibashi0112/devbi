@@ -26,34 +26,50 @@ test("a dashboard reads a database through the API and shows the same numbers as
 test("the API lists its SQL files and answers in Japanese when something is wrong", async ({ request }) => {
   const schema = await (await request.get("/api/schema")).json();
   const from = { name: "from", type: "date", label: "受注日（から）" };
+  const regions = { name: "regions", type: "text", multiple: true, label: "地域", default: "all", values: "regions" };
+  const to = { name: "to", type: "date", label: "受注日（まで）", optional: true };
   expect(schema.datasets).toEqual([
     {
-      name: "order_lines",
-      description: expect.stringContaining("受注日と地域で絞る"),
+      name: "customer_totals",
+      description: expect.stringContaining("顧客ごとの受注の数"),
       params: ["from", "to", "regions"],
+      parameters: [{ ...from, default: "fiscal_year_start" }, to, regions],
+      key: ["顧客ID"],
+      connection: "DEVBI_DB",
+    },
+    { name: "customers", description: expect.stringContaining("顧客の一覧"), params: ["regions"], parameters: [regions], connection: "DEVBI_DB" },
+    {
+      name: "order_lines",
+      description: expect.stringContaining("受注日・地域・顧客で絞る"),
+      params: ["from", "to", "regions", "customer"],
       parameters: [
         { ...from, default: "fiscal_year_start" },
-        { name: "to", type: "date", label: "受注日（まで）", optional: true },
-        { name: "regions", type: "text", multiple: true, label: "地域", default: "all", values: "regions" },
+        to,
+        regions,
+        { name: "customer", type: "integer", label: "顧客", optional: true, values: "customers" },
       ],
       key: ["受注番号", "行番号"],
       connection: "DEVBI_DB",
     },
     { name: "orders", description: expect.stringContaining("受注の明細"), params: ["from"], parameters: [from], connection: "DEVBI_DB" },
-    { name: "regions", description: expect.stringContaining("地域の一覧"), params: [], parameters: [], connection: "DEVBI_DB" },
+    { name: "regions", description: expect.stringContaining("地域の一覧"), params: [], parameters: [], connection: "DEVBI_DB", snapshot: ["06:00"] },
     { name: "sales_daily", description: expect.stringContaining("日・地域・商品分類"), params: ["from"], parameters: [from], connection: "DEVBI_DB", snapshot: ["06:00"] },
   ]);
-  // The snapshots, and when each was made (devbi-serve makes a missing one when it starts, or when it is asked for).
-  expect(schema.snapshots).toEqual([expect.objectContaining({ name: "sales_daily", params: { from: "2024-04-01" }, times: ["06:00"], models: ["sales_daily"] })]);
+  // The snapshots, and when each was made (devbi-serve makes a missing one when it starts, or when it is asked for):
+  // the read_api of models/, and the choices of a dashboard's parameter (sales-report's regions).
+  expect(schema.snapshots).toEqual([
+    expect.objectContaining({ name: "sales_daily", params: { from: "2024-04-01" }, times: ["06:00"], models: ["sales_daily"], dashboards: [] }),
+    expect.objectContaining({ name: "regions", params: {}, times: ["06:00"], models: [], dashboards: ["sales-report"] }),
+  ]);
   expect((await request.get(`/snapshots/${encodeURIComponent(schema.snapshots[0].file)}`)).status()).toBe(200);
   expect((await (await request.get("/api/schema")).json()).snapshots[0].updatedAt).toEqual(expect.any(String));
   const res = await request.post("/api/query", { data: { name: "orders", params: {} } });
   expect(res.status()).toBe(400);
   expect((await res.json()).error).toBe("api/orders.sql: パラメーター :from の値がありません。read_api('orders', from = ...) と書きます");
   // Several values for a text[] parameter, and the types checked (the same answers from the C# reference)
-  const lines = await request.post("/api/query", { data: { name: "order_lines", params: { from: "2024-04-01", to: null, regions: ["関東", "近畿"] } } });
+  const lines = await request.post("/api/query", { data: { name: "order_lines", params: { from: "2024-04-01", to: null, regions: ["関東", "近畿"], customer: null } } });
   expect(lines.status()).toBe(200);
-  const bad = await request.post("/api/query", { data: { name: "order_lines", params: { from: "2024/04/01", to: null, regions: ["関東"] } } });
+  const bad = await request.post("/api/query", { data: { name: "order_lines", params: { from: "2024/04/01", to: null, regions: ["関東"], customer: null } } });
   expect([bad.status(), (await bad.json()).error]).toEqual([400, `api/order_lines.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（"2024/04/01" が来ました）`]);
 });
 

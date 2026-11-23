@@ -395,6 +395,11 @@ describe("devbi-check", () => {
           tile("broken", 2, { type: "table", query: { dataset: "broken" } }),
           tile("gone", 4, { type: "table", query: { dataset: "gone" } }),
           tile("own", 6, { component: "./r/Own.tsx" }),
+          tile("opts", 8, {
+            type: "table",
+            query: { dataset: "regions" },
+            options: { totals: "yes", columns: [{ field: "r", agg: "median" }], click: { params: { region: "r", nope: "r" } } },
+          }),
         ],
       }),
       "dashboards/r/Own.tsx": 'export const query = { dataset: "lines", params: { from: { param: "since" } } };\nexport default function T() {\n  return null;\n}\n',
@@ -406,13 +411,30 @@ describe("devbi-check", () => {
       expect.stringMatching(/^error dashboards\/r\.dash\.json タイル broken: api\/broken\.sql: SELECT か WITH で始まる文だけ使えます/),
       "error dashboards/r.dash.json タイル gone: データセット gone がありません（api/gone.sql）",
       "error dashboards/r.dash.json タイル own: ./r/Own.tsx の query: パラメーター since の欄がありません（dash.json のタイルの query に dataset を書くか、params に type を書いてください）",
+      // The table's options (the columns they name are checked once the page reads the rows); region is in the bar.
+      "error dashboards/r.dash.json タイル opts: options.columns[0].agg は sum・avg・min・max・count のどれかです",
+      "error dashboards/r.dash.json タイル opts: options.totals は true か false です",
+      "error dashboards/r.dash.json タイル opts: options.click の nope はこのダッシュボードのパラメーターにありません（dash.json の params に type を書くか、そのパラメーターを使うデータセットの表を置いてください）",
     ]);
     expect(Object.fromEntries(r.tiles.map((t) => [t.id, t.note]))).toEqual({
       lines: "データセット lines（api/lines.sql）を読むタイル（データベースから読むため行は数えていません）",
       broken: "エラー",
       gone: "エラー",
       own: "エラー",
+      opts: "エラー",
     });
+  }, 60_000);
+
+  it("the options of a report's table on a table of the metrics files: an error, as the table ignores them", async () => {
+    const dir = project({
+      "dashboards/d.dash.json": dash([
+        tile("t", 0, { type: "table", query: { dimensions: ["region"], measures: ["revenue"] }, options: { totals: true, groupBy: ["region"] } }),
+      ]),
+    });
+    const r = await checkProject(dir);
+    expect(r.findings.map((f) => f.message)).toEqual([
+      "タイル t: options.groupBy・options.totals はデータセットの表（query.dataset）だけで使えます。指標ファイルの表は query の列をすべて出します",
+    ]);
   }, 60_000);
 
   it("reports a project without metrics files", async () => {

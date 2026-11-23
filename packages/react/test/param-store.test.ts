@@ -141,6 +141,26 @@ describe("DashboardParams", () => {
     expect(s.request({ dataset: "sales" }, datasets.sales!)).toEqual({ missing: ["顧客"] });
   });
 
+  it("a table's row click puts values in (others kept); a second click puts them back to their default", async () => {
+    const tiles = [{ id: "s", x: 0, y: 0, w: 12, h: 4, type: "table", query: { dataset: "sales" } }];
+    const { s, settle } = store({ params: { customer: { optional: true } }, tiles }, { region: "関東" });
+    s.start();
+    await settle();
+    expect(s.value("customer")).toBeNull();
+    let heard = 0;
+    s.subscribe(() => heard++);
+    s.setValues({ customer: 2 });
+    expect([s.value("region"), s.value("customer"), s.draftValue("customer")]).toEqual(["関東", 2, 2]);
+    expect(s.changedValues()).toEqual({ region: "関東", customer: 2 });
+    s.reset(["customer"]);
+    expect(s.value("customer")).toBeNull();
+    expect(s.changedValues()).toEqual({ region: "関東" });
+    // already at its default: nothing changes, nobody hears of it
+    const before = heard;
+    s.reset(["customer", "nope"]);
+    expect(heard).toBe(before);
+  });
+
   it("更新 reads the choices again", async () => {
     const { s, settle, calls } = store({ tiles: [linesTile] });
     s.start();

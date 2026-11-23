@@ -312,7 +312,7 @@ function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemo
         }}
       />
       {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} />}
-      {builtin && Object.keys(TILE_TYPES[builtin].options).length > 0 && (
+      {builtin && shownOptions(builtin, tile).length > 0 && (
         <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} registerFlush={registerFlush} />
       )}
       {builtin && <Promote folder={`dashboards/${name}/`} dirty={dirty} onPromote={() => onPromote(tile.id)} />}
@@ -974,6 +974,13 @@ function SortEditor({ view, query, set }: { view: MetricsView; query: Query; set
 }
 
 /** The tile type's options (TILE_TYPES[type].options). Left at 既定, an option is not written. */
+/** A tile type's options the panel shows: those of a report's table (`dataset`) only for a dataset tile, or once written. */
+function shownOptions(type: BuiltinTileType, tile: RawTile): [string, TileOptionSchema][] {
+  const options = isObj(tile.options) ? tile.options : {};
+  const dataset = isObj(tile.query) && typeof tile.query.dataset === "string";
+  return (Object.entries(TILE_TYPES[type].options) as [string, TileOptionSchema][]).filter(([k, o]) => !o.dataset || dataset || Object.hasOwn(options, k));
+}
+
 function OptionsEditor({
   metrics,
   spec,
@@ -992,7 +999,7 @@ function OptionsEditor({
   registerFlush(flush: Flush): () => void;
 }) {
   const options = isObj(tile.options) ? tile.options : {};
-  const entries = Object.entries(TILE_TYPES[type].options) as [string, TileOptionSchema][];
+  const entries = shownOptions(type, tile);
   const name = metricsNameOf(metrics, spec, tile);
   const view = name && Object.hasOwn(metrics, name) ? metrics[name] : undefined;
   // The period picker takes its default when it starts: start it over so the change shows.

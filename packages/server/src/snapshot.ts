@@ -1,10 +1,14 @@
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { apiCalls, parseMetricsYaml, snapshotFile, type ApiParamValue } from "devbi";
-import { DatasetError, listDatasets, readDatasetText, snapshotOf } from "./datasets.js";
+import { apiCalls, DashboardError, defaultRequests, defineDashboard, parseMetricsYaml, snapshotFile, type ApiParamValue, type DatasetInfo } from "devbi";
+import { dialectOf } from "./connect.js";
+import { connectionOf, connectionVariable, DatasetError, listDatasets, parseDataset, readDatasetText, snapshotOf } from "./datasets.js";
 
-/** One snapshot to make: a `read_api(name, params)` call in models/ whose SQL file has a `-- snapshot:` line. */
+/**
+ * One snapshot to make, of an SQL file with a `-- snapshot:` line: a `read_api(name, params)` call in models/, or a
+ * dataset table (or a parameter's choices) of a dashboard in dashboards/ with its parameters at their defaults.
+ */
 export interface SnapshotJob {
   /** The SQL file: `api/<name>.sql`. */
   name: string;
@@ -15,6 +19,8 @@ export interface SnapshotJob {
   times: string[];
   /** The metrics files that read it (`models/<name>.metrics.yaml`). */
   models: string[];
+  /** The dashboards that open with it (`dashboards/<name>.dash.json`). */
+  dashboards: string[];
 }
 
 export interface SnapshotResult {
@@ -35,6 +41,7 @@ export interface SnapshotStatus {
   params: Record<string, ApiParamValue>;
   times: string[];
   models: string[];
+  dashboards: string[];
   /** When the saved file was made; null when there is none yet (or no folder to save in). */
   updatedAt: string | null;
   /** Why the last try failed, when it did. */
@@ -94,10 +101,15 @@ export function nextDue(times: string[], now: Date): Date | undefined {
 }
 
 /**
- * The snapshots of a project: each `read_api(...)` call in `models/*.metrics.yaml` whose SQL file has a
- * `-- snapshot: 06:00` line, with the parameters written there. Files that cannot be read are listed in `problems`.
+ * The snapshots of a project, of the SQL files with a `-- snapshot: 06:00` line: each `read_api(...)` call in
+ * `models/*.metrics.yaml` with the parameters written there, and each dataset table of `dashboards/*.dash.json` (and
+ * the choices of its parameters) with the parameters at their defaults, when those are fixed values (not a word like
+ * `today`, not `all`, not a list). Files that cannot be read are listed in `problems`.
  */
-export async function snapshotJobs(dir: string): Promise<{ jobs: SnapshotJob[]; problems: string[] }> {
+export async function snapshotJobs(
+  dir: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<{ jobs: SnapshotJob[]; problems: string[] }> {
   const problems: string[] = [];
   const times = new Map<string, string[]>();
   let names: string[];
@@ -107,40 +119,69 @@ export async function snapshotJobs(dir: string): Promise<{ jobs: SnapshotJob[]; 
     // The folder is away for a moment (a network drive, a deploy): no snapshots this time, not a crash.
     return { jobs: [], problems: [`api/ を読めません: ${(e as Error).message}`] };
   }
+  const texts = new Map<string, string>();
   for (const name of names) {
     try {
-      const t = snapshotOf(await readDatasetText(dir, name), name);
+      const text = await readDatasetText(dir, name);
+      texts.set(name, text);
+      const t = snapshotOf(text, name);
       if (t) times.set(name, t);
     } catch (e) {
       problems.push((e as Error).message);
     }
   }
   const jobs = new Map<string, SnapshotJob>();
-  const modelsDir = path.join(dir, "models");
-  if (times.size === 0 || !existsSync(modelsDir)) return { jobs: [], problems };
-  let files: string[];
-  try {
-    files = (await readdir(modelsDir)).filter((f) => f.endsWith(".metrics.yaml")).sort();
-  } catch (e) {
-    return { jobs: [], problems: [...problems, `models/ を読めません: ${(e as Error).message}`] };
-  }
-  for (const f of files) {
+  if (times.size === 0) return { jobs: [], problems };
+  const add = (name: string, params: Record<string, ApiParamValue>, from: { model?: string; dashboard?: string }) => {
+    const t = times.get(name);
+    if (!t) return;
+    const file = snapshotFile(name, params);
+    let job = jobs.get(file);
+    if (!job) jobs.set(file, (job = { name, params, file, times: t, models: [], dashboards: [] }));
+    if (from.model && !job.models.includes(from.model)) job.models.push(from.model);
+    if (from.dashboard && !job.dashboards.includes(from.dashboard)) job.dashboards.push(from.dashboard);
+  };
+
+  const files = async (sub: string, suffix: string): Promise<string[]> => {
+    const folder = path.join(dir, sub);
+    if (!existsSync(folder)) return [];
+    try {
+      return (await readdir(folder)).filter((f) => f.endsWith(suffix)).sort();
+    } catch (e) {
+      problems.push(`${sub}/ を読めません: ${(e as Error).message}`);
+      return [];
+    }
+  };
+  for (const f of await files("models", ".metrics.yaml")) {
     const model = f.slice(0, -".metrics.yaml".length);
     try {
-      const view = parseMetricsYaml(await readFile(path.join(modelsDir, f), "utf8"), model, `models/${f}`);
-      for (const call of apiCalls(view.model)) {
-        const t = times.get(call.name);
-        if (!t) continue;
-        const file = snapshotFile(call.name, call.params);
-        const job = jobs.get(file);
-        if (job) {
-          if (!job.models.includes(model)) job.models.push(model);
-        } else {
-          jobs.set(file, { name: call.name, params: call.params, file, times: t, models: [model] });
-        }
-      }
+      const view = parseMetricsYaml(await readFile(path.join(dir, "models", f), "utf8"), model, `models/${f}`);
+      for (const call of apiCalls(view.model)) add(call.name, call.params, { model });
     } catch (e) {
       problems.push((e as Error).message);
+    }
+  }
+
+  const dashboards = await files("dashboards", ".dash.json");
+  if (dashboards.length) {
+    // The parameters of every dataset (a dashboard's parameters merge those of all its datasets), as the build reads them.
+    const datasets: Record<string, DatasetInfo> = {};
+    for (const [name, text] of texts) {
+      try {
+        const d = parseDataset(name, text, dialectOf(env[connectionVariable(connectionOf(text))] ?? ""));
+        datasets[name] = { parameters: d.parameters, ...(d.key ? { key: d.key } : {}) };
+      } catch {
+        // its own problem when it is read (the API and devbi-check report it)
+      }
+    }
+    for (const f of dashboards) {
+      const dashboard = f.slice(0, -".dash.json".length);
+      try {
+        const d = defineDashboard(JSON.parse(await readFile(path.join(dir, "dashboards", f), "utf8")), dashboard, `dashboards/${f}`);
+        for (const r of defaultRequests(d, datasets)) add(r.dataset, r.params, { dashboard });
+      } catch (e) {
+        problems.push(e instanceof DashboardError ? e.message : `dashboards/${f}: ${(e as Error).message}`);
+      }
     }
   }
   return { jobs: [...jobs.values()], problems };
@@ -162,6 +203,8 @@ async function replace(tmp: string, target: string): Promise<void> {
 
 export function createSnapshots(options: {
   dir: string;
+  /** Where DEVBI_DB… are read from (each SQL file's quoting rules). Default: `process.env`. */
+  env?: Record<string, string | undefined>;
   run: (name: string, params: Record<string, unknown>) => Promise<{ bytes: Uint8Array; rows: number }>;
   /** Where the files are saved. Without it, nothing is saved: `get` runs the SQL each time. */
   outDir?: string;
@@ -181,7 +224,7 @@ export function createSnapshots(options: {
   let reported = "";
 
   const jobs = async () => {
-    const { jobs, problems } = await snapshotJobs(dir);
+    const { jobs, problems } = await snapshotJobs(dir, options.env);
     // Each problem once, not on every request.
     const text = problems.join("\n");
     if (text && text !== reported) for (const p of problems) log(`スナップショット: ${p}`);
@@ -265,7 +308,7 @@ export function createSnapshots(options: {
     jobs,
     async get(file) {
       const job = (await jobs()).find((j) => j.file === file);
-      if (!job) throw new DatasetError(`スナップショット ${file} はありません（api/ の SQL に -- snapshot: の行があり、models/ の read_api で使っているものだけ）`, 404);
+      if (!job) throw new DatasetError(`スナップショット ${file} はありません（api/ の SQL に -- snapshot: の行があり、models/ の read_api か dashboards/ のデータセットの表が既定のパラメーターで読むものだけ）`, 404);
       if (!outDir) {
         const result = await run(job.name, job.params);
         return { at: new Date(), rows: result.rows, bytes: result.bytes };
@@ -308,6 +351,7 @@ export function createSnapshots(options: {
           params: job.params,
           times: job.times,
           models: job.models,
+          dashboards: job.dashboards,
           updatedAt: made ? made.toISOString() : null,
           ...(errors.has(job.file) ? { error: errors.get(job.file)! } : {}),
         });

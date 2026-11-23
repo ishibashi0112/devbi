@@ -1,5 +1,5 @@
 import type { BuiltinTileType, TileProps } from "devbi";
-import { lazy, type ComponentType, type LazyExoticComponent } from "react";
+import { createElement, lazy, type ComponentType, type LazyExoticComponent } from "react";
 import { loadChunk } from "../chunk.js";
 import { BarList } from "./BarList.js";
 import { DateRange } from "./DateRange.js";
@@ -19,7 +19,12 @@ export interface BuiltinTile {
 // each as its own chunk.
 const chart = (kind: "bar" | "line" | "area") =>
   lazy(() => loadChunk(() => import("./PlotChart.js")).then((m) => ({ default: m.makeChart(kind) })));
-const table = lazy(() => loadChunk(() => import("./GridTable.js")).then((m) => ({ default: m.GridTable })));
+const gridTable = lazy(() => loadChunk(() => import("./GridTable.js")).then((m) => ({ default: m.GridTable })));
+// A report's table (a dataset) uses more of spreadsheet-grid (filters, groups, totals, search): its own chunk.
+const datasetTable = lazy(() => loadChunk(() => import("./DatasetTable.js")).then((m) => ({ default: m.DatasetTable })));
+function table(props: TileProps) {
+  return createElement(props.query.dataset !== undefined ? datasetTable : gridTable, props);
+}
 // Perspective (several MB with its WebAssembly) comes with the first explore tile.
 const explore = lazy(() => loadChunk(() => import("./Explore.js")).then((m) => ({ default: m.Explore })));
 

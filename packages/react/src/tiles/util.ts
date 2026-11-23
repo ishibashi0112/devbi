@@ -88,3 +88,22 @@ export function compareValues(a: Scalar | undefined, b: Scalar | undefined): num
   if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a).localeCompare(String(b), "ja");
 }
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * A date as the grid reads it: `2026-04-01`, or `2026-04-01 09:30:00` with a time of day. The rows hold the
+ * database's date and time as UTC; the grid reads a Date in the viewer's time zone (a Tokyo viewer would see the
+ * 15:00 rows filtered as the next day), but text by its leading `YYYY-MM-DD`. Text sorts in time order too.
+ */
+export function dateKey(d: Date): string {
+  const day = `${String(d.getUTCFullYear()).padStart(4, "0")}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) return day;
+  return `${day} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+/** {@link dateKey} read back (the Excel sheet writes dates as dates). */
+export function fromDateKey(text: string): Date | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}):(\d{2}))?$/.exec(text);
+  return m ? new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0))) : undefined;
+}

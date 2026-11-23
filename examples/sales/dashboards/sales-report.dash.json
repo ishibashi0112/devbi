@@ -1,22 +1,56 @@
 {
   "$schema": "../.devbi/dash.schema.json",
   "title": "受注明細レポート",
-  "description": "SQL（api/order_lines.sql）の結果をそのまま表にする、SSRS のレポートのような画面",
+  "description": "SQL（api/customer_totals.sql と api/order_lines.sql）の結果をそのまま表にする、SSRS のレポートのような画面",
   "fiscalYearStart": 4,
   "tiles": [
     {
+      "id": "customers",
+      "x": 0, "y": 0, "w": 12, "h": 7,
+      "type": "table",
+      "title": "顧客別（行をクリックで、その顧客の明細）",
+      "query": { "dataset": "customer_totals" },
+      "options": {
+        "columns": [
+          { "field": "顧客ID", "hidden": true },
+          "顧客",
+          "受注数",
+          "数量",
+          { "field": "金額", "format": "¥#,##0", "style": "bar" }
+        ],
+        "groupBy": ["地域"],
+        "totals": true,
+        "click": { "params": { "customer": "顧客ID" } }
+      }
+    },
+    {
       "id": "lines",
-      "x": 0, "y": 0, "w": 12, "h": 9,
+      "x": 0, "y": 7, "w": 12, "h": 9,
       "type": "table",
       "title": "受注明細",
-      "query": { "dataset": "order_lines" }
+      "query": { "dataset": "order_lines" },
+      "options": {
+        "columns": [
+          { "field": "受注日", "pin": "left" },
+          "受注番号",
+          "行番号",
+          "顧客",
+          "地域",
+          "商品分類",
+          "商品",
+          { "field": "数量", "agg": "sum" },
+          { "field": "単価", "format": "¥#,##0" },
+          { "field": "金額", "format": "¥#,##0", "agg": "sum" }
+        ],
+        "totals": true
+      }
     },
     {
       "id": "about",
-      "x": 0, "y": 9, "w": 12, "h": 1,
+      "x": 0, "y": 16, "w": 12, "h": 1,
       "type": "markdown",
       "options": {
-        "text": "**このレポートについて** 上の欄は `api/order_lines.sql` の `-- param:` の行から作られます。値を変えると、サーバーがその値で SQL を実行し直します（ブラウザで集計はしません）。受注日（から）の既定は今年度の始まり（4 月）、地域の候補は `api/regions.sql` です。"
+        "text": "**このレポートについて** 上の欄は `api/*.sql` の `-- param:` の行から作られます。値を変えると、サーバーがその値で SQL を実行し直します（ブラウザで集計はしません）。顧客別の表の行をクリックすると、欄の「顧客」にその顧客が入り、明細がその顧客だけになります（もう一度クリックで元に戻す）。表の見出しのメニュー（⋮）で並べ替え・絞り込み・グループができ、Excel にはそのままの形で書き出せます。"
       }
     }
   ]

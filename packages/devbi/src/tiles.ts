@@ -3,6 +3,7 @@
  * Used to validate dash.json and to build its JSON Schema (editor completion).
  */
 import { formatTime } from "./format.js";
+import { CHIP_TONES, TABLE_AGGREGATES } from "./table.js";
 import type { Grain } from "./types.js";
 
 /** Initial periods for the `date-range` tile (`options.default`). */
@@ -108,7 +109,7 @@ export function dateRangePresets(max: Date, fiscalYearStart = 1): DateRangeOptio
 
 /** One option of a tile type: a JSON Schema fragment (completion and hover text) plus what the GUI editor shows. */
 export interface TileOptionSchema {
-  type?: "string" | "boolean" | "number" | "object";
+  type?: "string" | "boolean" | "number" | "object" | "array";
   enum?: readonly string[];
   /** A short name for each `enum` value, in the same order (the GUI editor, and hover text in VS Code). */
   enumLabels?: readonly string[];
@@ -120,6 +121,10 @@ export interface TileOptionSchema {
    * tile's metrics file), `metrics` (a metrics file). Default: one line. An object is written as JSON (`json`).
    */
   input?: "text" | "field" | "metrics" | "json";
+  /** Only for a tile that reads a dataset (`query.dataset`): the GUI editor shows it only there. */
+  dataset?: boolean;
+  /** The option's JSON Schema in full, when `type` alone says too little (the items of an array, an object's keys). */
+  schema?: Record<string, unknown>;
 }
 
 export interface TileTypeInfo {
@@ -177,9 +182,90 @@ export const TILE_TYPES = {
   table: {
     label: "表",
     size: { w: 12, h: 5 },
-    description: "表。すべての列を出す。見出しで並べ替え、行をクリックでその行の軸の値を選択",
+    description:
+      "表。すべての列を出す。見出しで並べ替え、行をクリックでその行の軸の値を選択。データセット（query.dataset）の表は、options で列・グループ・合計・検索・行のクリックを決められ、列の見出しのメニューで絞り込める",
     query: true,
-    options: {},
+    options: {
+      columns: {
+        type: "array",
+        dataset: true,
+        input: "json",
+        label: "列",
+        description:
+          '出す列と順（データセットの表）。列の名前か { "field": 列の名前, "label", "format", "width", "align", "pin", "hidden", "filter", "agg", "style" }。書かなければ全部の列を SQL の順に',
+        schema: {
+          type: "array",
+          items: {
+            anyOf: [
+              { type: "string", description: "列の名前（SQL の結果の列）" },
+              {
+                type: "object",
+                properties: {
+                  field: { type: "string", description: "列の名前（SQL の結果の列）" },
+                  label: { type: "string", description: "見出し（既定は列の名前）" },
+                  format: { type: "string", description: '数の書式（"¥#,##0"、"#,##0"、"0.0%" など）' },
+                  width: { type: "number", minimum: 20, description: "幅（px）。書かなければ中身に合わせる" },
+                  align: { enum: ["left", "center", "right"], description: "寄せ（既定は数が右、ほかは左）" },
+                  pin: { enum: ["left", "right"], description: "左か右に固定（横にスクロールしても動かない）" },
+                  hidden: { type: "boolean", description: "最初は隠す（見る人が列の一覧から出せる）" },
+                  filter: { type: "boolean", description: "false で列の絞り込みを出さない" },
+                  agg: { enum: TABLE_AGGREGATES, description: "グループと合計の行の集計（count は行の数）" },
+                  style: {
+                    anyOf: [
+                      { enum: ["bar", "scale"], description: "bar はデータバー、scale は色の濃さ" },
+                      {
+                        type: "object",
+                        properties: {
+                          chips: { type: "object", additionalProperties: { enum: CHIP_TONES }, description: '値ごとの色のチップ（{ "遅れ": "critical" }）' },
+                        },
+                        required: ["chips"],
+                        additionalProperties: false,
+                      },
+                    ],
+                  },
+                },
+                required: ["field"],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+      },
+      groupBy: {
+        type: "array",
+        dataset: true,
+        input: "json",
+        label: "グループ",
+        description: '行をまとめる列（順に階層。["地域", "顧客"]）。小計は agg の列（どの列にも agg がなければ数の列の合計）',
+        schema: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+      },
+      totals: {
+        type: "boolean",
+        dataset: true,
+        label: "合計の行",
+        description: "表の下に合計の行（agg の列。どの列にも agg がなければ数の列の合計）。絞り込むと見えている行の合計",
+      },
+      search: { type: "boolean", dataset: true, label: "検索欄", description: "上の検索欄（全部の列から探して絞る）。false で消す。既定は出す" },
+      click: {
+        type: "object",
+        dataset: true,
+        input: "json",
+        label: "行のクリック",
+        description: '行をクリックすると、その行の列の値をダッシュボードのパラメーターに入れる: { "params": { "customer": "顧客ID" } }。もう一度クリックで既定値に戻す',
+        schema: {
+          type: "object",
+          properties: {
+            params: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              description: "パラメーターの名前 → 入れる列の名前",
+            },
+          },
+          required: ["params"],
+          additionalProperties: false,
+        },
+      },
+    },
   },
   pivot: {
     label: "クロス集計",

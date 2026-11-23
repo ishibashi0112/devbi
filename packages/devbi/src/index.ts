@@ -39,6 +39,21 @@ export {
 } from "./dashboard.js";
 export { formatDashboardJson } from "./format-dash.js";
 export {
+  CHIP_TONES,
+  TABLE_AGGREGATES,
+  TABLE_OPTION_KEYS,
+  tableOptions,
+  tableColumnProblems,
+  tableColumns,
+  tableView,
+  withColumnOptions,
+  type ChipTone,
+  type TableAggregate,
+  type TableColumn,
+  type TableColumnView,
+  type TableOptions,
+} from "./table.js";
+export {
   PARAM_TYPES,
   DAY_WORDS,
   dashboardParams,
@@ -60,6 +75,9 @@ export {
   paramsToSearch,
   checkParamValues,
   choiceValue,
+  defaultRequest,
+  defaultRequests,
+  type DefaultRequest,
   type ParamType,
   type DatasetParameter,
   type DatasetInfo,

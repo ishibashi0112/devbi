@@ -213,22 +213,36 @@ export class DashboardParams {
       any = true;
     }
     if (options.others === "default") {
-      for (const p of this.list) {
-        if (given.has(p.name)) continue;
-        const def = this.defaultOf(p, this.readyChoices(p));
-        // `all` while its choices are being read: it waits for them (not when they failed).
-        const waits =
-          def === undefined && p.multiple && p.default === "all" && !!p.values && Object.hasOwn(this.datasets, p.values) && !this.choices.get(p.name)?.error;
-        if (same(this.applied[p.name], def) && same(this.draft[p.name], def) && !waits) continue;
-        this.applied[p.name] = def;
-        this.draft[p.name] = def;
-        if (waits) this.pendingAll.add(p.name);
-        any = true;
-      }
+      for (const p of this.list) if (!given.has(p.name) && this.toDefault(p)) any = true;
     }
     if (!any) return;
     this.changed();
     this.loadChoices();
+  }
+
+  /** Put these parameters back to their default, applied at once (a second click on a table's row). */
+  reset(names: readonly string[]): void {
+    let any = false;
+    for (const name of names) {
+      const p = this.find(name);
+      if (p && this.toDefault(p)) any = true;
+    }
+    if (!any) return;
+    this.changed();
+    this.loadChoices();
+  }
+
+  /** Set a parameter to its default in the bar and for the tiles. Whether that changed anything. */
+  private toDefault(p: DashboardParam): boolean {
+    const def = this.defaultOf(p, this.readyChoices(p));
+    // `all` while its choices are being read: it waits for them (not when they failed).
+    const waits =
+      def === undefined && p.multiple && p.default === "all" && !!p.values && Object.hasOwn(this.datasets, p.values) && !this.choices.get(p.name)?.error;
+    if (same(this.applied[p.name], def) && same(this.draft[p.name], def) && !waits) return false;
+    this.applied[p.name] = def;
+    this.draft[p.name] = def;
+    if (waits) this.pendingAll.add(p.name);
+    return true;
   }
 
   /** 更新: read the tiles and the choices again (the caller drops its cached rows). */

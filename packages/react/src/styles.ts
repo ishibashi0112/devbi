@@ -95,6 +95,7 @@ export const css = `
 @keyframes devbi-load { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 @media (prefers-reduced-motion: reduce) { .devbi-tile.devbi-loading::after { animation: none; width: 100%; opacity: 0.4; } }
 .devbi-tile-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px 0; }
+.devbi-tile-note { margin-left: auto; color: var(--devbi-muted); font-size: 11px; white-space: nowrap; }
 .devbi-tile-title h2 { font-size: 13px; font-weight: 600; margin: 0; color: var(--devbi-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .devbi-clear { border: 0; background: none; color: var(--devbi-accent); cursor: pointer; font-size: 12px; padding: 0 4px; }
 .devbi-tile-body { flex: 1; min-height: 0; padding: 8px 14px 12px; overflow: auto; }
@@ -149,7 +150,8 @@ export const css = `
   border: 0; border-radius: 0; box-shadow: none;
 }
 .devbi-grid-popup { font-family: ${FONT}; }
-.devbi-table-grid .ssg-body-cell { cursor: pointer; }
+/* A row click selects (the metrics files' table) or puts values in the parameters (a dataset table with options.click). */
+.devbi-table-grid:not(.devbi-dataset-grid) .ssg-body-cell, .devbi-grid-clickable .ssg-body-cell { cursor: pointer; }
 .devbi-table-grid .devbi-dimmed { opacity: 1; }
 .devbi-table-grid .ssg-body-cell.devbi-dimmed { opacity: 0.45; }
 .devbi-table-grid .ssg-body-cell.devbi-selected { background: var(--devbi-accent-soft); }
