@@ -6,8 +6,6 @@ import type { DevUser } from "./index.js";
 
 /** What the devbi() plugin tells tools about itself (`plugin.api`). */
 export interface DevbiPluginApi {
-  /** The project folder (dashboards/, models/, api/), absolute. Set once Vite has resolved the config. */
-  dir?: string;
   /** `dir` as written in the options (relative to the Vite root). */
   dirOption?: string;
   devUsers?: Record<string, DevUser>;
@@ -16,6 +14,21 @@ export interface DevbiPluginApi {
 /** One of devUsers, as the API takes it: `{ id, roles, attrs }` (the id defaults to the name). */
 export function devUserOf(name: string, u: DevUser): DevBIUser {
   return { id: u.id ?? name, ...(u.roles ? { roles: u.roles } : {}), ...(u.attrs ? { attrs: u.attrs } : {}) };
+}
+
+/** devUsers as the API takes users: throws `devUsers の yamada: …` for the first one it would not take. */
+export async function checkDevUsers(users: Record<string, DevUser>): Promise<void> {
+  const { viewerOf } = await import("@devbi/server");
+  for (const [name, u] of Object.entries(users)) {
+    try {
+      if (!name.trim()) throw new TypeError("名前は空でない文字で書いてください");
+      if (typeof u !== "object" || u === null || Array.isArray(u)) throw new TypeError("{ roles, attrs } の形で書いてください");
+      if (u.id !== undefined && (typeof u.id !== "string" || !u.id.trim())) throw new TypeError("id は空でない文字で書いてください");
+      viewerOf(devUserOf(name, u));
+    } catch (e) {
+      throw new Error(`devUsers の ${name}: ${(e as Error).message}`);
+    }
+  }
 }
 
 const CONFIG_FILES = ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs", "vite.config.cts", "vite.config.cjs"];
@@ -33,8 +46,9 @@ async function flatten(plugins: unknown): Promise<unknown[]> {
 
 /**
  * The devUsers of the project in `dir`, from a Vite config: `config` when given, else `vite.config.*` in the current
- * folder or in `dir`. The devbi() plugin whose project folder is `dir` (`devbi({ dir })` from the config's root).
- * Undefined when there is no config, no such plugin, or it has no devUsers. Throws when the given config cannot be read.
+ * folder or in `dir`. The devbi() plugin whose project folder is `dir` (`devbi({ dir })` from the config's root, which
+ * Vite resolves from the current folder). Undefined when no config found has such a plugin, or it has no devUsers.
+ * Throws when a config cannot be read, when the given one has no such plugin, and for devUsers the API would not take.
  */
 export async function loadDevUsers(dir: string, options: { config?: string; cwd?: string } = {}): Promise<{ users: Record<string, DevUser>; config: string } | undefined> {
   const root = path.resolve(dir);
@@ -42,28 +56,31 @@ export async function loadDevUsers(dir: string, options: { config?: string; cwd?
   const candidates = options.config
     ? [path.resolve(cwd, options.config)]
     : [...new Set([cwd, root])].flatMap((base) => CONFIG_FILES.map((f) => path.join(base, f))).filter((f) => existsSync(f));
+  // Windows and macOS: one folder, whatever the case of its name.
+  const same = (a: string, b: string) => (process.platform === "win32" || process.platform === "darwin" ? a.toLowerCase() === b.toLowerCase() : a === b);
   const { loadConfigFromFile } = await import("vite");
   for (const file of candidates) {
+    const shown = path.relative(cwd, file) || file;
     let loaded: Awaited<ReturnType<typeof loadConfigFromFile>>;
     try {
-      loaded = await loadConfigFromFile({ command: "serve", mode: "development" }, file, path.dirname(file), "silent");
+      loaded = await loadConfigFromFile({ command: "serve", mode: "development" }, file, cwd, "silent");
     } catch (e) {
-      if (options.config) throw new Error(`${options.config} を読めません: ${(e as Error).message}`);
-      continue;
+      throw new Error(`${shown} を読めません: ${(e as Error).message}`);
     }
-    if (!loaded) {
-      if (options.config) throw new Error(`${options.config} を読めません`);
-      continue;
-    }
-    const viteRoot = path.resolve(path.dirname(file), loaded.config.root ?? ".");
+    if (!loaded) throw new Error(`${shown} を読めません`);
+    // As Vite: root from the current folder (where vite runs), the plugin's dir from root.
+    const viteRoot = path.resolve(cwd, loaded.config.root ?? ".");
     for (const p of await flatten(loaded.config.plugins)) {
       const plugin = p as { name?: string; api?: { devbi?: DevbiPluginApi } };
       const api = plugin.name === "devbi" ? plugin.api?.devbi : undefined;
-      if (!api) continue;
-      if (path.resolve(viteRoot, api.dirOption ?? ".") !== root) continue;
+      if (!api || !same(path.resolve(viteRoot, api.dirOption ?? "."), root)) continue;
       if (!api.devUsers || !Object.keys(api.devUsers).length) return undefined;
-      return { users: api.devUsers, config: path.relative(cwd, file) || file };
+      await checkDevUsers(api.devUsers).catch((e: Error) => {
+        throw new Error(`${shown} の ${e.message}`);
+      });
+      return { users: api.devUsers, config: shown };
     }
+    if (options.config) throw new Error(`${shown} に、${path.relative(cwd, root) || "."} を指す devbi() がありません（devbi({ dir }) は Vite の root から、root は今のフォルダからです）`);
   }
   return undefined;
 }

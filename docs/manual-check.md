@@ -507,10 +507,10 @@ cd ../..
 | # | すること | 期待する結果 |
 | --- | --- | --- |
 | 209 | `pnpm exec devbi-check --dir e2e/rls` | 最初の行が「行レベルのモードです（api/orders.sql に :user. があるため）。データは読んでいません（devUsers を書くか --as を付けます）」。指標ファイルとタイル kpi-revenue・region は「確かめていません（… ログインした人が要ります …）」で、注意 1 件。`examples/sales/vite.config.ts` の `devbi()` は `e2e/rls` を指さないので、`devUsers` を読まない |
-| 210 | `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts` | 「データは yamada・suzuki・sato として読みました」。`models/my_sales.metrics.yaml（yamada として）: 2,322 行`、`（suzuki として）: 1,325 行`、sato は「確かめていません（sato は API の orders を読めません: 利用者 sato に属性 region がありません …）」。ダッシュボードも人ごとに 3 つ。最後に「⚠ models/my_sales.metrics.yaml: sato として: 確かめていません: …」と「エラー 0 件、注意 1 件」 |
-| 211 | `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts --as suzuki --values 3` | 「データは suzuki として読みました」。`kpi-revenue: 売上 ¥42,290,840`、`region: 地域 近畿、売上 ¥42,290,840`。最後に「問題はありません」。`--as tanaka` にすると「devUsers に tanaka がありません（e2e/rls.vite.config.ts にあるのは yamada・suzuki・sato）」で終了コード 2 |
+| 210 | `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts` | 「データを yamada・suzuki・sato として流しました」。`models/my_sales.metrics.yaml（yamada として）: 2,322 行`、`（suzuki として）: 1,325 行`、sato は「確かめていません（sato は API の orders を読めません: 利用者 sato に属性 region がありません …）」。ダッシュボードも人ごとに 3 つ。最後に「⚠ models/my_sales.metrics.yaml: sato として: 確かめていません: …」と「エラー 0 件、注意 1 件」 |
+| 211 | `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts --as suzuki --values 3` | 「データを suzuki として流しました」。`kpi-revenue: 売上 ¥42,290,840`、`region: 地域 近畿、売上 ¥42,290,840`。最後に「問題はありません」。`--as tanaka` にすると「devUsers に tanaka がありません（e2e/rls.vite.config.ts にあるのは yamada・suzuki・sato）」で終了コード 2 |
 | 212 | `pnpm exec devbi-inspect --dir e2e/rls --config e2e/rls.vite.config.ts --as yamada my_sales`、次に `--config` と `--as` を外して同じコマンド | 1 つ目は「2,322 行、9 列」で、地域は「1 種類 関東 (2,322)」。2 つ目は「API の orders を読んでいません: 行レベルのモードなので、ログインした人が要ります。…」 |
-| 213 | `pnpm exec vite --config e2e/rls.vite.config.ts` を動かしたまま、別のターミナルで `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts --as yamada --url http://127.0.0.1:5180/` | 2 行目に「置いた先 http://127.0.0.1:5180/: ログインが要る API です（行レベルのモードで動いています）」。`devbi-serve` を動かして `--url http://localhost:8080/` にすると、「行レベル制御を知っている API です」 |
+| 213 | `pnpm exec vite --config e2e/rls.vite.config.ts` を動かしたまま、別のターミナルで `pnpm exec devbi-check --dir e2e/rls --config e2e/rls.vite.config.ts --as yamada --url http://127.0.0.1:5180/` | 2 行目に「置いた先 http://127.0.0.1:5180/: ログインが要る API です（行レベルのモードで動いています）」。開発サーバーを止めて `pnpm serve`（行レベル制御を使っていないサンプルの `devbi-serve`）を動かし、`--url http://localhost:8080/` にすると、「✗ --url: http://localhost:8080/api/schema が、ログインしていない人に SQL の一覧を返しました。置いた先は行レベルのモードで動いていません …」で、終了コード 1 |
 
 ## 4. 自分の Excel で試す
 

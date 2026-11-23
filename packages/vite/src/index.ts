@@ -21,13 +21,13 @@ import { loadEnv, version as viteVersion, type Connect, type Plugin, type Previe
 import { parse as parseYaml } from "yaml";
 import type { IncomingMessage } from "node:http";
 import type { ApiHandler, RequestOptions } from "@devbi/server";
-import { devUserOf, type DevbiPluginApi } from "./dev-users.js";
+import { checkDevUsers, devUserOf, type DevbiPluginApi } from "./dev-users.js";
 import { createEditorHandler, sameMachine, versionOf } from "./editor.js";
 import { generate } from "./gen.js";
 
 export { generate, envDts, schemaNames, type GenerateResult } from "./gen.js";
 export { createEditorHandler, versionOf, NEW_NAME, type EditorOptions } from "./editor.js";
-export { loadDevUsers, devUserOf, type DevbiPluginApi } from "./dev-users.js";
+export { loadDevUsers, devUserOf, checkDevUsers, type DevbiPluginApi } from "./dev-users.js";
 
 export interface DevbiOptions {
   /** Directory holding `dashboards/`, `models/` and `data/`. Relative to the Vite root. Default: the root. */
@@ -725,17 +725,9 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
     async configureServer(server: ViteDevServer) {
       // devUsers as the API takes users: a mistake stops the dev server here, not each request later.
       if (options.devUsers) {
-        const { viewerOf } = await import("@devbi/server");
-        for (const [name, u] of Object.entries(options.devUsers)) {
-          try {
-            if (!name.trim()) throw new TypeError("名前は空でない文字で書いてください");
-            if (typeof u !== "object" || u === null || Array.isArray(u)) throw new TypeError("{ roles, attrs } の形で書いてください");
-            if (u.id !== undefined && (typeof u.id !== "string" || !u.id.trim())) throw new TypeError("id は空でない文字で書いてください");
-            viewerOf(devUserOf(name, u));
-          } catch (e) {
-            throw new Error(`devbi: devUsers の ${name}: ${(e as Error).message}`);
-          }
-        }
+        await checkDevUsers(options.devUsers).catch((e: Error) => {
+          throw new Error(`devbi: ${e.message}`);
+        });
       }
       mountApi(server.middlewares, server.httpServer, false);
       const handleEditor = createEditorHandler({

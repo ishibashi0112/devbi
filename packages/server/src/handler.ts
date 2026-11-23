@@ -635,7 +635,8 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       const status = e instanceof HttpError || e instanceof DatasetError ? e.status : 500;
       const message = (e as Error).message;
       if (status >= 500) log(message);
-      a = json(status, { error: message });
+      // A 401 of DevBI's own says it knows row-level security (devbi-check --url; a login in front has its own 401).
+      a = json(status, status === 401 ? { error: message, access: 1 } : { error: message });
     }
     if (method === "HEAD" && a.body) {
       if (a.body instanceof Readable) a.body.destroy();

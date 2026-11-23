@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ApiHandler, DevBIUser, RowLevelMode } from "@devbi/server";
+import * as arrow from "apache-arrow";
 import {
   apiCalls,
   checkQuery,
@@ -106,6 +107,8 @@ export interface CheckReport {
    * A period filters the tiles whose metrics file has its time column.
    */
   periods: Record<string, string[]>;
+  /** Read as several users: the periods of each (they count from the latest date of that user's rows). `periods` is then empty. */
+  periodsAs?: Record<string, Record<string, string[]>>;
 }
 
 export interface CheckOptions {
@@ -228,22 +231,24 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
     // Each user in turn; what all of them got is one finding, the rest say whose.
     const runs: { name: string; report: CheckReport }[] = [];
     for (const u of users) runs.push({ name: u.name, report: await checkOnce(dir, options, u) });
-    const seen = new Map<string, { finding: Finding; names: string[] }>();
+    const seen = new Map<string, { finding: Finding; names: Set<string> }>();
     for (const run of runs) {
       for (const f of run.report.findings) {
         const key = JSON.stringify([f.level, f.file, f.message]);
         const s = seen.get(key);
-        if (s) s.names.push(run.name);
-        else seen.set(key, { finding: f, names: [run.name] });
+        if (s) s.names.add(run.name);
+        else seen.set(key, { finding: f, names: new Set([run.name]) });
       }
     }
     const first = runs[0]!.report;
     report = {
       ...first,
       as: runs.map((r) => r.name),
-      findings: [...seen.values()].map(({ finding, names }) => (names.length === runs.length ? finding : { ...finding, as: names })),
+      findings: [...seen.values()].map(({ finding, names }) => (names.size === runs.length ? finding : { ...finding, as: [...names] })),
       views: runs.flatMap((r) => r.report.views.map((v) => ({ ...v, as: r.name }))),
       tiles: runs.flatMap((r) => r.report.tiles.map((t) => ({ ...t, as: r.name }))),
+      periods: {},
+      periodsAs: Object.fromEntries(runs.map((r) => [r.name, r.report.periods])),
     };
     for (const f of await sameRows(dir, options, users)) report.findings.push(f);
   }
@@ -302,25 +307,23 @@ async function sameRows(dir: string, options: CheckOptions, users: { name: strin
     const done = new Set<string>();
     for (const { name, params } of requests.values()) {
       if (!filtering.has(name) || done.has(name)) continue;
-      const got = new Map<string, string[]>();
+      const got: { name: string; rows: Cells }[] = [];
       for (const u of users) {
         try {
           const { bytes, rows } = await api.run(name, params, { user: u.user });
           // Everyone getting no rows says nothing about the filter (a period without data).
-          if (!rows) continue;
-          const key = Buffer.from(bytes).toString("base64");
-          got.set(key, [...(got.get(key) ?? []), u.name]);
+          if (rows) got.push({ name: u.name, rows: cellsOf(bytes) });
         } catch {
           // this user may not read it (403), or the database is away: not compared
         }
       }
-      const read = [...got.values()].flat();
-      if (got.size === 1 && read.length >= 2) {
+      const read = got.map((g) => g.name);
+      if (got.length >= 2 && sameButTheUser(got.map((g) => g.rows))) {
         done.add(name);
         out.push({
           level: "warning",
           file: `api/${name}.sql`,
-          message: `devUsers の ${read.join("・")} に、同じ行を返しました。:user.… で行を絞っているか確かめてください（属性の値が同じ人どうしなら問題ありません）`,
+          message: `devUsers の ${read.join("・")} に、同じ行を返しました（その人の値をくり返す列のほかは）。:user.… で行を絞っているか確かめてください（属性の値が同じ人どうしや、絞っても同じ行になるときは問題ありません）`,
         });
       }
     }
@@ -328,6 +331,37 @@ async function sameRows(dir: string, options: CheckOptions, users: { name: strin
     await api.close();
   }
   return out;
+}
+
+type Cells = string[][];
+
+/** A result's rows as text, column by column (JSON of each value; bigints and dates as their text). */
+function cellsOf(bytes: Uint8Array): Cells {
+  const table = arrow.tableFromIPC(bytes);
+  const columns = table.schema.fields.map((f) => f.name);
+  const text = (v: unknown) => JSON.stringify(v, (_k, x: unknown) => (typeof x === "bigint" ? x.toString() : x)) ?? "null";
+  return table.toArray().map((r: Record<string, unknown>) => columns.map((c) => text(r[c])));
+}
+
+/**
+ * Whether users got the same rows but for columns that only repeat a value of the user (`SELECT :user.id AS 見ている人, …`
+ * without a WHERE): the columns with one value in each user's rows and different values between users are left out,
+ * and the rows compared in any order. Nothing left to compare (`SELECT COUNT(*) … WHERE region = :user.region`, a
+ * number per user): not the same.
+ */
+function sameButTheUser(results: Cells[]): boolean {
+  const width = results[0]!.length ? results[0]![0]!.length : 0;
+  if (results.some((rows) => rows.some((r) => r.length !== width))) return false;
+  const kept: number[] = [];
+  for (let c = 0; c < width; c++) {
+    const single = results.map((rows) => (rows.every((r) => r[c] === rows[0]![c]) ? rows[0]![c] : undefined));
+    const echoed = single.every((v) => v !== undefined) && new Set(single).size > 1;
+    if (!echoed) kept.push(c);
+  }
+  if (!kept.length) return false;
+  const key = (rows: Cells) => JSON.stringify(rows.map((r) => JSON.stringify(kept.map((c) => r[c]))).sort());
+  const first = key(results[0]!);
+  return results.every((rows) => key(rows) === first);
 }
 
 /** `--url`: whether the API where the site is knows row-level security (`"access": 1` in api/schema). */
@@ -338,17 +372,29 @@ async function checkUrl(url: string, report: CheckReport, fetchFn: typeof fetch)
   const level: Level = report.rowLevel ? "error" : "warning";
   let res: Response;
   try {
-    res = await fetchFn(at, { headers: { Accept: "application/json" } });
+    res = await fetchFn(at, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
   } catch (e) {
     report.url = { url, access: false, status: 0, note: `つながりません: ${message(e)}` };
     return [{ level: "warning", file, message: `${at} につながりません（${message(e)}）。置いた先の API を確かめていません` }];
   }
-  const body = (await res.json().catch(() => undefined)) as { access?: unknown; error?: unknown } | undefined;
+  const body = (await res.json().catch(() => undefined)) as { access?: unknown; error?: unknown; user?: unknown } | undefined;
   if (res.ok && body?.access === 1) {
+    // Asked without signing in: an API in row-level mode answers 401, or says whom it answers as (a server in front).
+    if (report.rowLevel && !body.user) {
+      report.url = { url, access: true, status: res.status, note: "行レベル制御を知っている API ですが、行レベルのモードで動いていません" };
+      return [
+        {
+          level: "error",
+          file,
+          message: `${at} が、ログインしていない人に SQL の一覧を返しました。置いた先は行レベルのモードで動いていません（新しい api/*.sql を置いていない、ホストがログインした人を渡していない、など）。このままでは、だれにでも同じ行が返ります`,
+        },
+      ];
+    }
     report.url = { url, access: true, status: res.status, note: "行レベル制御を知っている API です" };
     return [];
   }
-  if (res.status === 401 && typeof body?.error === "string") {
+  // DevBI's own 401 says `"access": 1` too (another login in front answers 401 of its own).
+  if (res.status === 401 && body?.access === 1) {
     report.url = { url, access: true, status: 401, note: "ログインが要る API です（行レベルのモードで動いています）" };
     return [];
   }
@@ -1041,8 +1087,10 @@ async function rowLevelChecks(
   }
   if (mode.on) {
     for (const { view, file } of metrics.values()) {
+      const told = new Set<string>();
       for (const s of scanSources(view.model)) {
-        if (s.format === "api") continue;
+        if (s.format === "api" || told.has(s.path)) continue;
+        told.add(s.path);
         add("warning", file, `model の ${s.path} は、だれが開いても同じ行が届きます（行レベルのモード）。マスタなら問題ありません。人ごとに変えたいデータは、データベースに入れて api/*.sql から読みます`);
       }
     }
@@ -1070,7 +1118,7 @@ export function formatReport(report: CheckReport): string {
   const lines: string[] = [];
   if (report.rowLevel) {
     lines.push(
-      `行レベルのモードです（${report.rowLevel}）。${report.as?.length ? `データは ${report.as.join("・")} として読みました` : "データは読んでいません（devUsers を書くか --as を付けます）"}`,
+      `行レベルのモードです（${report.rowLevel}）。${report.as?.length ? `データを ${report.as.join("・")} として流しました` : "データは読んでいません（devUsers を書くか --as を付けます）"}`,
     );
   }
   if (report.url) lines.push(`置いた先 ${report.url.url}: ${report.url.note}`);
@@ -1088,7 +1136,8 @@ export function formatReport(report: CheckReport): string {
     for (const name of report.dashboards) {
       const list = report.tiles.filter((t) => t.dashboard === name && (run === undefined || t.as === run));
       const ran = list.filter((t) => t.rows !== undefined);
-      const period = Object.hasOwn(report.periods, name) ? `、date-range の最初の期間: ${report.periods[name]!.join("・")}` : "";
+      const periods = run !== undefined && report.periodsAs ? (report.periodsAs[run] ?? {}) : report.periods;
+      const period = Object.hasOwn(periods, name) ? `、date-range の最初の期間: ${periods[name]!.join("・")}` : "";
       lines.push(`dashboards/${name}.dash.json${whose(run)}: タイル ${list.length}（クエリを実行 ${ran.length}${period}）`);
       if (ran.some((t) => t.values)) {
         // --values: each tile's first rows, as the screen shows them.

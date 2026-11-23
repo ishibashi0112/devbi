@@ -519,7 +519,9 @@ describe("devbi-check and row-level security", () => {
       "api/forgot.sql": "SELECT name FROM customers",
       "api/typo.sql": "--- roles: 経理\n-- access: all\nSELECT 1 AS one",
       "api/byid.sql": "-- access: all\nSELECT * FROM orders WHERE customer_id = :user_id",
-      "models/xlsx.metrics.yaml": "model: SELECT * FROM read_xlsx('data/sales.xlsx', sheet = '明細')\nmeasures:\n  n: COUNT(*)\n",
+      // the same file twice: one warning
+      "models/xlsx.metrics.yaml":
+        "model: SELECT * FROM read_xlsx('data/sales.xlsx', sheet = '明細') UNION ALL SELECT * FROM read_xlsx('data/sales.xlsx', sheet = '明細')\nmeasures:\n  n: COUNT(*)\n",
       "dist/snapshots/orders.arrows": "everyone's rows, from before",
     });
     const r = await checkProject(dir, { env });
@@ -544,6 +546,10 @@ describe("devbi-check and row-level security", () => {
       "api/same.sql": "SELECT COUNT(*) AS n FROM customers WHERE :user.region IS NOT NULL",
       // no rows for anyone says nothing about the filter
       "api/empty.sql": "SELECT name FROM customers WHERE region = :user.region AND 1 = 0",
+      // the user's value in a column, and no WHERE: everyone's rows all the same
+      "api/echo.sql": "SELECT :user.region AS 見ている地域, name FROM customers ORDER BY name DESC",
+      // a number for each user
+      "api/count.sql": "SELECT :user.region AS 地域, COUNT(*) AS n FROM customers WHERE region = :user.region",
       "models/m.metrics.yaml": "model: SELECT * FROM read_api('mine')\ndimensions:\n  region: { column: 地域 }\nmeasures:\n  n: COUNT(*)\n",
       "dashboards/d.dash.json": JSON.stringify({ metrics: "m", tiles: [tile("k", 0, { type: "kpi", query: { measures: ["n"] } })] }),
     });
@@ -564,7 +570,8 @@ describe("devbi-check and row-level security", () => {
     ]);
     expect(all.findings.map((f) => [f.level, f.file, f.as, f.message])).toEqual([
       ["warning", "models/m.metrics.yaml", ["sato"], "確かめていません: sato は API の mine を読めません: 利用者 sato に属性 region がありません（api/mine.sql の :user.region）"],
-      ["warning", "api/same.sql", undefined, "devUsers の yamada・suzuki に、同じ行を返しました。:user.… で行を絞っているか確かめてください（属性の値が同じ人どうしなら問題ありません）"],
+      ["warning", "api/echo.sql", undefined, "devUsers の yamada・suzuki に、同じ行を返しました（その人の値をくり返す列のほかは）。:user.… で行を絞っているか確かめてください（属性の値が同じ人どうしや、絞っても同じ行になるときは問題ありません）"],
+      ["warning", "api/same.sql", undefined, "devUsers の yamada・suzuki に、同じ行を返しました（その人の値をくり返す列のほかは）。:user.… で行を絞っているか確かめてください（属性の値が同じ人どうしや、絞っても同じ行になるときは問題ありません）"],
     ]);
     const text = formatReport(all);
     expect(text).toContain("models/m.metrics.yaml（suzuki として）: 10 行");
@@ -590,6 +597,19 @@ describe("devbi-check and row-level security", () => {
     expect((await loadDevUsers(path.join(root, "proj"), { cwd: root, config: "rls.config.mjs" }))?.users).toEqual({ suzuki: {} });
     await expect(loadDevUsers(root, { cwd: root, config: "nope.mjs" })).rejects.toThrow(/nope\.mjs を読めません/);
     expect(await loadDevUsers(path.join(root, "elsewhere"), { cwd: root })).toBeUndefined();
+    // As Vite: root, and the plugin's dir without a root, from the current folder (not the config's folder)
+    mkdirSync(path.join(root, "e2e", "t1"), { recursive: true });
+    writeFileSync(path.join(root, "e2e", "t1.config.mjs"), `export default { plugins: [${plugin("e2e/t1", { kanto: {} })}] };`);
+    expect((await loadDevUsers(path.join(root, "e2e", "t1"), { cwd: root, config: "e2e/t1.config.mjs" }))?.users).toEqual({ kanto: {} });
+    // the given config, without a devbi() of that folder: said so
+    await expect(loadDevUsers(path.join(root, "elsewhere"), { cwd: root, config: "rls.config.mjs" })).rejects.toThrow("rls.config.mjs に、elsewhere を指す devbi() がありません");
+    // devUsers the API would not take, as the dev server stops on them
+    writeFileSync(path.join(root, "bad.config.mjs"), `export default { plugins: [${plugin(undefined, { bad: { roles: "営業" } })}] };`);
+    await expect(loadDevUsers(root, { cwd: root, config: "bad.config.mjs" })).rejects.toThrow("bad.config.mjs の devUsers の bad: user.roles は文字の配列で渡してください");
+    // a config found that cannot be read: said so (not "no devUsers")
+    const broken = mkdtempSync(path.join(tmpdir(), "devbi-devusers-"));
+    writeFileSync(path.join(broken, "vite.config.mjs"), "export default {");
+    await expect(loadDevUsers(broken, { cwd: broken })).rejects.toThrow(/vite\.config\.mjs を読めません/);
   });
 
   it("--url: whether the API where the site is knows row-level security", async () => {
@@ -600,13 +620,48 @@ describe("devbi-check and row-level security", () => {
       const r = await checkProject(dir, { env, url: "https://intra.example.com/devbi", fetch: f });
       return [r.url?.note, r.findings.filter((x) => x.file === "--url").map((x) => `${x.level} ${x.message}`)];
     };
-    expect(await at(answer(200, { datasets: [], snapshots: [], access: 1 }))).toEqual(["行レベル制御を知っている API です", []]);
-    expect(await at(answer(401, { error: "ログインしていません" }))).toEqual(["ログインが要る API です（行レベルのモードで動いています）", []]);
+    // asked without signing in: an API in row-level mode answers 401 (with "access": 1, as DevBI's own)
+    expect(await at(answer(401, { error: "ログインしていません", access: 1 }))).toEqual(["ログインが要る API です（行レベルのモードで動いています）", []]);
+    expect(await at(answer(200, { datasets: [], snapshots: [], access: 1, user: { id: "CORP\\yamada" } }))).toEqual(["行レベル制御を知っている API です", []]);
+    // it answers everyone: the SQL there is old, or nothing hands it users
+    expect(await at(answer(200, { datasets: [], snapshots: [], access: 1 }))).toEqual([
+      "行レベル制御を知っている API ですが、行レベルのモードで動いていません",
+      [expect.stringMatching(/^error .*api\/schema が、ログインしていない人に SQL の一覧を返しました。置いた先は行レベルのモードで動いていません/)],
+    ]);
+    // another login in front, with a JSON 401 of its own: not known
+    expect(await at(answer(401, { error: "Unauthorized" }))).toEqual(["確かめられません（HTTP 401）", [expect.stringMatching(/^warning .* が HTTP 401 で答えました/)]]);
+    const down = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    expect(await at(down)).toEqual([expect.stringMatching(/^つながりません/), [expect.stringMatching(/^warning .*api\/schema につながりません（fetch failed）/)]]);
     expect(await at(answer(200, { datasets: [], snapshots: [] }))).toEqual([
       "行レベル制御を知らない API です",
       [expect.stringMatching(/^error https:\/\/intra\.example\.com\/devbi\/api\/schema に "access": 1 がありません。行レベル制御を知らない古い DevBI の API です/)],
     ]);
     expect(await at(answer(401, "<html>login</html>", "text/html"))).toEqual(["確かめられません（HTTP 401）", [expect.stringMatching(/^warning .* が HTTP 401 で答えました/)]]);
+    // not row-level: an old API is a warning, and one that answers everyone is fine
+    const plain = rls({ "api/all.sql": "SELECT name FROM customers" });
+    const old = await checkProject(plain, { env, url: "https://intra.example.com/devbi/", fetch: answer(200, { datasets: [], snapshots: [] }) });
+    expect(old.findings.filter((x) => x.file === "--url").map((x) => x.level)).toEqual(["warning"]);
+    const now = await checkProject(plain, { env, url: "https://intra.example.com/devbi/", fetch: answer(200, { datasets: [], snapshots: [], access: 1 }) });
+    expect(now.findings.filter((x) => x.file === "--url")).toEqual([]);
+  }, 60_000);
+
+  it("each user's periods: they count from the latest date of that user's rows", async () => {
+    const dir = rls({
+      "api/mine.sql": "SELECT o.order_date AS 受注日, c.region AS 地域 FROM orders o JOIN customers c ON c.id = o.customer_id WHERE c.region = :user.region",
+      "models/m.metrics.yaml": "model: SELECT CAST(受注日 AS DATE) AS 受注日, 地域 FROM read_api('mine')\ntime: { column: 受注日 }\nmeasures:\n  n: COUNT(*)\n",
+      "dashboards/d.dash.json": JSON.stringify({ metrics: "m", tiles: [tile("p", 0, { type: "date-range", h: 1, options: { default: "latest_day" } }), tile("k", 1, { type: "kpi", query: { measures: ["n"] } })] }),
+    });
+    // 関東's rows end on 2026-10-30, 中国・四国's on 2026-10-22
+    const two = [users[0]!, { name: "chugoku", user: { id: "chugoku", attrs: { region: "中国・四国" } } }];
+    const one = async (u: (typeof users)[number]) => (await checkProject(dir, { env, users: [u] })).periods["d"];
+    const all = await checkProject(dir, { env, users: two });
+    expect(all.periods).toEqual({});
+    expect(await one(two[1]!)).toEqual(["受注日 2026/10/22（2026-10-22〜2026-10-22）"]);
+    expect(all.periodsAs).toEqual({ yamada: { d: await one(two[0]!) }, chugoku: { d: await one(two[1]!) } });
+    const text = formatReport(all);
+    for (const u of two) expect(text).toContain(`dashboards/d.dash.json（${u.name} として）: タイル 2（クエリを実行 1、date-range の最初の期間: ${(await one(u))!.join("・")}）`);
   }, 60_000);
 });
 

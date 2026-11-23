@@ -213,7 +213,7 @@ export async function createNodeEngine(dir: string, options: NodeEngineOptions =
           // Row-level security: nobody signed in, or this user may not read it. Not a mistake in the files.
           if (status === 401) {
             throw new NotChecked(
-              `API の ${s.path} を読んでいません: 行レベルのモードなので、ログインした人が要ります。vite.config.ts の devbi({ devUsers }) に開発用の利用者を書くと、その人として確かめます（--as <名前>）`,
+              `API の ${s.path} を読んでいません: 行レベルのモードなので、ログインした人が要ります。vite.config.ts の devbi({ devUsers }) に開発用の利用者を書き、--as <名前> でその人として読みます（devbi-check は、付けなければ全員として）`,
             );
           }
           if (status === 403) throw new NotChecked(`${options.userName ?? options.user?.id ?? "この利用者"} は API の ${s.path} を読めません: ${message}`);
