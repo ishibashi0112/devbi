@@ -18,6 +18,7 @@ import {
   tableColumnProblems,
   tableColumns,
   tableOptions,
+  withColumnOptions,
   type DashboardParam,
   type FieldInfo,
   type ParamValue,
@@ -26,7 +27,7 @@ import {
   type TileProps,
 } from "devbi";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { useDevbi, useParamsVersion, type TableExport } from "../context.js";
+import { makeFormatters, useDevbi, useParamsVersion, type TableExport } from "../context.js";
 import { popups, useTheme } from "./grid-theme.js";
 import { dateKey, fromDateKey } from "./util.js";
 
@@ -49,8 +50,8 @@ const Grid = createSpreadsheetGrid({
 
 type ValueKind = "number" | "date" | "boolean" | "text";
 
-/** What a column holds: from its kind, or its first value (a `-- key:` number is a dimension). */
-function valueKind(field: FieldInfo, rows: readonly Row[]): ValueKind {
+/** What a column holds: from its kind, or its first value (a `-- key:` number is a dimension). None: no value to tell. */
+function valueKind(field: FieldInfo, rows: readonly Row[]): ValueKind | undefined {
   if (field.kind === "time") return "date";
   if (field.kind === "measure") return "number";
   for (const r of rows) {
@@ -58,7 +59,7 @@ function valueKind(field: FieldInfo, rows: readonly Row[]): ValueKind {
     if (v === null || v === undefined) continue;
     return typeof v === "number" ? "number" : v instanceof Date ? "date" : typeof v === "boolean" ? "boolean" : "text";
   }
-  return "text";
+  return undefined;
 }
 
 const FILTERS = { number: "numberSet", date: "dateSet", boolean: "textSet", text: "textSet" } as const;
@@ -115,18 +116,36 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
  * shows hidden columns, all in the browser. `options.click` puts a clicked row's values in the dashboard's
  * parameters (a second click puts them back to their default).
  */
-export function DatasetTable({ rows, fields, format, tile, query }: TileProps) {
+export function DatasetTable({ rows, fields: resultFields, tile, query }: TileProps) {
   const ctx = useDevbi();
   useParamsVersion();
   const ref = useRef<HTMLDivElement>(null);
   const grid = useRef<SpreadsheetGridHandle<Row>>(null);
   const theme = useTheme(ref);
   const { options, problems } = useMemo(() => tableOptions(tile.options), [tile.options]);
+  // A result with no rows can say less about its columns (SQLite: an expression's type comes from its values, so
+  // 金額 = qty * price is no longer a number): the columns as the last rows had them.
+  const last = useRef(new Map<string, FieldInfo>());
+  const settled = useMemo(() => {
+    if (!rows.length) return resultFields.map((f) => last.current.get(f.name) ?? f);
+    last.current = new Map(resultFields.map((f) => [f.name, f]));
+    return resultFields;
+  }, [resultFields, rows]);
+  // The labels and formats of its options, here: a tile written out as code ("コードにする") passes its options to
+  // this component itself.
+  const fields = useMemo(() => withColumnOptions(settled, options), [settled, options]);
+  const { format } = useMemo(() => makeFormatters(undefined, fields), [fields]);
   const missing = useMemo(() => (fields.length ? tableColumnProblems(options, fields.map((f) => f.name)) : []), [options, fields]);
   const views = useMemo(() => tableColumns(fields, options), [fields, options]);
   // The columns change with the result's columns and the options, not with each new set of rows: the viewer's
-  // changes (pins, groups, shown columns) stay while the parameters change.
-  const kinds = views.map((v) => valueKind(v.field, rows));
+  // changes (pins, groups, shown columns) stay while the parameters change. A column with no value in these rows (none
+  // at all, or only empty ones) keeps the kind it had.
+  const known = useRef(new Map<string, ValueKind>());
+  const kinds = views.map((v) => {
+    const kind = valueKind(v.field, rows);
+    if (kind) known.current.set(v.field.name, kind);
+    return kind ?? known.current.get(v.field.name) ?? "text";
+  });
   const signature = JSON.stringify([views, kinds]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const base = useMemo(() => views.map((v, i) => gridColumn(v, kinds[i]!, format)), [signature]);
@@ -219,7 +238,13 @@ export function DatasetTable({ rows, fields, format, tile, query }: TileProps) {
     (unknown.length
       ? `options.click の ${unknown.join("、")} はこのダッシュボードのパラメーターにありません（dash.json の params に type を書くか、そのパラメーターを使うデータセットの表を置いてください）`
       : undefined);
-  if (problem) return <div className="devbi-error">{problem}</div>;
+  // The ref here too: the grid's light / dark is read from the first element drawn.
+  if (problem)
+    return (
+      <div ref={ref} className="devbi-error">
+        {problem}
+      </div>
+    );
 
   return (
     <div ref={ref} className={`devbi-grid-wrap${click.length ? " devbi-grid-clickable" : ""}`} onKeyDown={onKeyDown}>

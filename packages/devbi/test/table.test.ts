@@ -93,6 +93,7 @@ describe("tableColumns", () => {
     const rows = [
       { 顧客ID: 1, 地域: "関東", 顧客: "富士物産", 受注数: 3, 金額: 1200, 最終受注日: null },
       { 顧客ID: 2, 地域: "近畿", 顧客: "浪速工業", 受注数: 1, 金額: null, 最終受注日: null },
+      { 顧客ID: 3, 地域: "関東", 顧客: "新規商事", 受注数: null, 金額: 600, 最終受注日: null },
     ];
     const { options } = tableOptions({
       columns: [{ field: "顧客ID", hidden: true }, "顧客", { field: "受注数", agg: "count" }, { field: "金額", agg: "avg" }],
@@ -102,7 +103,8 @@ describe("tableColumns", () => {
     const view = tableView(FIELDS, rows, options);
     expect(view.fields.map((f) => f.name)).toEqual(["地域", "顧客", "受注数", "金額"]);
     expect(view.rows).toBe(rows);
-    expect(view.total).toEqual({ 地域: null, 顧客: null, 受注数: 2, 金額: 1200 });
+    // count is every row (as the grid counts), avg skips the empty values
+    expect(view.total).toEqual({ 地域: null, 顧客: null, 受注数: 3, 金額: 900 });
     expect(tableView(FIELDS, rows, tableOptions(undefined).options).total).toBeUndefined();
   });
 });

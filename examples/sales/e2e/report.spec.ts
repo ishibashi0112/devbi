@@ -157,6 +157,29 @@ test("a click on a customer's row shows their lines (options.click); a second cl
   expect(seen.errors).toEqual([]);
 });
 
+test("the viewer's changes to a table stay while the parameters change, through a reading with no rows", async ({ page }) => {
+  await page.goto("/#/sales-report?from=2024-04-01&to=2024-04-30");
+  await expect(lines(page)).toContainText("J10001");
+  const headers = lines(page).locator("[role=columnheader] .ssg-header-label");
+  const before = await headers.allInnerTexts();
+  const header = lines(page).getByRole("columnheader", { name: /商品分類/ });
+  await header.hover();
+  await header.getByRole("button", { name: "列メニュー" }).click();
+  await page.getByRole("menuitem", { name: "この列でグループ化" }).click();
+  await expect.poll(() => headers.allInnerTexts()).not.toEqual(before);
+  const grouped = await headers.allInnerTexts();
+  // 受注日（まで） before 受注日（から）: no rows (行番号 has no value to tell that it is a number).
+  const to = field(page, "to").getByLabel("受注日（まで）");
+  await to.fill("2024-03-01");
+  await to.press("Enter");
+  await expect(lines(page)).toContainText("行がありません");
+  await to.fill("2024-04-30");
+  await to.press("Enter");
+  // April 2024: 172 lines, 1,667 pieces, ¥5,567,780.
+  await expect(lines(page).locator(".ssg-total-row").last()).toContainText("1,667¥5,567,780");
+  await expect(headers).toHaveText(grouped);
+});
+
 test("the viewer searches and filters a column; Excel writes the table as it is then, with its totals", async ({ page }) => {
   await page.goto("/#/sales-report?from=2024-04-01&to=2024-04-30");
   await expect(lines(page)).toContainText("J10001");

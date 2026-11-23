@@ -123,16 +123,18 @@ function TextInput({
 }
 
 /**
- * An object written as JSON (an explore tile's layout). It is written to dash.json when the box loses focus, when
- * another tile is pressed and on ⌘S (through `registerFlush`), and only when the text is a JSON object; empty removes
- * the key. Until then the text stays as typed, with what is wrong under it.
+ * An object or a list written as JSON (an explore tile's layout, a report table's columns). It is written to dash.json
+ * when the box loses focus, when another tile is pressed and on ⌘S (through `registerFlush`), and only when the text
+ * is JSON of the option's kind (`array`: a list, else an object); empty removes the key. Until then the text stays as
+ * typed, with what is wrong under it.
  */
 function JsonInput({
   value,
+  kind,
   onChange,
   registerFlush,
   ...rest
-}: Ids & { value: unknown; onChange(value: Record<string, unknown> | undefined): void; registerFlush(flush: Flush): () => void }) {
+}: Ids & { value: unknown; kind: "object" | "array"; onChange(value: unknown): void; registerFlush(flush: Flush): () => void }) {
   const shown = value === undefined ? "" : JSON.stringify(value, null, 2);
   const [text, setText] = useState(shown);
   const [error, setError] = useState<string>();
@@ -151,6 +153,11 @@ function JsonInput({
       if (value !== undefined) onChange(undefined);
       return;
     }
+    // Not changed (a groupBy written by hand as one name stays as it is).
+    if (text === shown) {
+      setError(undefined);
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
@@ -158,8 +165,8 @@ function JsonInput({
       setError(`JSON として読めません（${(e as Error).message}）`);
       return;
     }
-    if (!isObj(parsed)) {
-      setError("{ } で囲んだ JSON のオブジェクトにしてください");
+    if (kind === "array" ? !Array.isArray(parsed) : !isObj(parsed)) {
+      setError(kind === "array" ? "[ ] で囲んだ JSON の配列にしてください" : "{ } で囲んだ JSON のオブジェクトにしてください");
       return;
     }
     setError(undefined);
@@ -1048,7 +1055,8 @@ function OptionsEditor({
       );
     }
     if (o.input === "metrics") return <MetricsSelect {...ids} metrics={metrics} value={str(value)} empty="ダッシュボードと同じ" onChange={(v) => set(key, v)} />;
-    if (o.input === "json") return <JsonInput {...ids} value={value} onChange={(v) => set(key, v)} registerFlush={registerFlush} />;
+    if (o.input === "json")
+      return <JsonInput {...ids} value={value} kind={o.type === "array" ? "array" : "object"} onChange={(v) => set(key, v)} registerFlush={registerFlush} />;
     return <TextInput {...ids} multiline={o.input === "text"} value={str(value)} onChange={(v, merge) => set(key, v, merge)} />;
   };
   return (

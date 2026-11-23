@@ -238,17 +238,14 @@ export function tableColumns(fields: readonly FieldInfo[], options: TableOptions
   return [...groups, ...views.filter((v) => !v.group)];
 }
 
-/** A column's aggregate over the rows (nulls skipped; `count` counts the rows with a value). */
+/** A column's aggregate over the rows (nulls skipped; `count` counts every row, as the grid does). */
 function aggregate(rows: readonly Row[], field: string, agg: TableAggregate): number | null {
+  if (agg === "count") return rows.length;
   const values: number[] = [];
-  let count = 0;
   for (const r of rows) {
     const v = r[field];
-    if (v === null || v === undefined || v === "") continue;
-    count++;
     if (typeof v === "number" && Number.isFinite(v)) values.push(v);
   }
-  if (agg === "count") return count;
   if (!values.length) return null;
   if (agg === "sum") return values.reduce((a, b) => a + b, 0);
   if (agg === "avg") return values.reduce((a, b) => a + b, 0) / values.length;

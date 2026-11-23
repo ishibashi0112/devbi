@@ -4,8 +4,6 @@ import {
   customQuery,
   customSelectable,
   resolveComponent,
-  tableOptions,
-  withColumnOptions,
   type BuiltinTileType,
   type Filter,
   type Query,
@@ -113,11 +111,8 @@ export function TileFrame({ tile, style }: { tile: TileSpec; style: CSSPropertie
     },
     [ctx.selection, tile.id, selectable, isDataset],
   );
-  // A dataset table's columns take their labels and formats from its options (`columns`).
-  const fields = useMemo(
-    () => (isDataset && tile.type === "table" ? withColumnOptions(data.fields, tableOptions(tile.options).options) : data.fields),
-    [isDataset, tile.type, tile.options, data.fields],
-  );
+  // (A dataset table takes its columns' labels and formats from its options itself: DatasetTable.)
+  const fields = data.fields;
   const { format, label } = useMemo(() => makeFormatters(view, fields), [view, fields]);
   const [ref, size] = useSize();
 

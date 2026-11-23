@@ -222,8 +222,9 @@ async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
   const fy = view?.time?.fiscalYearStart ?? 1;
   const result = await runQuery(ctx, query, filters);
   // A report's table: as the viewer has it on the page (the columns shown, filtered, sorted, its totals row), else as
-  // its options first show it.
-  const table = query.dataset !== undefined && tile.type === "table" ? datasetTable(ctx, tile, result.rows, result.fields) : undefined;
+  // its options first show it. (A table written out as code is on the page as a table too.)
+  const table =
+    query.dataset !== undefined && (tile.type === "table" || ctx.tables.has(tile.id)) ? datasetTable(ctx, tile, result.rows, result.fields) : undefined;
   const out = table ?? result;
   const cut = out.rows.length > MAX_ROWS - ROOM;
   if (cut) out.rows = out.rows.slice(0, MAX_ROWS - ROOM);
@@ -254,6 +255,8 @@ async function addTile(ctx: DevbiContextValue, book: Workbook, tile: TileSpec): 
 function datasetTable(ctx: DevbiContextValue, tile: TileSpec, rows: readonly Row[], fields: FieldInfo[]): TableExport | undefined {
   const shown = ctx.tables.get(tile.id)?.();
   if (shown && shown.fields.length) return shown;
+  // A table written out as code has its options in its file: its rows as they came.
+  if (tile.type !== "table") return undefined;
   const { options, problems } = tableOptions(tile.options);
   if (problems.length) return undefined;
   const view = tableView(fields, rows, options);

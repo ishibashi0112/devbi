@@ -8,7 +8,9 @@ import { defaultClientConditions, defineConfig } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
 export const work = path.join(root, "e2e-work");
-export const copied = ["dashboards/sales.dash.json", "dashboards/sales", "models/sales.metrics.yaml", "data/sales.xlsx"];
+// The SQL (api/) and the sample's SQLite (db/; DEVBI_DB in .env is relative to the folder) for the report's tables:
+// the test that edits one puts sales-report.dash.json there itself (with one dashboard, #/ opens it).
+export const copied = ["dashboards/sales.dash.json", "dashboards/sales", "models/sales.metrics.yaml", "data/sales.xlsx", "api", "db/sales.sqlite"];
 
 rmSync(work, { recursive: true, force: true });
 for (const p of copied) cpSync(path.join(root, p), path.join(work, p), { recursive: true });

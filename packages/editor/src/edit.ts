@@ -115,13 +115,13 @@ export function changeType(spec: RawDashboard, tile: RawTile, type: BuiltinTileT
     const metricsKey = Object.hasOwn(query, "metrics") ? keep("metrics") : m !== undefined ? { metrics: m } : {};
     next = setTileKey(next, "query", { ...metricsKey, ...rest, ...keep("filters"), ...keep("period") });
   }
-  // The options the new type has too; a report's table's (columns, totals… of a dataset) only from one of those
-  // (a pivot's columns and totals mean something else).
+  // The options the new type has too, meaning the same: a report's table's (columns, totals… of a dataset) only to
+  // and from another one of those (a pivot's columns and totals mean something else).
   const before: Record<string, TileOptionSchema> =
     typeof tile.type === "string" && Object.hasOwn(TILE_TYPES, tile.type) ? TILE_TYPES[tile.type as BuiltinTileType].options : {};
   const keeps = (k: string) => {
     const o = (info.options as Record<string, TileOptionSchema>)[k];
-    return o !== undefined && (!o.dataset || before[k]?.dataset === true);
+    return o !== undefined && !!o.dataset === !!before[k]?.dataset;
   };
   const merged: Obj = { ...(isObj(fresh.options) ? fresh.options : {}), ...Object.fromEntries(Object.entries(old).filter(([k]) => keeps(k))) };
   const metricsName = own ?? (base.needsMetrics ? base.view?.name : undefined);

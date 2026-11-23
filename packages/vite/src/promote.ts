@@ -90,6 +90,8 @@ export function promotedTileSource(tile: PromotedTile, options: { name: string; 
   const query = hasQuery ? (tile.query ?? {}) : undefined;
   // Malloy or SQL: its columns are what the query says, not names to type (rows are plain rows).
   const custom = typeof query?.malloy === "string" ? "Malloy" : typeof query?.sql === "string" ? "SQL" : undefined;
+  // A dataset (a report's table): the rows of its SQL file, with the dashboard's parameters.
+  const dataset = typeof query?.dataset === "string" ? `api/${oneLine(query.dataset)}.sql` : undefined;
   const opts = tile.options && Object.keys(tile.options).length ? tile.options : undefined;
   const lines = [
     `// 「${title}」のタイル。GUI エディタの「コードにする」で、${what}から書き出したもの。`,
@@ -109,6 +111,8 @@ export function promotedTileSource(tile: PromotedTile, options: { name: string; 
       `export const query: Query = ${literal(query, "")};`,
       "",
     );
+  } else if (query && dataset) {
+    lines.push(`// 何を出すか（${dataset} の SQL の結果。パラメーターはダッシュボードの欄の値）`, `export const query = defineQuery(${literal(query, "")});`, "");
   } else if (query) {
     const metrics = typeof query.metrics === "string" ? query.metrics : options.metrics;
     lines.push(
@@ -124,8 +128,13 @@ export function promotedTileSource(tile: PromotedTile, options: { name: string; 
     "",
     `export default function ${options.name}(props: TileProps${query && !custom ? "<RowOf<typeof query>>" : ""}) {`,
   );
-  const columns = query && !custom ? columnsOf(query, options.view) : [];
-  if (query) {
+  const columns = query && !custom && !dataset ? columnsOf(query, options.view) : [];
+  if (query && dataset) {
+    lines.push(
+      "  // 自分で描くときは、下の return を書き換える。props.rows が SQL の結果の行（パラメーターの値で読んだもの）で、",
+      `  // 列は ${dataset} の SELECT の列。props.fields に名前と見出し、値の書式は props.format。`,
+    );
+  } else if (query) {
     lines.push("  // 自分で描くときは、下の return を書き換える。props.rows が集計済みの行（ほかのタイルの選択で絞ったもの）で、");
     if (columns.length) {
       lines.push(`  // 列は ${oneLine(columns.map((c) => c.about).join("、"))}。例:`);
