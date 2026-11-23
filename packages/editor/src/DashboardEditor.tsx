@@ -6,7 +6,7 @@ import { ReactGridLayout, useContainerWidth, verticalCompactor, type Layout } fr
 import { EditorError, readDashboard, writeDashboard, writeTileFile, type DashboardFile, type TileFile } from "./api.js";
 import { metricsNameOf, promoteTile, updateTile, viewFor } from "./edit.js";
 import { boxesOf, newTile, placeTiles, type Box, type RawDashboard } from "./layout.js";
-import { Panel, type Flush } from "./Panel.js";
+import { Panel, type DescribeApi, type Flush } from "./Panel.js";
 import { injectEditorStyles } from "./styles.js";
 
 /** Narrower than this, the 12 columns are too thin to drag. */
@@ -456,13 +456,26 @@ function Body(props: BodyProps) {
   // One context while the editor is open, so a change to one tile runs only that tile's query again, and the period
   // and other selections stay. A new one when the dashboard's metrics file (every tile's default) changes, with the
   // tiles started over (keyed), so the period picker takes its default again. Its `dashboard.tiles` may lag behind;
-  // the tiles here come from `valid`.
-  const metricsKey = valid ? (valid.metrics ?? "") : null;
+  // the tiles here come from `valid`. Also when the parameters' sources change (a table set to a dataset, or to another
+  // one), as the parameters' bar is made with the context.
+  const metricsKey = valid
+    ? JSON.stringify([valid.metrics ?? "", valid.params ?? null, valid.tiles.flatMap((t) => (t.query?.dataset === undefined ? [] : [[t.query.dataset, t.query.params ?? null]]))])
+    : null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const context = useMemo(() => valid, [metricsKey]);
+  // The dev server's API (a report table's columns: <api>/describe), where and as the page reads it.
+  const api = useMemo(
+    (): DescribeApi => ({
+      url: new URL((project.apiUrl ?? "api/").replace(/([^/])$/, "$1/"), new URL(project.baseUrl, document.baseURI)).href,
+      fetch: project.fetch ?? fetch.bind(globalThis),
+    }),
+    [project],
+  );
   const panel = (live: boolean, clearSelection: (id: string) => void) => (
     <Panel
       metrics={project.metrics}
+      datasets={project.datasets}
+      api={api}
       name={name}
       spec={spec}
       selected={props.selected}

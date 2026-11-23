@@ -10,7 +10,10 @@ import {
   EXPLORE_ROWS,
   isoDate,
   resolveComponent,
+  TABLE_AGGREGATES,
+  tableOptions,
   type BuiltinTileType,
+  type DatasetInfo,
   type Grain,
   type MetricsView,
   type Query,
@@ -20,8 +23,11 @@ import {
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   changeType,
+  columnRows,
+  datasetOf,
   fieldsOf,
   filterRow,
+  groupsOf,
   idProblem,
   isObj,
   metricsNameOf,
@@ -29,7 +35,10 @@ import {
   queryMode,
   readsRows,
   rowFilter,
+  setColumnKey,
+  setColumnRows,
   setDashboardKey,
+  setDataset,
   setOption,
   setQueryKey,
   setQueryMode,
@@ -38,6 +47,7 @@ import {
   sortSpecs,
   toggle,
   updateTile,
+  type ColumnRow,
   type FilterRow,
 } from "./edit.js";
 import type { RawDashboard, RawTile } from "./layout.js";
@@ -56,6 +66,10 @@ export type Flush = () => { from: string; to: string } | undefined;
 
 export interface PanelProps {
   metrics: Record<string, MetricsView>;
+  /** The project's datasets (api/*.sql), for a report table. */
+  datasets: Record<string, DatasetInfo>;
+  /** The dev server's API, where a dataset's columns are asked (`<url>describe`). */
+  api: DescribeApi;
   /** The dashboard's file name (`dashboards/<name>.dash.json`). */
   name: string;
   spec: RawDashboard;
@@ -265,7 +279,7 @@ function DashboardPanel({ metrics, name, spec, onChange }: PanelProps) {
   );
 }
 
-function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemove, clearSelection, registerFlush, onPromote, dirty }: PanelProps & { tile: RawTile }) {
+function TilePanel({ metrics, datasets, api, name, spec, tile, live, onSelect, onChange, onRemove, clearSelection, registerFlush, onPromote, dirty }: PanelProps & { tile: RawTile }) {
   const onTile = (update: (t: RawTile) => RawTile, merge?: string) => onChange(updateTile(spec, tile.id, update), merge);
   const type = typeof tile.type === "string" ? tile.type : undefined;
   const builtin = type && Object.hasOwn(TILE_TYPES, type) ? (type as BuiltinTileType) : undefined;
@@ -318,7 +332,19 @@ function TilePanel({ metrics, name, spec, tile, live, onSelect, onChange, onRemo
           if (follow) onSelect(id);
         }}
       />
-      {showQuery && <QueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} />}
+      {showQuery && (
+        <QueryEditor
+          metrics={metrics}
+          datasets={datasets}
+          api={api}
+          spec={spec}
+          tile={tile}
+          live={live}
+          onTile={onTile}
+          clearSelection={clearSelection}
+          registerFlush={registerFlush}
+        />
+      )}
       {builtin && shownOptions(builtin, tile).length > 0 && (
         <OptionsEditor metrics={metrics} spec={spec} tile={tile} type={builtin} onTile={onTile} clearSelection={clearSelection} registerFlush={registerFlush} />
       )}
@@ -433,34 +459,62 @@ type OnTile = (update: (t: RawTile) => RawTile, merge?: string) => void;
 
 function QueryEditor({
   metrics,
+  datasets,
+  api,
   spec,
   tile,
   live,
   onTile,
+  clearSelection,
   registerFlush,
 }: {
   metrics: Record<string, MetricsView>;
+  datasets: Record<string, DatasetInfo>;
+  api: DescribeApi;
   spec: RawDashboard;
   tile: RawTile;
   live: boolean;
   onTile: OnTile;
+  clearSelection(id: string): void;
   registerFlush(flush: Flush): () => void;
 }) {
   const query = (isObj(tile.query) ? tile.query : {}) as Query;
   const names = Object.keys(metrics).sort();
-  if (typeof query.dataset === "string") {
-    // A dataset's rows (a report): its SQL file and parameters are edited as files for now.
+  const dataset = datasetOf(tile);
+  // A table reads a metrics file (aggregated) or a dataset's rows as they are (a report).
+  const source =
+    tile.type === "table" && (Object.keys(datasets).length > 0 || dataset !== undefined) ? (
+      <SourceSelect
+        dataset={dataset !== undefined}
+        datasets={datasets}
+        onChange={(name) => {
+          // A metrics table's clicked rows filter the others; a dataset's table does not select (as 種類 does).
+          clearSelection(tile.id);
+          onTile((t) => setDataset(spec, t, name, metrics));
+        }}
+      />
+    ) : null;
+  if (dataset !== undefined) {
+    if (tile.type !== "table") {
+      return (
+        <>
+          <h3>データ</h3>
+          <p className="devbi-hint">
+            データセット {dataset}（api/{dataset}.sql）の結果をそのまま出します。SQL とパラメーターは、そのファイルと dash.json の query.params・params で書きかえてください。
+          </p>
+        </>
+      );
+    }
     return (
       <>
         <h3>データ</h3>
-        <p className="devbi-hint">
-          データセット {query.dataset}（api/{query.dataset}.sql）の結果をそのまま出します。SQL とパラメーターは、そのファイルと dash.json の query.params・params で書きかえてください。
-        </p>
+        {source}
+        <DatasetEditor key={dataset} tile={tile} name={dataset} datasets={datasets} api={api} onTile={onTile} onDataset={(n) => onTile((t) => setDataset(spec, t, n, metrics))} />
       </>
     );
   }
   const mode = queryMode(query);
-  if (mode !== "names") return <CustomQueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} />;
+  if (mode !== "names") return <CustomQueryEditor metrics={metrics} spec={spec} tile={tile} live={live} onTile={onTile} registerFlush={registerFlush} source={source} />;
   const name = metricsNameOf(metrics, spec, tile);
   const view = name && Object.hasOwn(metrics, name) ? metrics[name] : undefined;
   const set = (key: keyof Query, value: unknown, merge?: string) => onTile((t) => setQueryKey(t, key, value), merge);
@@ -482,6 +536,7 @@ function QueryEditor({
   return (
     <>
       <h3>データ</h3>
+      {source}
       {!rows && <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view, metrics))} />}
       {problem && <p className="devbi-ed-warn">{problem}</p>}
       {unused.length > 0 && (
@@ -543,6 +598,250 @@ function QueryEditor({
   );
 }
 
+/** A table's data: a metrics file's measures (aggregated in the browser), or a dataset's rows as they are. */
+function SourceSelect({ dataset, datasets, onChange }: { dataset: boolean; datasets: Record<string, DatasetInfo>; onChange(name: string | undefined): void }) {
+  const names = Object.keys(datasets).sort();
+  return (
+    <Field label="データの元" hint="データセットは、サーバーの api/<名前>.sql の結果を、パラメーターの値で読んでそのまま出す表（レポート）">
+      {(ids) => (
+        <select {...ids} value={dataset ? "dataset" : "metrics"} onChange={(e) => onChange(e.target.value === "dataset" ? names[0] : undefined)}>
+          <option value="metrics">指標ファイル（集計する）</option>
+          <option value="dataset" disabled={!dataset && !names.length}>
+            データセット（api/ の SQL）
+          </option>
+        </select>
+      )}
+    </Field>
+  );
+}
+
+/** A dataset's columns as its database describes them (`POST <api>/describe`, the dev server's), or why not. */
+interface Described {
+  columns?: { name: string; type?: string; dbType?: string; nullable?: boolean }[];
+  error?: string;
+}
+
+const describedCache = new Map<string, Promise<Described>>();
+
+/** Where the editor asks for a dataset's columns: the page's API folder (absolute, ending in /) and its fetch. */
+export interface DescribeApi {
+  url: string;
+  fetch: typeof fetch;
+}
+
+async function askColumns(api: DescribeApi, name: string): Promise<Described> {
+  let res: Response;
+  try {
+    res = await api.fetch(new URL("describe", api.url).href, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+  } catch (e) {
+    return { error: `dev server につながりません（止まっていませんか）: ${(e as Error).message}` };
+  }
+  const data = (await res.json().catch(() => ({}))) as { columns?: Described["columns"]; error?: unknown };
+  if (!res.ok || !Array.isArray(data.columns)) return { error: typeof data.error === "string" ? data.error : `${res.status} ${res.statusText}` };
+  return { columns: data.columns };
+}
+
+/** The columns of a dataset, asked once per dataset while the editor is open (again with `retry`). */
+function useDescribed(api: DescribeApi, name: string): { described: Described | undefined; retry(): void } {
+  const key = `${api.url}\n${name}`;
+  const [state, setState] = useState<{ key: string; described: Described } | undefined>();
+  const [round, setRound] = useState(0);
+  useEffect(() => {
+    let live = true;
+    let asked = describedCache.get(key);
+    if (!asked) describedCache.set(key, (asked = askColumns(api, name)));
+    void asked.then((described) => {
+      // Asked again next time when it did not answer (the database may be up then).
+      if (described.error) describedCache.delete(key);
+      if (live) setState({ key, described });
+    });
+    return () => {
+      live = false;
+    };
+  }, [key, api, name, round]);
+  return {
+    described: state?.key === key ? state.described : undefined,
+    retry: () => {
+      describedCache.delete(key);
+      setState(undefined);
+      setRound((r) => r + 1);
+    },
+  };
+}
+
+const AGG_LABELS: Record<string, string> = { sum: "合計", avg: "平均", min: "最小", max: "最大", count: "行の数" };
+
+/**
+ * A report table's dataset and its columns, as the database describes them: which are shown and in what order, their
+ * headings, number formats, how groups and the totals row add them up, and the groups. Written to `options.columns`
+ * and `options.groupBy` (the JSON boxes under 表示 show the same).
+ */
+function DatasetEditor({
+  tile,
+  name,
+  datasets,
+  api,
+  onTile,
+  onDataset,
+}: {
+  tile: RawTile;
+  name: string;
+  datasets: Record<string, DatasetInfo>;
+  api: DescribeApi;
+  onTile: OnTile;
+  onDataset(name: string): void;
+}) {
+  const names = Object.keys(datasets).sort();
+  const info = Object.hasOwn(datasets, name) ? datasets[name] : undefined;
+  const { described, retry } = useDescribed(api, name);
+  const [open, setOpen] = useState<string | null>(null);
+  // A column taken out of the list, with its label, format…: as it was when put back (while this panel is open).
+  const removed = useRef(new Map<string, ColumnRow>());
+  const options = isObj(tile.options) ? tile.options : {};
+  const columns = described?.columns;
+  const resultNames = columns?.map((c) => c.name);
+  const rows = columnRows(options, resultNames);
+  const groups = groupsOf(options);
+  // A list the panel cannot read back as it is (a wrong key, a column without its name): fixed in the JSON box.
+  const unreadable = tableOptions(options).problems.filter((p) => /^options\.(columns|groupBy)\b/.test(p));
+  const shownCount = rows.filter((r) => r.shown).length;
+  const firstShown = rows.findIndex((r) => r.shown);
+  const write = (next: ColumnRow[], merge?: string) => onTile((t) => setColumnRows(t, next, resultNames), merge);
+  const moveUp = (field: string) => {
+    const i = rows.findIndex((r) => r.field === field);
+    let j = i - 1;
+    while (j >= 0 && !rows[j]!.shown) j--;
+    if (j < 0) return;
+    const next = [...rows];
+    next.splice(j, 0, ...next.splice(i, 1));
+    write(next);
+  };
+  return (
+    <>
+      <Field label="データセット" hint={`api/${name}.sql の結果をそのまま出します。SQL とパラメーター（-- param:）は、そのファイルで書きかえます`}>
+        {(ids) => (
+          <select {...ids} value={name} onChange={(e) => onDataset(e.target.value)}>
+            {names.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+            {!info && <option value={name}>{name}（ありません）</option>}
+          </select>
+        )}
+      </Field>
+      {info && info.parameters.length > 0 && (
+        <p className="devbi-hint">
+          パラメーター: {info.parameters.map((p) => p.label ?? p.name).join("、")}
+          （値はダッシュボードの見出しの下の欄で変えます。このタイルだけの値や欄の名前は、dash.json の query.params で書きます）
+        </p>
+      )}
+      <fieldset>
+        <legend>列</legend>
+        {!described && <p className="devbi-hint">データベースに列を聞いています…</p>}
+        {described?.error && (
+          <p className="devbi-ed-warn">
+            列を聞けませんでした（{described.error}）{" "}
+            <button type="button" className="devbi-ed-mini" onClick={retry}>
+              もう一度
+            </button>
+          </p>
+        )}
+        {unreadable.length > 0 ? (
+          <p className="devbi-ed-warn">{unreadable.join(" ")}。下の「表示」の「列」「グループ」の JSON で直してください</p>
+        ) : !resultNames && !Array.isArray(options.columns) ? (
+          // Every column of the result, not known yet: a list made of what is known would drop the others.
+          described && <p className="devbi-hint">列は、データベースが答えてから選べます（下の「表示」の「列」の JSON では書けます）</p>
+        ) : (
+          rows.map((r, i) => {
+            const col = columns?.find((c) => c.name === r.field);
+            const label = str(r.spec.label);
+            const grouped = groups.includes(r.field);
+            // A column not in the list can still group the rows (their headings): its ⋯ has only the group box.
+            const details = open === r.field;
+            return (
+              <div key={r.field} className="devbi-ed-column">
+                <div className="devbi-ed-name">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={r.shown}
+                      disabled={r.shown && shownCount === 1}
+                      onChange={() => {
+                        if (r.shown) removed.current.set(r.field, r);
+                        const back = removed.current.get(r.field);
+                        write(rows.map((x) => (x.field !== r.field ? x : x.shown ? { ...x, shown: false } : { ...(back ?? x), shown: true, missing: x.missing })));
+                      }}
+                    />
+                    {/* Spaces between the parts: the box's name is "金額 DECIMAL 隠す", not one word. */}
+                    <span>{label || r.field}</span> {label && <code className="devbi-ed-code">{r.field}</code>}{" "}
+                    {col?.dbType && <code className="devbi-ed-code">{col.dbType}</code>} {r.missing && <span className="devbi-ed-warn">（結果にありません）</span>}{" "}
+                    {r.shown && r.spec.hidden === true && <span className="devbi-ed-order">隠す</span>} {grouped && <span className="devbi-ed-order">グループ</span>}
+                  </label>
+                  {r.shown && i > firstShown && (
+                    <button type="button" className="devbi-ed-mini" aria-label={`${label || r.field}を前へ`} title="前へ" onClick={() => moveUp(r.field)}>
+                      ↑
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="devbi-ed-mini"
+                    aria-expanded={details}
+                    aria-label={`${label || r.field}の設定`}
+                    title={r.shown ? "見出し・書式・集計・グループ" : "グループ"}
+                    onClick={() => setOpen(details ? null : r.field)}
+                  >
+                    ⋯
+                  </button>
+                </div>
+                {details && (
+                  <div className="devbi-ed-column-detail">
+                    {r.shown && (
+                      <>
+                        <Field label="列の見出し" hint={`空のときは列の名前（${r.field}）`}>
+                          {(ids) => <TextInput {...ids} value={label} onChange={(v, merge) => write(setColumnKey(rows, r.field, "label", v), merge)} />}
+                        </Field>
+                        <Field label="数の書式" hint="¥#,##0、#,##0、0.0% など。空のときは 3 桁区切り">
+                          {(ids) => <TextInput {...ids} value={str(r.spec.format)} onChange={(v, merge) => write(setColumnKey(rows, r.field, "format", v), merge)} />}
+                        </Field>
+                        <Field label="グループと合計の行の集計" hint="どの列にも書かなければ、数の列の合計">
+                          {(ids) => (
+                            <select {...ids} value={str(r.spec.agg)} onChange={(e) => write(setColumnKey(rows, r.field, "agg", e.target.value))}>
+                              <option value="">既定</option>
+                              {TABLE_AGGREGATES.map((a) => (
+                                <option key={a} value={a}>
+                                  {AGG_LABELS[a] ?? a}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </Field>
+                        <label className="devbi-ed-check">
+                          <input type="checkbox" checked={r.spec.hidden === true} onChange={(e) => write(setColumnKey(rows, r.field, "hidden", e.target.checked || undefined))} />
+                          はじめは隠す（列の見出しのメニューで出せます。行のクリックでは使えます）
+                        </label>
+                      </>
+                    )}
+                    <label className="devbi-ed-check">
+                      <input type="checkbox" checked={grouped} onChange={() => onTile((t) => setOption(t, "groupBy", toggle(groups, r.field)))} />
+                      この列の値で行をまとめる（グループ）
+                    </label>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+        {Array.isArray(options.columns) && (
+          <button type="button" className="devbi-ed-mini" onClick={() => onTile((t) => setOption(t, "columns", undefined))}>
+            全部の列を SQL の順に戻す
+          </button>
+        )}
+      </fieldset>
+    </>
+  );
+}
+
 /** How the query is written: by picking measures and dimensions, or as Malloy or SQL. */
 function ModeSelect({ mode, onChange }: { mode: ReturnType<typeof queryMode>; onChange(mode: ReturnType<typeof queryMode>): void }) {
   return (
@@ -569,6 +868,7 @@ function CustomQueryEditor({
   live,
   onTile,
   registerFlush,
+  source,
 }: {
   metrics: Record<string, MetricsView>;
   spec: RawDashboard;
@@ -576,6 +876,8 @@ function CustomQueryEditor({
   live: boolean;
   onTile: OnTile;
   registerFlush(flush: Flush): () => void;
+  /** A table's choice between a metrics file and a dataset. */
+  source?: ReactNode;
 }) {
   const query = (isObj(tile.query) ? tile.query : {}) as Query;
   const mode = queryMode(query) as "malloy" | "sql";
@@ -589,6 +891,7 @@ function CustomQueryEditor({
   return (
     <>
       <h3>データ</h3>
+      {source}
       <ModeSelect mode={mode} onChange={(m) => onTile((t) => setQueryMode(spec, t, m, view ?? (names.length === 1 ? metrics[names[0]!] : undefined), metrics))} />
       <Field
         label={lang}

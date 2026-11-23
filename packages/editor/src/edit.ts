@@ -4,7 +4,7 @@ import { newTile, type RawDashboard, type RawTile } from "./layout.js";
 /** Where each key goes in a hand-written file, so a key the panel adds lands where a person would put it. */
 export const DASHBOARD_KEYS = ["$schema", "title", "description", "metrics", "columns", "rowHeight", "tiles"] as const;
 export const TILE_KEYS = ["id", "x", "y", "w", "h", "type", "component", "title", "query", "options"] as const;
-export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit", "period", "malloy", "sql"] as const;
+export const QUERY_KEYS = ["metrics", "measures", "dimensions", "time", "filters", "sort", "limit", "period", "malloy", "sql", "dataset", "params"] as const;
 
 type Obj = Record<string, unknown>;
 
@@ -288,3 +288,107 @@ export function rowFilter(row: Exclude<FilterRow, { kind: "other" }>): Filter | 
   if (!row.from && !row.to) return null;
   return { field: row.field, between: [row.from || null, row.to ? shiftDay(row.to, 1) : null], ...(row.unit ? { unit: row.unit } : {}) };
 }
+
+/** The dataset (`api/<name>.sql`) a tile reads as it is (`query.dataset`), if it does. */
+export function datasetOf(tile: RawTile): string | undefined {
+  return isObj(tile.query) && typeof tile.query.dataset === "string" ? tile.query.dataset : undefined;
+}
+
+/** A report table's options (TILE_TYPES.table: columns, groupBy, totals, search, click). */
+const DATASET_OPTIONS = Object.entries(TILE_TYPES.table.options as Record<string, TileOptionSchema>)
+  .filter(([, o]) => o.dataset)
+  .map(([k]) => k);
+/** Those that name the dataset's columns. */
+const COLUMN_OPTIONS = ["columns", "groupBy", "click"];
+
+/**
+ * A table reading a dataset's rows as they are (`{ "dataset": name }`), another dataset, or (no name) a metrics file's
+ * measures again: what a new table starts with. Options naming the old dataset's columns go (columns, groups, click);
+ * back to a metrics file, all of a report table's options go.
+ */
+export function setDataset(spec: RawDashboard, tile: RawTile, name: string | undefined, metrics: Record<string, MetricsView>): RawTile {
+  const now = datasetOf(tile);
+  if (now === name) return tile;
+  let next = tile;
+  for (const k of name ? (now ? COLUMN_OPTIONS : []) : DATASET_OPTIONS) next = setOption(next, k, undefined);
+  if (name) return setTileKey(next, "query", { dataset: name });
+  const base = viewFor(metrics, spec);
+  const fresh = newTile((typeof tile.type === "string" ? tile.type : "table") as BuiltinTileType, spec, base.view, base.needsMetrics).query;
+  return setTileKey(next, "query", isObj(fresh) ? fresh : {});
+}
+
+/** A column of a report table as the panel lists it. */
+export interface ColumnRow {
+  field: string;
+  /** In `options.columns` (or, with none, a column of the result: all are shown). */
+  shown: boolean;
+  /** Its other keys in `options.columns` (label, format, agg…). */
+  spec: Obj;
+  /** Named in `options.columns` but not a column of the result (as the database described it). */
+  missing: boolean;
+  /** As written in `options.columns`: written back with its keys where they are. */
+  entry?: unknown;
+}
+
+/**
+ * A report table's columns for the panel's list: those in `options.columns` first, in its order, then the result's
+ * others (not shown). With no `options.columns`, the result's columns in its order, all shown. Then the groups'
+ * columns that are neither (not known yet, or not in the result). `described`: the result's column names (undefined:
+ * not known, only what the options say).
+ */
+export function columnRows(options: unknown, described: readonly string[] | undefined): ColumnRow[] {
+  const listed = isObj(options) && Array.isArray(options.columns) ? options.columns : undefined;
+  const known = (field: string) => !described || described.includes(field);
+  const rows: ColumnRow[] = [];
+  const add = (field: string, shown: boolean, spec: Obj = {}, entry?: unknown) => {
+    if (!rows.some((r) => r.field === field)) rows.push({ field, shown, spec, missing: !known(field), ...(entry === undefined ? {} : { entry }) });
+  };
+  for (const c of listed ?? []) {
+    const field = typeof c === "string" ? c : isObj(c) && typeof c.field === "string" ? c.field : undefined;
+    const { field: _, ...spec } = isObj(c) ? c : {};
+    if (field !== undefined) add(field, true, spec, c);
+  }
+  for (const field of described ?? []) add(field, !listed);
+  for (const field of groupsOf(options)) add(field, false);
+  return rows;
+}
+
+/**
+ * The list written back as `options.columns`: the shown columns in order, a name alone when it has nothing else. When
+ * every column of the result is shown in its order with nothing else, `options.columns` goes (the same table).
+ */
+export function setColumnRows(tile: RawTile, rows: readonly ColumnRow[], described: readonly string[] | undefined): RawTile {
+  const shown = rows.filter((r) => r.shown);
+  // No column at all is not a table (and an empty list would mean every column): left as it is.
+  if (!shown.length) return tile;
+  const plainAll = !!described && shown.length === described.length && shown.every((r, i) => r.field === described[i] && Object.keys(r.spec).length === 0);
+  return setOption(tile, "columns", plainAll ? undefined : shown.map(columnEntry));
+}
+
+/** A column of `options.columns` as written: as it was in the file, with what changed in its place (new keys in the usual order). */
+function columnEntry(r: ColumnRow): unknown {
+  const keys = Object.keys(r.spec);
+  const entry = r.entry;
+  if (!isObj(entry) || entry.field !== r.field) return keys.length ? withKeys({ field: r.field }, r.spec) : r.field;
+  // `{ "field": "金額" }` as it is; a name alone once its last other key goes.
+  if (!keys.length) return Object.keys(entry).length === 1 ? entry : r.field;
+  let next: Obj = entry;
+  for (const k of Object.keys(entry)) if (k !== "field" && !Object.hasOwn(r.spec, k)) next = withKey(next, k, undefined, COLUMN_KEYS);
+  return withKeys(next, r.spec);
+}
+
+const withKeys = (obj: Obj, keys: Obj): Obj => Object.entries(keys).reduce((o, [k, v]) => withKey(o, k, v, COLUMN_KEYS), obj);
+
+/** A column's key in the list (label, format, agg…) set, or removed when empty, keeping the keys' usual order. */
+export function setColumnKey(rows: readonly ColumnRow[], field: string, key: string, value: unknown): ColumnRow[] {
+  return rows.map((r) => (r.field === field ? { ...r, spec: withKey(r.spec, key, value, COLUMN_KEYS) } : r));
+}
+
+const COLUMN_KEYS = ["field", "label", "format", "width", "align", "pin", "hidden", "filter", "agg", "style"];
+
+/** `options.groupBy` as a list (it may be one name). */
+export function groupsOf(options: unknown): string[] {
+  const g = isObj(options) ? options.groupBy : undefined;
+  return typeof g === "string" ? [g] : Array.isArray(g) ? g.filter((x): x is string => typeof x === "string") : [];
+}
+
