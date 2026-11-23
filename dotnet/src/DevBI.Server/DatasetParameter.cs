@@ -75,7 +75,8 @@ namespace DevBI.Server
         private const string TypesHint = "text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）";
         private const string Line = "[^\\n\\r\\u2028\\u2029]*";
 
-        internal static readonly Regex Reserved = new Regex("^user\\.", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        // `user` in ASCII letters only, as JavaScript's /…/i without u reads it
+        internal static readonly Regex Reserved = new Regex("^[Uu][Ss][Ee][Rr]\\.", RegexOptions.CultureInvariant);
         private static readonly Regex Name = new Regex("^[A-Za-z_\\u0080-\\uffff][A-Za-z0-9_\\u0080-\\uffff]*\\z", RegexOptions.CultureInvariant);
         private static readonly Regex ParamLine = new Regex($"^[{SqlText.Space}]*--[{SqlText.Space}]*param[{SqlText.Space}]*:({Line})\\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         private static readonly Regex KeyLine = new Regex($"^[{SqlText.Space}]*--[{SqlText.Space}]*key[{SqlText.Space}]*:({Line})\\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -348,9 +349,9 @@ namespace DevBI.Server
         /// The <c>-- param:</c> and <c>-- key:</c> lines among the comment lines at the top of the file, checked against
         /// the SQL's parameter names. Throws <see cref="DatasetException"/> (400) with <c>api/&lt;name&gt;.sql（N 行目）: …</c>.
         /// </summary>
-        internal static (List<DatasetParameter> parameters, List<string>? key) HeaderDirectives(string text, string name, IReadOnlyList<string> sqlParams)
+        internal static (List<DatasetParameter> parameters, List<string>? key) HeaderDirectives(string text, string name, IReadOnlyList<string> sqlParams, string? rel = null)
         {
-            var rel = $"api/{name}.sql";
+            rel ??= $"api/{name}.sql";
             var parameters = new List<(DatasetParameter def, int line)>();
             (List<string> columns, int line)? key = null;
             var lines = Regex.Split(text.Length > 0 && text[0] == '﻿' ? text.Substring(1) : text, "\r?\n");

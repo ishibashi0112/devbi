@@ -22,7 +22,18 @@ namespace DevBI.Server
     /// <summary>One <c>api/&lt;name&gt;.sql</c> file: a SELECT the API runs for <c>read_api('&lt;name&gt;')</c>.</summary>
     public sealed class Dataset
     {
-        internal Dataset(string name, string description, string? connection, IReadOnlyList<string>? snapshot, string sql, IReadOnlyList<string> parameters, IReadOnlyList<DatasetParameter> definitions, IReadOnlyList<string>? key)
+        internal Dataset(
+            string name,
+            string description,
+            string? connection,
+            IReadOnlyList<string>? snapshot,
+            string sql,
+            IReadOnlyList<string> parameters,
+            IReadOnlyList<DatasetParameter> definitions,
+            IReadOnlyList<string>? key,
+            IReadOnlyList<string>? user,
+            IReadOnlyList<string>? roles,
+            string? access)
         {
             Name = name;
             Description = description;
@@ -32,11 +43,14 @@ namespace DevBI.Server
             Params = parameters;
             Parameters = definitions;
             Key = key;
+            User = user;
+            Roles = roles;
+            Access = access;
         }
 
         public string Name { get; }
 
-        /// <summary>The comment lines above the SELECT, without the <c>connection:</c> and <c>snapshot:</c> lines.</summary>
+        /// <summary>The comment lines above the SELECT, without the <c>connection:</c>, <c>snapshot:</c>, <c>param:</c>, <c>key:</c>, <c>roles:</c> and <c>access:</c> lines.</summary>
         public string Description { get; }
 
         /// <summary>The <c>-- connection: &lt;name&gt;</c> line: which DEVBI_DB_&lt;NAME&gt; to use. Null: DEVBI_DB.</summary>
@@ -48,7 +62,7 @@ namespace DevBI.Server
         /// <summary>The statement, without the comments above it and without a final <c>;</c>.</summary>
         public string Sql { get; }
 
-        /// <summary>Parameter names (<c>:from</c> → <c>from</c>), each once, in the order they first appear.</summary>
+        /// <summary>Parameter names (<c>:from</c> → <c>from</c>), each once, in the order they first appear. Not the user's (<c>:user.region</c>).</summary>
         public IReadOnlyList<string> Params { get; }
 
         /// <summary>
@@ -60,6 +74,19 @@ namespace DevBI.Server
         /// <summary>The <c>-- key: 受注番号, 行番号</c> line: the result columns that tell one row from another. Null: none.</summary>
         public IReadOnlyList<string>? Key { get; }
 
+        /// <summary>
+        /// The signed-in user's values the SQL uses (<c>:user.id</c>, <c>:user.region</c> → <c>id</c>, <c>region</c>; lower
+        /// case, each once, in the order they first appear): row-level security. They come from the user the host hands
+        /// over, never the browser. Null: none.
+        /// </summary>
+        public IReadOnlyList<string>? User { get; }
+
+        /// <summary>The <c>-- roles: 経理, CORP\Managers</c> line: only users with one of these roles may read it. Null: none.</summary>
+        public IReadOnlyList<string>? Roles { get; }
+
+        /// <summary>The <c>-- access: all</c> line (<c>"all"</c>): on purpose, every signed-in user gets every row. Null: none.</summary>
+        public string? Access { get; }
+
         /// <summary>The name a connection goes by: DEVBI_DB, or DEVBI_DB_&lt;NAME&gt; for a named one (<c>-- connection: erp</c>).</summary>
         public static string ConnectionVariable(string? connection) =>
             string.IsNullOrEmpty(connection) ? "DEVBI_DB" : "DEVBI_DB_" + Regex.Replace(connection!.ToUpperInvariant(), "[^A-Z0-9]", "_");
@@ -69,10 +96,10 @@ namespace DevBI.Server
         private static readonly Regex CommentLine = new Regex($"^[{SqlText.Space}]*--", RegexOptions.CultureInvariant);
         private static readonly Regex Time = new Regex("^([0-9]{1,2}):([0-9]{2})\\z", RegexOptions.CultureInvariant);
         private static readonly Regex TimeSeparators = new Regex($"[,、{SqlText.Space}]+", RegexOptions.CultureInvariant);
-        private static readonly Regex HeaderLine = new Regex($"^(connection|snapshot|param|key)[{SqlText.Space}]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex HeaderLine = new Regex($"^(connection|snapshot|param|key|roles|access)[{SqlText.Space}]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
         /// <summary>The lines of the file, the way JavaScript's <c>split(/\r?\n/)</c> cuts them.</summary>
-        private static string[] Lines(string text) => Regex.Split(text.Length > 0 && text[0] == '\ufeff' ? text.Substring(1) : text, "\r?\n");
+        internal static string[] Lines(string text) => Regex.Split(text.Length > 0 && text[0] == '\ufeff' ? text.Substring(1) : text, "\r?\n");
 
         /// <summary>
         /// The <c>-- connection: &lt;name&gt;</c> line among the comment lines at the top of the file (blank lines between
@@ -118,10 +145,13 @@ namespace DevBI.Server
             return null;
         }
 
-        /// <summary>Read and check the text of <c>api/&lt;name&gt;.sql</c>. Throws <see cref="DatasetException"/> (400).</summary>
-        public static Dataset Parse(string name, string text)
+        /// <summary>
+        /// Read and check the text of <c>api/&lt;name&gt;.sql</c>. <paramref name="rel"/>: the file as messages name it
+        /// (<c>access/user.sql</c> for the user's attributes). Throws <see cref="DatasetException"/> (400).
+        /// </summary>
+        public static Dataset Parse(string name, string text, string? rel = null)
         {
-            var rel = $"api/{name}.sql";
+            rel ??= $"api/{name}.sql";
             var statements = SqlText.SplitStatements(text);
             if (statements.Count == 0) throw new DatasetException($"{rel}: SELECT 文がありません", 400);
             if (statements.Count > 1) throw new DatasetException($"{rel}: 1 つのファイルに書ける SELECT 文は 1 つだけです（{statements.Count} 個あります）", 400);
@@ -141,11 +171,35 @@ namespace DevBI.Server
             var description = st.Title.Split('\n').Where(line => !HeaderLine.IsMatch(SqlText.Trim(line)));
             var places = SqlText.Parameters(st.Sql);
             var parameters = new List<string>();
+            var user = new List<string>();
             foreach (var p in places)
             {
-                if (!parameters.Any(q => q.ToLowerInvariant() == p.Name.ToLowerInvariant())) parameters.Add(p.Name);
+                if (DevBI.Server.Access.IsUserName(p.Name))
+                {
+                    var attr = p.Name.Substring("user.".Length).ToLowerInvariant();
+                    if (!user.Contains(attr)) user.Add(attr);
+                }
+                else if (!parameters.Any(q => q.ToLowerInvariant() == p.Name.ToLowerInvariant())) parameters.Add(p.Name);
             }
-            var (definitions, key) = ParamLines.HeaderDirectives(text, name, parameters);
+            var (definitions, key) = ParamLines.HeaderDirectives(text, name, parameters, rel);
+            AccessLines access;
+            try
+            {
+                access = DevBI.Server.Access.Read(text, rel);
+            }
+            catch (AccessLineException e)
+            {
+                throw new DatasetException(e.Message, 400);
+            }
+            if (access.Access != null && user.Count > 0)
+            {
+                throw new DatasetException($"{rel}: -- access: all（全員に全部の行）と :user.{user[0]}（人で絞る）が両方あります。どちらかにしてください", 400);
+            }
+            if (snapshot != null && (user.Count > 0 || access.Roles != null))
+            {
+                var why = user.Count > 0 ? $":user.{user[0]} で人ごとに行が変わる" : "-- roles: の役割を、静的なファイルでは確かめられない";
+                throw new DatasetException($"{rel}: {why}ので、-- snapshot: は書けません（スナップショットは全員に同じファイルです）", 400);
+            }
             // A multiple-value parameter only in IN (:name): the server writes one placeholder per value there.
             foreach (var p in places)
             {
@@ -156,7 +210,7 @@ namespace DevBI.Server
             }
             var declared = new HashSet<string>(definitions.Select(d => d.Name.ToLowerInvariant()), StringComparer.Ordinal);
             var all = definitions.Concat(parameters.Where(p => !declared.Contains(p.ToLowerInvariant())).Select(p => new DatasetParameter(p))).ToList();
-            return new Dataset(name, SqlText.Trim(string.Join("\n", description)), connection, snapshot, st.Sql, parameters, all, key);
+            return new Dataset(name, SqlText.Trim(string.Join("\n", description)), connection, snapshot, st.Sql, parameters, all, key, user.Count > 0 ? user : null, access.Roles, access.Access);
         }
 
         /// <summary>Whether the parameter at sql[start, end) is all there is in <c>IN (…)</c> (NOT IN too), spaces aside.</summary>
@@ -179,17 +233,30 @@ namespace DevBI.Server
         /// or <see cref="double"/>), <see cref="bool"/> or null; anything else is refused. A parameter with a
         /// <c>-- param:</c> line is checked against its type (dates and times are read as <c>CAST(@p1 AS date)</c> /
         /// <c>datetime2</c>); a multiple-value one takes a list and becomes one placeholder per value in its <c>IN (…)</c>.
-        /// Names starting with <c>user.</c> are refused: they are the signed-in user's values (row-level security).
+        /// Names starting with <c>user.</c> are refused: they are the signed-in user's values (row-level security), and
+        /// <c>:user.id</c>, <c>:user.&lt;name&gt;</c> are refused here (401) for want of a user: see the other overload.
         /// </summary>
-        public BoundSql Bind(IEnumerable<KeyValuePair<string, object?>> values)
+        public BoundSql Bind(IEnumerable<KeyValuePair<string, object?>> values) => BindAs(values, null, false);
+
+        /// <summary>
+        /// <see cref="Bind(IEnumerable{KeyValuePair{string, object}})"/> with the signed-in user, whose values fill
+        /// <c>:user.id</c> and <c>:user.&lt;name&gt;</c> (from <see cref="DevBIUser.Attributes"/>; access/user.sql is the
+        /// API's): no user, 401; no such attribute, or an empty one, 403. <paramref name="values"/> are the browser's (or
+        /// the caller's) and never fill them. <paramref name="rowLevel"/>: a parameter named <c>user</c> itself is refused
+        /// too (row-level mode, where it is likely meant as <c>user.id</c>).
+        /// </summary>
+        public BoundSql Bind(IEnumerable<KeyValuePair<string, object?>> values, DevBIUser? user, bool rowLevel = false) => BindAs(values, Viewer.Of(user), rowLevel);
+
+        internal BoundSql BindAs(IEnumerable<KeyValuePair<string, object?>> values, Viewer? user, bool rowLevel, string? rel = null)
         {
-            var rel = $"api/{Name}.sql";
+            rel ??= $"api/{Name}.sql";
             // Names match without regard to case, like SQL names (and DuckDB passes read_api's argument names in lower case).
             var given = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach (var pair in values)
             {
                 var lower = pair.Key.ToLowerInvariant();
                 if (ParamLines.Reserved.IsMatch(pair.Key)) throw new DatasetException($"{rel}: パラメーター {pair.Key} は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）", 400);
+                if (rowLevel && DevBI.Server.Access.IsBareUser(pair.Key)) throw new DatasetException($"{rel}: パラメーター {pair.Key} は渡せません（行レベルのモードでは、user という名前はログインした人のために取ってあります）", 400);
                 if (given.ContainsKey(lower)) throw new DatasetException($"{rel}: パラメーター {pair.Key} が 2 回あります", 400);
                 if (!Params.Any(p => p.ToLowerInvariant() == lower))
                 {
@@ -217,6 +284,18 @@ namespace DevBI.Server
                 }
                 checkedValues[lower] = v;
             }
+            // The user's values: from the user only, checked before anything runs.
+            foreach (var attr in User ?? new string[0])
+            {
+                if (user == null) throw new DatasetException($"ログインしていません（{rel} は、ログインした人の :user.{attr} で行を絞ります）", 401);
+                var v = attr == "id" ? user.Id : user.Attrs.TryGetValue(attr, out var a) ? a : null;
+                if (v == null || (v is string s && SqlText.Trim(s).Length == 0))
+                {
+                    throw new DatasetException($"利用者 {user.Id} に属性 {attr} がありません（{rel} の :user.{attr}）", 403);
+                }
+                checkedValues["user." + attr] = v;
+                types["user." + attr] = null;
+            }
             // A name's placeholders, written again where the name comes again.
             var written = new Dictionary<string, string>(StringComparer.Ordinal);
             var bound = new List<object?>();
@@ -225,10 +304,12 @@ namespace DevBI.Server
             foreach (var p in SqlText.Parameters(Sql))
             {
                 sql.Append(Sql, last, p.Start - last);
-                var lower = p.Name.ToLowerInvariant();
+                // `user.` and the attribute lower-cased apart, as they were checked
+                var lower = DevBI.Server.Access.IsUserName(p.Name) ? "user." + p.Name.Substring("user.".Length).ToLowerInvariant() : p.Name.ToLowerInvariant();
                 if (!written.TryGetValue(lower, out var place))
                 {
-                    var v = checkedValues[lower];
+                    // Never bound as nothing (`:user.x IS NULL OR …` would pass).
+                    if (!checkedValues.TryGetValue(lower, out var v)) throw new DatasetException($"{rel}: :{p.Name} の値がありません", 500);
                     var type = types[lower];
                     var items = v is List<object?> list ? list : new List<object?> { v };
                     place = string.Join(", ", items.Select(x =>

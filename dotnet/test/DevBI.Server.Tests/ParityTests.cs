@@ -118,6 +118,9 @@ namespace DevBI.Server.Tests
                         ["params"] = Strings(d.Params),
                         ["parameters"] = new JsonArray(d.Parameters.Select(p => (JsonNode?)ParameterJson(p)).ToArray()),
                         ["key"] = d.Key == null ? null : Strings(d.Key),
+                        ["user"] = d.User == null ? null : Strings(d.User),
+                        ["roles"] = d.Roles == null ? null : Strings(d.Roles),
+                        ["access"] = d.Access,
                     };
                 }
                 catch (DatasetException e)
@@ -131,17 +134,102 @@ namespace DevBI.Server.Tests
         }
 
         [Fact]
+        public void ReadsTheLinesThatSayWhoMayRead()
+        {
+            Compare("access", c =>
+            {
+                var text = c["text"]!.GetValue<string>();
+                JsonNode lines;
+                try
+                {
+                    var l = Access.Read(text, "api/x.sql");
+                    lines = new JsonObject { ["roles"] = l.Roles == null ? null : Strings(l.Roles), ["access"] = l.Access };
+                }
+                catch (AccessLineException e)
+                {
+                    lines = new JsonObject { ["error"] = e.Message };
+                }
+                var expected = new JsonObject { ["lines"] = c["lines"]!.DeepClone(), ["signal"] = c["signal"]?.DeepClone() };
+                var actual = new JsonObject { ["lines"] = lines, ["signal"] = Access.RowLevelSignal(text) };
+                return (JsonSerializer.Serialize(text), expected, actual);
+            });
+        }
+
+        private static readonly DateTime Epoch = new DateTime(1970, 1, 1);
+
+        /// <summary>A value of access/user.sql's row as SqlServerQuery hands it over: dates as days, timestamps as microseconds since 1970.</summary>
+        private static object? CellOf(JsonNode? v, ColumnType type)
+        {
+            if (v == null) return null;
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            switch (type)
+            {
+                case ColumnType.Date:
+                    return (int)(DateTime.ParseExact(v.GetValue<string>(), "yyyy-MM-dd", culture) - Epoch).TotalDays;
+                case ColumnType.Timestamp:
+                    return (DateTime.ParseExact(v.GetValue<string>(), new[] { "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm:ss.fff" }, culture, System.Globalization.DateTimeStyles.None) - Epoch).Ticks / 10;
+                case ColumnType.Int:
+                    return v.GetValue<long>();
+                case ColumnType.Float:
+                    return v.GetValue<double>();
+                case ColumnType.Bool:
+                    return v.GetValue<bool>();
+                default:
+                    return v.GetValue<string>();
+            }
+        }
+
+        [Fact]
+        public void ReadsTheRowOfAccessUserSql()
+        {
+            Compare("tableUsers", c =>
+            {
+                var columns = c["columns"]!.AsArray()
+                    .Select(x => new ResultColumn(x!["name"]!.GetValue<string>(), Enum.Parse<ColumnType>(x["type"]!.GetValue<string>(), ignoreCase: true)))
+                    .ToList();
+                var row = c["row"] is JsonArray values ? values.Select((v, i) => CellOf(v, columns[i].Type)).ToArray() : null;
+                JsonNode user;
+                try
+                {
+                    var t = Access.TableUserOf(columns, row);
+                    var attrs = new JsonObject();
+                    foreach (var pair in t.Attrs) attrs[pair.Key] = Value(pair.Value);
+                    user = new JsonObject { ["attrs"] = attrs, ["roles"] = Strings(t.Roles) };
+                }
+                catch (ArgumentException e)
+                {
+                    user = ErrorOf(e);
+                }
+                return ($"{c["columns"]!.ToJsonString(Readable)} {c["row"]?.ToJsonString(Readable)}", c["user"]!.DeepClone(), user);
+            });
+        }
+
+        /// <summary>A JSON value as the API reads it from a request.</summary>
+        private static object? ValueOf(JsonNode? v) => DevBIApi.ValueOf(JsonDocument.Parse(v?.ToJsonString() ?? "null").RootElement);
+
+        [Fact]
         public void BindsParameters()
         {
             Compare("binds", c =>
             {
                 var text = c["text"]!.GetValue<string>();
                 // the values as the API reads them from a request's JSON
-                var values = c["values"]!.AsObject().Select(p => new KeyValuePair<string, object?>(p.Key, DevBIApi.ValueOf(JsonDocument.Parse(p.Value?.ToJsonString() ?? "null").RootElement))).ToList();
+                var values = c["values"]!.AsObject().Select(p => new KeyValuePair<string, object?>(p.Key, ValueOf(p.Value))).ToList();
+                // the user as the host hands it over
+                DevBIUser? user = null;
+                if (c["user"] is JsonObject u)
+                {
+                    user = new DevBIUser { Id = u["id"]!.GetValue<string>() };
+                    if (u["attrs"] is JsonObject attrs)
+                    {
+                        foreach (var a in attrs) user.Attributes[a.Key] = ValueOf(a.Value);
+                    }
+                }
+                var rowLevel = c["rowLevel"]?.GetValue<bool>() ?? false;
                 JsonNode bound;
                 try
                 {
-                    var b = Dataset.Parse("x", text).Bind(values);
+                    var b = Dataset.Parse("x", text).Bind(values, user, rowLevel);
                     bound = new JsonObject { ["sql"] = b.Sql, ["values"] = new JsonArray(b.Values.Select(Value).ToArray()) };
                 }
                 catch (DatasetException e)

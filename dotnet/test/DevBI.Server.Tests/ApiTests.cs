@@ -13,14 +13,33 @@ namespace DevBI.Server.Tests
 {
     public class ApiTests
     {
-        private static DevBIApi Api(string? dir = null, Func<string, System.Data.Common.DbConnection?>? connect = null, bool exposeErrors = false, List<string>? log = null) =>
+        private static DevBIApi Api(string? dir = null, Func<string, System.Data.Common.DbConnection?>? connect = null, bool exposeErrors = false, List<string>? log = null, bool requireUser = false) =>
             new DevBIApi(new DevBIOptions
             {
                 Directory = dir ?? Repo.Sample,
                 Connect = connect ?? (_ => null),
                 ExposeErrors = exposeErrors,
                 Log = log == null ? null : log.Add,
+                RequireUser = requireUser,
             });
+
+        /// <summary>A folder with these files (paths with /).</summary>
+        private static string Project(Dictionary<string, string> files)
+        {
+            var dir = Directory.CreateTempSubdirectory("devbi-api-").FullName;
+            foreach (var (name, text) in files)
+            {
+                var path = Path.Combine(dir, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, text);
+            }
+            return dir;
+        }
+
+        private static Task<ApiResponse> Schema(DevBIApi api, DevBIUser? user = null, string? hint = null) =>
+            api.HandleAsync(new ApiRequest { Action = "schema", Method = "GET", User = user, SignInHint = hint });
+
+        private static string Text(ApiResponse r) => Encoding.UTF8.GetString(r.Body);
 
         private static Task<ApiResponse> Post(DevBIApi api, string body, string contentType = "application/json") =>
             api.HandleAsync(new ApiRequest { Action = "query", Method = "POST", ContentType = contentType, Body = new MemoryStream(Encoding.UTF8.GetBytes(body)) });
@@ -83,9 +102,9 @@ namespace DevBI.Server.Tests
                 "-- 地域で絞る\n-- param: regions text[] label=\"地 域\" values=regions default=all\n-- param: from date optional hidden\n-- key: id, \"行\"\nSELECT id FROM t WHERE r IN (:regions) AND (:from IS NULL OR d >= :from) AND x = :x");
             var r = await Api(dir).HandleAsync(new ApiRequest { Action = "schema", Method = "GET" });
             Assert.Equal(
-                "{\"datasets\":[{\"name\":\"bad\",\"error\":\"api/bad.sql: SELECT か WITH で始まる文だけ使えます（DELETE で始まっています）\"},{\"name\":\"good\",\"description\":\"\",\"params\":[],\"parameters\":[],\"connection\":\"DEVBI_DB_ERP_2\"},{\"name\":\"typed\",\"description\":\"地域で絞る\",\"params\":[\"regions\",\"from\",\"x\"],\"parameters\":[{\"name\":\"regions\",\"type\":\"text\",\"multiple\":true,\"label\":\"地 域\",\"default\":\"all\",\"values\":\"regions\"},{\"name\":\"from\",\"type\":\"date\",\"optional\":true,\"hidden\":true},{\"name\":\"x\"}],\"key\":[\"id\",\"行\"],\"connection\":\"DEVBI_DB\"}],\"snapshots\":[]}",
+                "{\"datasets\":[{\"name\":\"bad\",\"error\":\"api/bad.sql: SELECT か WITH で始まる文だけ使えます（DELETE で始まっています）\"},{\"name\":\"good\",\"description\":\"\",\"params\":[],\"parameters\":[],\"connection\":\"DEVBI_DB_ERP_2\"},{\"name\":\"typed\",\"description\":\"地域で絞る\",\"params\":[\"regions\",\"from\",\"x\"],\"parameters\":[{\"name\":\"regions\",\"type\":\"text\",\"multiple\":true,\"label\":\"地 域\",\"default\":\"all\",\"values\":\"regions\"},{\"name\":\"from\",\"type\":\"date\",\"optional\":true,\"hidden\":true},{\"name\":\"x\"}],\"key\":[\"id\",\"行\"],\"connection\":\"DEVBI_DB\"}],\"snapshots\":[],\"access\":1}",
                 Encoding.UTF8.GetString(r.Body));
-            Assert.Equal("{\"datasets\":[],\"snapshots\":[]}", Encoding.UTF8.GetString((await Api(Path.Combine(dir, "none")).HandleAsync(new ApiRequest { Action = "schema", Method = "GET" })).Body));
+            Assert.Equal("{\"datasets\":[],\"snapshots\":[],\"access\":1}", Encoding.UTF8.GetString((await Api(Path.Combine(dir, "none")).HandleAsync(new ApiRequest { Action = "schema", Method = "GET" })).Body));
         }
 
         [Fact]
@@ -142,6 +161,118 @@ namespace DevBI.Server.Tests
         }
 
         [Fact]
+        public async Task InRowLevelModeAnswersNobodySignedInWith401AndAccess1()
+        {
+            var api = Api(requireUser: true);
+            var r = await Schema(api);
+            Assert.Equal((401, "{\"error\":\"ログインしていません\",\"access\":1}"), (r.Status, Text(r)));
+            r = await Schema(api, new DevBIUser { Id = " \t" }, " このアプリにログインしてください ");
+            Assert.Equal((401, "{\"error\":\"ログインしていません（このアプリにログインしてください）\",\"access\":1}"), (r.Status, Text(r)));
+            // signed in before anything else is read: the body, its type
+            r = await api.HandleAsync(new ApiRequest { Action = "query", Method = "POST", ContentType = "text/plain" });
+            Assert.Equal(401, r.Status);
+            // and when the host runs a file itself without a user
+            var e = await Assert.ThrowsAsync<ApiException>(() => api.RunAsync("orders", null, null));
+            Assert.Equal((401, "ログインしていません"), (e.Status, e.Message));
+            // the wrong method is still the wrong method
+            Assert.Equal(405, (await api.HandleAsync(new ApiRequest { Action = "schema", Method = "POST" })).Status);
+        }
+
+        [Fact]
+        public async Task InRowLevelModeListsEachFileThatDoesNotSayWhoSeesWhichRowsWithWhy()
+        {
+            var r = await Schema(Api(requireUser: true), new DevBIUser { Id = " CORP\\yamada " });
+            Assert.Equal(200, r.Status);
+            using var doc = JsonDocument.Parse(r.Body);
+            var orders = doc.RootElement.GetProperty("datasets").EnumerateArray().Single(d => d.GetProperty("name").GetString() == "orders");
+            Assert.Equal(
+                "api/orders.sql は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: ホストの設定 RequireUser）",
+                orders.GetProperty("error").GetString());
+            Assert.EndsWith(",\"snapshots\":[],\"access\":1,\"user\":{\"id\":\"CORP\\\\yamada\"}}", Text(r));
+        }
+
+        [Fact]
+        public async Task ListsOnlyTheFilesTheUserMayRead()
+        {
+            var dir = Project(new Dictionary<string, string>
+            {
+                ["api/pay.sql"] = "-- 給与\n-- roles: 経理, CORP\\Managers\n-- access: all\nSELECT 1 AS one",
+                ["api/mine.sql"] = "SELECT * FROM t WHERE r = :user.region AND d >= :from",
+                ["api/bare.sql"] = "-- access: all\nSELECT * FROM t WHERE a = :user",
+                ["api/typo.sql"] = "-- role: 経理\nSELECT 1 AS one",
+            });
+            var log = new List<string>();
+            var api = Api(dir, log: log);
+            Assert.Equal(401, (await Schema(api)).Status);
+            var r = await Schema(api, new DevBIUser { Id = "CORP\\yamada" });
+            using (var doc = JsonDocument.Parse(r.Body))
+            {
+                var all = doc.RootElement.GetProperty("datasets").EnumerateArray().ToList();
+                // pay.sql is not even named; the user's values are not parameters the browser sends
+                Assert.Equal(new[] { "bare", "mine", "typo" }, all.Select(d => d.GetProperty("name").GetString()));
+                Assert.Equal(
+                    "api/bare.sql: 行レベルのモードでは :user は使えません。ログインした人の ID なら :user.id と書きます（行レベルのモード: api/bare.sql に -- access: があるため）",
+                    all[0].GetProperty("error").GetString());
+                Assert.Equal(new[] { "from" }, all[1].GetProperty("params").EnumerateArray().Select(p => p.GetString()));
+                Assert.StartsWith("api/typo.sql（1 行目）: -- role: は -- roles: の書き間違いではありませんか", all[2].GetProperty("error").GetString());
+            }
+            r = await Schema(api, new DevBIUser { Id = "CORP\\boss", IsInRole = role => role == "CORP\\Managers" });
+            using (var doc = JsonDocument.Parse(r.Body))
+            {
+                Assert.Equal(new[] { "bare", "mine", "pay", "typo" }, doc.RootElement.GetProperty("datasets").EnumerateArray().Select(d => d.GetProperty("name").GetString()));
+            }
+            Assert.Empty(log);
+        }
+
+        [Fact]
+        public async Task PutsTheProjectInRowLevelModeByTheTextOfItsFiles()
+        {
+            async Task<int> Status(Dictionary<string, string> files) => (await Schema(Api(Project(files)))).Status;
+            Assert.Equal(200, await Status(new Dictionary<string, string> { ["api/a.sql"] = "-- Access log の SQL\nSELECT 1 AS one" }));
+            Assert.Equal(200, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT :user_id AS a" }));
+            Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT 1 AS a", ["api/b.sql"] = "SELECT 1 AS b -- ｒｏｌｅｓ：" }));
+            Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT ':USER.x' AS a" }));
+            Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT 1 AS a", ["access/readme.txt"] = "" }));
+            // a noncharacter, which .NET's normalization refuses: read as JavaScript reads it, not a 500 for every file
+            Assert.Equal(200, await Status(new Dictionary<string, string> { ["api/a.sql"] = "-- 説明\uFFFE\nSELECT 1 AS a -- x\uFFFE" }));
+            Assert.Equal(401, await Status(new Dictionary<string, string> { ["api/a.sql"] = "SELECT 1 AS a -- ｒｏｌｅｓ：\uFFFF" }));
+        }
+
+        [Fact]
+        public async Task SaysOnceWhenItGetsAUserButIsNotInRowLevelMode()
+        {
+            var log = new List<string>();
+            var api = Api(log: log);
+            for (var i = 0; i < 2; i++) Assert.Equal(200, (await Schema(api, new DevBIUser { Id = "CORP\\yamada" })).Status);
+            Assert.Equal(new[] { "利用者を受け取っていますが、行レベルのモードになっていません（api/*.sql に :user. も -- access: もありません。本番では DevBIOptions.RequireUser を付けます）" }, log);
+        }
+
+        [Fact]
+        public async Task RefusesAUserOfTheWrongShape()
+        {
+            var log = new List<string>();
+            var api = Api(log: log);
+            var r = await Schema(api, new DevBIUser { Id = "u", Attributes = { ["ID"] = "x" } });
+            Assert.Equal((500, "DevBIUser.Attributes の ID: id は属性の名前に使えません（:user.id はログインした人の ID です）"), (r.Status, Error(r)));
+            r = await Schema(api, new DevBIUser { Id = "u", Attributes = { ["region"] = "a", ["Region"] = "b" } });
+            Assert.Equal((500, "DevBIUser.Attributes に Region が 2 つあります（大文字と小文字は区別しません）"), (r.Status, Error(r)));
+            r = await Schema(api, new DevBIUser { Id = "u", Attributes = { ["a b"] = "x" } });
+            Assert.Equal((500, "DevBIUser.Attributes の a b: 属性の名前は文字・数字・_ で書きます（:user.a b と書けない名前です）"), (r.Status, Error(r)));
+            r = await Schema(api, new DevBIUser { Id = "u", Attributes = { ["at"] = DateTime.Now } });
+            Assert.Equal((500, "DevBIUser.Attributes の at の値は文字・数値・真偽のどれかにしてください"), (r.Status, Error(r)));
+            r = await Schema(api, new DevBIUser { Id = "u", Attributes = { ["n"] = double.NaN } });
+            Assert.Equal((500, "DevBIUser.Attributes の n の値が数として読めません（NaN）"), (r.Status, Error(r)));
+            // one line each in the log
+            Assert.Equal(5, log.Count(l => l.StartsWith("DevBIUser.Attributes", StringComparison.Ordinal)));
+        }
+
+        [Fact]
+        public void WritesUserIdsOnOneLogLine()
+        {
+            Assert.Equal("CORP?yamada? x?", Access.LogSafe("CORP\nyamada\u2028 x\u0085"));
+        }
+
+        [Fact]
         public void NeedsAFolderAndAConnection()
         {
             Assert.Throws<ArgumentException>(() => new DevBIApi(new DevBIOptions { Connect = _ => null }));
@@ -149,6 +280,7 @@ namespace DevBI.Server.Tests
             Assert.Throws<ArgumentOutOfRangeException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, MaxRows = 0 }));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, Timeout = TimeSpan.FromSeconds(-1) }));
             Assert.Throws<ArgumentOutOfRangeException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, Timeout = TimeSpan.FromDays(30) }));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, UserCache = TimeSpan.FromSeconds(-1) }));
             // the largest of each is fine
             new DevBIApi(new DevBIOptions { Directory = Repo.Sample, Connect = _ => null, MaxRows = int.MaxValue, Timeout = SqlServerQuery.MaxTimeout });
         }

@@ -1121,6 +1121,7 @@ npx devbi-snapshot --dir C:\reports\sales --out C:\inetpub\wwwroot\sales
 | `--dir` | プロジェクトのフォルダ（`api/`、`models/`、`.env` のある場所）。既定は今のフォルダ |
 | `--out` | サイトのフォルダ。`<out>/snapshots/` に置く。既定は `<dir>/dist`（`@devbi/vite` の `dir` を変えたときは、ビルドの中のそのフォルダ） |
 | `--max-rows` / `--timeout` / `--debug` | `devbi-serve` と同じ |
+| `--require-user` | 行レベルのモードで作る（`-- access: all` の SQL のものだけ。[行レベルのモード](#行レベルのモード絞り忘れを止める)）。ファイルを配るホストを `requireUser`（C# は `DevBIOptions.RequireUser`）で行レベルのモードにしているときに付ける |
 | `<名前>…` | その SQL のものだけ作る（`devbi-snapshot sales_daily`）。書かなければ全部 |
 
 - 作れなかったものがあると、終了コードが 1 になります。前のファイルはそのまま残ります（新しいファイルは、書き終わってから置き換えます）。くわしい理由はログに出ます。
@@ -1147,7 +1148,7 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - `metrics.yaml` と `dash.json` の書き方は変わりません。同じダッシュボードが、人ごとに違う行で動きます。
 - いちばん確かな守りは、今と同じくデータベースの権限です（DevBI のユーザーは SELECT だけ）。
 
-今は、Node のサーバー（`@devbi/server` の `createApiHandler`）、[`devbi-serve`](#前のサーバーからユーザー名を受け取るdevbi-serve)（前に置いたサーバーからヘッダーで受け取る）、開発サーバーの「[この人として見る](#開発サーバーでこの人として見るdevusers)」、[`devbi-check` の確かめ](#行レベル制御のプロジェクトを確かめる)でこの形が動きます。C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。
+今は、Node のサーバー（`@devbi/server` の `createApiHandler`）、[ASP.NET（C#）](#aspnetcでログインした人を渡す)、[`devbi-serve`](#前のサーバーからユーザー名を受け取るdevbi-serve)（前に置いたサーバーからヘッダーで受け取る）、開発サーバーの「[この人として見る](#開発サーバーでこの人として見るdevusers)」、[`devbi-check` の確かめ](#行レベル制御のプロジェクトを確かめる)でこの形が動きます。Next.js の見本は、このあと足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。
 
 #### `:user.<属性>` と `:user.id`
 
@@ -1188,11 +1189,11 @@ SELECT code AS 商品コード, name AS 商品名 FROM products
 いちばん起こりやすい事故は、あとから足した `api/*.sql` で絞り忘れることです。そこで、プロジェクトが**行レベルのモード**のときは、次の決まりにします。
 
 1. **すべての** `api/*.sql` に、`:user.` か `-- access: all` が要ります。どちらもないファイルは実行せず、`400` と「api/x.sql は、だれにどの行を見せるかが書いてありません。:user.… で絞るか、全員に全部の行を見せるなら -- access: all を書いてください（行レベルのモード: …）」を返します。`:user`（点なし）も、`:user.id` の書き間違いとしてエラーです。
-2. **すべての**リクエスト（`api/schema`、`api/query`、`snapshots/`、ホストが呼ぶ `run`）に、ログインが要ります。利用者がなければ `401` です。ホストが利用者を渡し忘れても、行が出ていくことはありません。
+2. **すべての**リクエスト（`api/schema`、`api/query`、`snapshots/`、ホストが呼ぶ `run`）に、ログインが要ります。利用者がなければ `401` です。ホストが利用者を渡し忘れても、行が出ていくことはありません。C# の API では `snapshots/` は IIS などが静的なファイルとして配るので、サイトのログインで守ります（[ASP.NET（C#）でログインした人を渡す](#aspnetcでログインした人を渡す)）。
 
 行レベルのモードになるのは、次のどれかのときです。メッセージの最後の（ ）に、どれでなったかが出ます。
 
-- **ホストの設定で決めたとき**（勧める形）: `createApiHandler({ requireUser: true })`。ファイルを消したり書き間違えたりしても外れないので、本番では必ず付けます。
+- **ホストの設定で決めたとき**（勧める形）: `createApiHandler({ requireUser: true })`（C# は `DevBIOptions.RequireUser = true`、`devbi-serve` と `devbi-snapshot` は `--require-user`）。ファイルを消したり書き間違えたりしても外れないので、本番では必ず付けます。
 - **プロジェクトのファイルが行レベル制御を使っているとき**: `api/*.sql` のどれかの文字に `:user.` があるか、`--` のコメントの中に `roles:` か `access:` があるか（全角の文字と `：` も半角として読みます）、`access/` フォルダがあるとき。SQL として読んだ結果ではなく、ただの文字の検索で決めます（引用符の中や SQL の後ろのコメントでもモードにします。迷ったら守る側に倒すため）。`:` のない `-- Access log` のような説明では、モードになりません。
 
 ホストが利用者を渡しているのに、どちらでもないときは、サーバーのログに 1 回だけ「利用者を受け取っていますが、行レベルのモードになっていません…」と書きます。
@@ -1229,6 +1230,37 @@ await api.run("orders", { from: "2024-04-01" }, { user });
 - 同じオリジンの API なら、アプリの Cookie や Windows 認証がそのまま API に届くので、ホストはそこから利用者を作ります。ほかのオリジンの API には Cookie が送られないので、行レベル制御は同じオリジンの API でだけ使えます。
 - ページを読み込み直さずに利用者が変わるアプリ（SPA でログアウトして、別の人でログインする）では、ページの中に前の人の行が残ります。ログアウトしたら、ページを読み込み直します。
 - `{ user }` と一緒に `signInHint` を渡すと、ログインしていないときの `401` のメッセージの（ ）に入ります（`{ user, signInHint: "社内ポータルからログインします" }` → 「ログインしていません（社内ポータルからログインします）」）。タイルにそのまま出ます。
+
+#### ASP.NET（C#）でログインした人を渡す
+
+```csharp
+var api = new DevBIApi(new DevBIOptions { Directory = ..., Connect = ..., RequireUser = true });
+
+// ASP.NET Core。ログインした人（HttpContext.User）が、そのまま利用者になる
+app.MapDevBIApi("/reports", api).RequireAuthorization();
+
+// OpenID Connect（Entra ID）などで、ID にするクレームを決めるとき
+app.MapDevBIApi("/reports", api, user: context =>
+{
+    var id = context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;   // Entra ID の oid
+    if (id == null) return null;   // ログインしていない
+    var user = new DevBIUser { Id = id, IsInRole = context.User.IsInRole };
+    // クレームがないときは足さない（null は「その属性はない」で、access/user.sql の値も使わない）
+    if (context.User.FindFirst("region") is { } region) user.Attributes["region"] = region.Value;
+    return user;
+}).RequireAuthorization();
+```
+
+- `user` を書かなければ、`MapDevBIApi` は `HttpContext.User` から、ID を `User.Identity.Name`、役割を `User.IsInRole` にして渡します。Windows 認証なら `CORP\yamada` と AD のグループです（`-- roles:` の名前の比べ方は `IsInRole` のとおり）。ログインしていない人（`IsAuthenticated` でない）は、利用者なしです。OpenID Connect では、`Identity.Name` にどのクレームが入るかがアプリの設定（`NameClaimType`）で変わるので、上のように `user` で変わらない ID のクレームを選びます。
+- `DevBIUser` の `Id`・`IsInRole`・`Attributes` は、Node の `id`・`roles`・`attrs` と同じ決まりです（上の表）。役割は一覧ではなく `IsInRole(名前)` で聞きます（Windows のグループは数が多いため）。`Attributes` にない名前は、[`access/user.sql`](#利用者の属性と役割を表から引くaccessusersql) の値を使い、`null` を入れた名前は「その属性はない」です。
+- `DevBIOptions.RequireUser = true` で行レベルのモードにします（Node の `requireUser`）。`DevBIOptions.UserCache` は `access/user.sql` の結果を覚えておく時間です（既定 60 秒、`TimeSpan.Zero` で毎回読む）。
+- **サイト全体にログインをかけます。** C# の API は `snapshots/` を配らず、`snapshots/` と `data/` のファイルは IIS や `UseStaticFiles` が静的なファイルとして配るので、API の `401` はそこには届きません。ASP.NET Core では、どこにも決まりのないリクエストにもログインを求め（`FallbackPolicy`）、`UseStaticFiles` を `UseAuthorization` のあとに置きます。IIS では匿名認証を無効にします（[社内に公開する](deploying.md#aspnet-core)）。
+- C# の API はスナップショットを作らないので、`devbi-snapshot` をタスクスケジューラで動かします（[スナップショット](#毎朝のスナップショット)）。`RequireUser = true` にしたら、`devbi-snapshot` にも `--require-user` を付けます。付けないと、プロジェクトのファイルだけでは行レベルのモードにならないとき、`-- access: all` のない SQL のスナップショットも作ってしまい、IIS がそれをログインした人のだれにでも配ります。
+- WebForms・MVC 5 の `DevBIHttpHandler` も、`HttpContext.User` から同じように作ります。作り方を変えるときは、`DevBIHttpHandler` を継承して `UserOf(HttpContext)` を書き換え、`web.config` にはその型を書きます。
+- ホストが自分で SQL を実行するときは `api.RunAsync(name, parameters, user)`、ほかの Web の仕組みにつなぐときは `ApiRequest.User`（と、`401` の（ ）に入る `ApiRequest.SignInHint`）に入れます。
+- メッセージ、`401` の `"access": 1`、`api/schema` の絞り込みと `"user"`、ログの ID は Node と同じです。`:user.`・`-- roles:`・`-- access:` の読み方が Node と同じことは、`packages/server/test/fixtures/sqlserver-cases.json` の同じ例で両方を確かめています。
+- **`DevBI.Server` の `.cs` をアプリにコピーして使っているときは、コピーを新しくします（`Access.cs` が増えました）。** 古いコピーは `-- roles:` と `-- access:` をただのコメントとして読み、だれにでも読ませます。置いたあとに `devbi-check --url` で確かめられます（[行レベル制御のプロジェクトを確かめる](#行レベル制御のプロジェクトを確かめる)）。
+- **IIS の Windows 認証で人ごとに行を変えるなら、この形を勧めます。** ログインした人を、何も足さずにそのまま受け取れるからです。
 
 #### 前のサーバーからユーザー名を受け取る（`devbi-serve`）
 
@@ -1578,7 +1610,7 @@ SSRS のレポートのように、`api/<名前>.sql`（データセット）の
 | `dotnet/src/DevBI.Server.SystemWeb` | .NET Framework の ASP.NET（WebForms、MVC 5）用。`DevBIHttpHandler`（`IHttpHandler`） |
 | `dotnet/samples/DevBI.Sample` | サンプル（`examples/sales`）を `devbi-serve` の代わりに ASP.NET Core で出す |
 
-NuGet にはまだ出していません。アプリのソリューションにプロジェクトを足して参照するか、`DevBI.Server` の 5 つの `.cs` をアプリにコピーして、NuGet で `Apache.Arrow` と（.NET Framework では）`System.Text.Json` を入れます。コピーするときは、C# 8 以降の書き方を使っているので、古い形式の `.csproj`（.NET Framework の既定は C# 7.3）に `<LangVersion>latest</LangVersion>` を足します（Visual Studio 2019 以降）。
+NuGet にはまだ出していません。アプリのソリューションにプロジェクトを足して参照するか、`DevBI.Server` の 7 つの `.cs` をアプリにコピーして、NuGet で `Apache.Arrow` と（.NET Framework では）`System.Text.Json` を入れます。コピーするときは、C# 8 以降の書き方を使っているので、古い形式の `.csproj`（.NET Framework の既定は C# 7.3）に `<LangVersion>latest</LangVersion>` を足します（Visual Studio 2019 以降）。
 
 ### ASP.NET Core
 
@@ -1600,6 +1632,7 @@ app.MapDevBIApi("/reports", api).RequireAuthorization();   // /reports/api/schem
 - ビルドした `dist/` を `wwwroot/reports/` に置くと、ダッシュボードは `/reports/` で開け、API は既定の場所（`/reports/api/`）で答えます。
 - `.arrows`（[スナップショット](#毎朝のスナップショット)と、データの Arrow）と、データに使うなら `.parquet` は、ASP.NET Core の静的ファイルが型を知らないので、`FileExtensionContentTypeProvider` に足します（`dotnet/samples/DevBI.Sample/Program.cs`）。
 - `MapDevBIApi` の戻り値には、`.RequireAuthorization()` などのふつうの設定が付けられます。
+- ログインした人（`HttpContext.User`）は、そのまま API の利用者になります。人ごとに見える行を変えるときは [ASP.NET（C#）でログインした人を渡す](#aspnetcでログインした人を渡す)。
 
 ### WebForms・MVC 5（.NET Framework 4.7.2 以降）
 
@@ -1636,7 +1669,7 @@ protected void Application_Start(object sender, EventArgs e)
 
 ### Windows 認証で SQL Server につなぐ
 
-接続文字列に `Integrated Security=true`（`Server=db01;Database=sales;Integrated Security=true;TrustServerCertificate=true`）と書くと、Windows のアカウントで SQL Server につながります。IIS では、アプリケーション プールのアカウント（`IIS AppPool\<プール名>`、ほかのコンピューターの SQL Server からは `<ドメイン>\<Web サーバー名>$`）です。そのアカウントに、読ませる表の SELECT の権限だけを付けます。利用者ひとりひとりのアカウントではつなぎません（DevBI の API は、だれが開いても同じ行を返します）。
+接続文字列に `Integrated Security=true`（`Server=db01;Database=sales;Integrated Security=true;TrustServerCertificate=true`）と書くと、Windows のアカウントで SQL Server につながります。IIS では、アプリケーション プールのアカウント（`IIS AppPool\<プール名>`、ほかのコンピューターの SQL Server からは `<ドメイン>\<Web サーバー名>$`）です。そのアカウントに、読ませる表の SELECT の権限だけを付けます。利用者ひとりひとりのアカウントではつなぎません（人ごとに見える行は、[行レベル制御](#利用者ごとに見える行を変える行レベル制御)で `api/*.sql` の中で絞ります）。
 
 `<identity impersonate="true" />` にしている WebForms のアプリでは、開いた利用者のアカウントでつながることがあります。そのときは利用者ごとの権限になり、ほかのコンピューターの SQL Server には Kerberos の委任の設定が要ります。アプリケーション プールのアカウントでつなぐなら、SQL Server 認証のユーザーを使うのがかんたんです。
 
@@ -1649,9 +1682,11 @@ protected void Application_Start(object sender, EventArgs e)
 | `MaxRows` | 1 回に返す行の上限。既定は 1,000,000 |
 | `Timeout` | 1 回の SQL の時間の上限。既定は 60 秒。`TimeSpan.Zero` で上限なし |
 | `ExposeErrors` | データベースのエラーをそのままブラウザに返す（`devbi-serve` の `--debug`）。既定は `false` |
-| `Log` | 1 回ごとの行（`api/orders.sql: 6,044 行、381 ms`）と、エラーのくわしい内容を受け取る関数 |
+| `Log` | 1 回ごとの行（`api/orders.sql: 6,044 行、381 ms`。ログインした人がいれば前に ID）と、エラーのくわしい内容を受け取る関数。改行や制御文字は `?` にして 1 行で渡す |
+| `RequireUser` | 行レベルのモードにする（[行レベル制御](#aspnetcでログインした人を渡す)）。既定は `false`（ファイルの中身で決まる） |
+| `UserCache` | `access/user.sql` の結果を覚えておく時間。既定は 60 秒。`TimeSpan.Zero` で毎回読む |
 
-`api.RunAsync(name, parameters)` で SQL を 1 つ実行できます（戻り値は Arrow のバイト列と行数。複数の値のパラメーターには `string[]` などの配列を渡します）。`Dataset.Parse(name, text)` の `Parameters` と `Key` で、`-- param:` と `-- key:` の中身を読めます。`api.HandleAsync(request)` は HTTP の 1 回分で、ほかの Web の仕組みにつなぐときに使います（パスから `schema` / `query` を取るのは `DevBIApi.ActionOf(path)`）。
+`api.RunAsync(name, parameters)` で SQL を 1 つ実行できます（戻り値は Arrow のバイト列と行数。複数の値のパラメーターには `string[]` などの配列を渡します。ログインした人として実行するときは `api.RunAsync(name, parameters, user)`）。`Dataset.Parse(name, text)` の `Parameters` と `Key` で、`-- param:` と `-- key:` の中身を読めます。`api.HandleAsync(request)` は HTTP の 1 回分で、ほかの Web の仕組みにつなぐときに使います（パスから `schema` / `query` を取るのは `DevBIApi.ActionOf(path)`）。
 
 ### `devbi-serve` との違い
 

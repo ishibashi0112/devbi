@@ -394,5 +394,135 @@ namespace DevBI.Server.Tests
             Assert.Equal(new[] { ColumnType.Float, ColumnType.Float, ColumnType.Float, ColumnType.Float, ColumnType.Int }, r.Columns.Select(c => c.Type));
             Assert.Equal(new object?[] { 1e30, 12.5, 1.5, 0.25, 7L }, Assert.Single(r.Rows));
         }
+
+        /// <summary>Row-level security (docs/design/row-level-security.md): each user's rows, from :user.region.</summary>
+        private (DevBIApi api, List<string> connections, List<string> log) RowLevelApi(TimeSpan? userCache = null)
+        {
+            var dir = System.IO.Directory.CreateTempSubdirectory("devbi-rls-").FullName;
+            System.IO.Directory.CreateDirectory(Path.Combine(dir, "api"));
+            System.IO.Directory.CreateDirectory(Path.Combine(dir, "access"));
+            File.WriteAllText(
+                Path.Combine(dir, "api", "mine.sql"),
+                "-- 担当の地域の受注\n-- param: from date\nSELECT COUNT(*) AS n, MIN(c.region) AS region FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date >= :from AND c.region = :user.region");
+            File.WriteAllText(Path.Combine(dir, "api", "me.sql"), "SELECT :user.id AS id, :USER.Id AS again");
+            File.WriteAllText(Path.Combine(dir, "api", "all.sql"), "-- 全社\n-- access: all\nSELECT COUNT(*) AS n FROM customers");
+            File.WriteAllText(Path.Combine(dir, "api", "pay.sql"), "-- 経理だけ\n-- roles: 経理\n-- access: all\nSELECT COUNT(*) AS n FROM orders");
+            // the users' attributes and roles, from a table (VALUES here)
+            File.WriteAllText(
+                Path.Combine(dir, "access", "user.sql"),
+                "SELECT u.region, u.roles FROM (VALUES (N'CORP\\yamada', N'関東', N'営業'), (N'CORP\\keiri', N'近畿', N'営業、 経理'), (N'CORP\\twice', N'a', NULL), (N'CORP\\twice', N'b', NULL)) AS u(login, region, roles) WHERE u.login = :user.id");
+            var connections = new List<string>();
+            var log = new List<string>();
+            var api = new DevBIApi(new DevBIOptions
+            {
+                Directory = dir,
+                Connect = name =>
+                {
+                    lock (connections) connections.Add(name);
+                    return name == "DEVBI_DB" ? new SqlConnection(SqlServer.ConnectionString) : null;
+                },
+                Log = log.Add,
+                UserCache = userCache ?? TimeSpan.FromSeconds(60),
+            });
+            return (api, connections, log);
+        }
+
+        private static Task<ApiResponse> Ask(DevBIApi api, string body, DevBIUser? user) =>
+            api.HandleAsync(new ApiRequest { Action = "query", Method = "POST", ContentType = "application/json", Body = new MemoryStream(Encoding.UTF8.GetBytes(body)), User = user });
+
+        private static string ErrorOf(ApiResponse r) => $"{r.Status} {System.Text.Json.JsonDocument.Parse(r.Body).RootElement.GetProperty("error").GetString()}";
+
+        [SqlServerFact]
+        public async Task GivesEachUserTheirOwnRows()
+        {
+            var (api, connections, log) = RowLevelApi();
+            const string mine = "{\"name\":\"mine\",\"params\":{\"from\":\"2024-04-01\"}}";
+            var kanto = (long)Assert.Single((await SqlServer.Query("SELECT COUNT(*) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date >= '2024-04-01' AND c.region = N'関東'")).Rows)[0]!;
+            var kinki = (long)Assert.Single((await SqlServer.Query("SELECT COUNT(*) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date >= '2024-04-01' AND c.region = N'近畿'")).Rows)[0]!;
+            Assert.NotEqual(kanto, kinki);
+
+            Assert.Equal("401 ログインしていません", ErrorOf(await Ask(api, mine, null)));
+            // the region from access/user.sql
+            var r = await Ask(api, mine, new DevBIUser { Id = "CORP\\yamada" });
+            Assert.Equal(200, r.Status);
+            var batch = Read(r.Body);
+            Assert.Equal((kanto, "関東"), (((Int64Array)batch.Column("n")).GetValue(0), ((StringArray)batch.Column("region")).GetString(0)));
+            Assert.Matches("^CORP\\\\yamada api/mine.sql: 1 行、[0-9]+ ms$", log.Last());
+            // the host's attribute over the table's; the host's null: none (not the table's either)
+            r = await Ask(api, mine, new DevBIUser { Id = "CORP\\yamada", Attributes = { ["Region"] = "近畿" } });
+            Assert.Equal(kinki, ((Int64Array)Read(r.Body).Column("n")).GetValue(0));
+            Assert.Equal("403 利用者 CORP\\yamada に属性 region がありません（api/mine.sql の :user.region）", ErrorOf(await Ask(api, mine, new DevBIUser { Id = "CORP\\yamada", Attributes = { ["region"] = null } })));
+            // nobody in the table: no attributes
+            Assert.Equal("403 利用者 CORP\\sato に属性 region がありません（api/mine.sql の :user.region）", ErrorOf(await Ask(api, mine, new DevBIUser { Id = "CORP\\sato" })));
+            // the browser cannot send the user's values
+            Assert.Equal(
+                "400 api/mine.sql: パラメーター user.region は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）",
+                ErrorOf(await Ask(api, "{\"name\":\"mine\",\"params\":{\"from\":\"2024-04-01\",\"user.region\":\"近畿\"}}", new DevBIUser { Id = "CORP\\yamada" })));
+            // :user.id as a parameter (a value in quotes would not change the SQL)
+            r = await Ask(api, "{\"name\":\"me\"}", new DevBIUser { Id = "O'Brien" });
+            Assert.Equal("O'Brien", ((StringArray)Read(r.Body).Column("again")).GetString(0));
+            // two rows for one user: which one is unknown
+            Assert.Equal(
+                "500 access/user.sql が利用者 CORP\\twice の行を 2 行以上返しました。1 人につき 1 行（いなければ 0 行）にしてください",
+                ErrorOf(await Ask(api, mine, new DevBIUser { Id = "CORP\\twice" })));
+            // the host runs a file as the user too
+            var q = await api.RunAsync("mine", new Dictionary<string, object?> { ["from"] = "2024-04-01" }, new DevBIUser { Id = "CORP\\keiri" });
+            Assert.Equal(kinki, ((Int64Array)Read(q.Bytes).Column("n")).GetValue(0));
+            Assert.All(connections, c => Assert.Equal("DEVBI_DB", c));
+        }
+
+        [SqlServerFact]
+        public async Task LetsOnlyTheRolesReadAFileWithRoles()
+        {
+            var (api, _, _) = RowLevelApi();
+            const string pay = "{\"name\":\"pay\"}";
+            Assert.Equal("403 api/pay.sql を読む役割がありません（利用者 CORP\\yamada）", ErrorOf(await Ask(api, pay, new DevBIUser { Id = "CORP\\yamada" })));
+            // a role from access/user.sql (split at 、), or from the host (IsInRole)
+            Assert.Equal(200, (await Ask(api, pay, new DevBIUser { Id = "CORP\\keiri" })).Status);
+            Assert.Equal(200, (await Ask(api, pay, new DevBIUser { Id = "CORP\\sato", IsInRole = r => r == "経理" })).Status);
+            var schema = await api.HandleAsync(new ApiRequest { Action = "schema", Method = "GET", User = new DevBIUser { Id = "CORP\\yamada" } });
+            using var doc = System.Text.Json.JsonDocument.Parse(schema.Body);
+            Assert.Equal(new[] { "all", "me", "mine" }, doc.RootElement.GetProperty("datasets").EnumerateArray().Select(d => d.GetProperty("name").GetString()));
+            Assert.Equal(new[] { "from" }, doc.RootElement.GetProperty("datasets")[2].GetProperty("params").EnumerateArray().Select(p => p.GetString()));
+        }
+
+        [SqlServerFact]
+        public async Task ReadsDatesOfAccessUserSqlAsNodeDoes()
+        {
+            var dir = System.IO.Directory.CreateTempSubdirectory("devbi-rls-").FullName;
+            System.IO.Directory.CreateDirectory(Path.Combine(dir, "api"));
+            System.IO.Directory.CreateDirectory(Path.Combine(dir, "access"));
+            File.WriteAllText(Path.Combine(dir, "api", "when.sql"), "SELECT :user.since AS since, :user.at AS at, :user.moment AS moment");
+            File.WriteAllText(
+                Path.Combine(dir, "access", "user.sql"),
+                "SELECT CAST('2024-01-02' AS date) AS since, CAST('2024-01-02 03:04:05.1234567' AS datetime2) AS at, CAST('2024-01-02 12:04:05 +09:00' AS datetimeoffset) AS moment WHERE N'u' = :user.id");
+            var api = new DevBIApi(new DevBIOptions { Directory = dir, Connect = _ => new SqlConnection(SqlServer.ConnectionString) });
+            var r = await Ask(api, "{\"name\":\"when\"}", new DevBIUser { Id = "u" });
+            Assert.Equal(200, r.Status);
+            var batch = Read(r.Body);
+            // as devbi-serve's mssql: YYYY-MM-DD, and the time to the millisecond (a moment's in UTC)
+            Assert.Equal(
+                ("2024-01-02", "2024-01-02 03:04:05.123", "2024-01-02 03:04:05"),
+                (((StringArray)batch.Column("since")).GetString(0), ((StringArray)batch.Column("at")).GetString(0), ((StringArray)batch.Column("moment")).GetString(0)));
+        }
+
+        [SqlServerFact]
+        public async Task ReadsAccessUserSqlOnlyWhenNeededAndKeepsIt()
+        {
+            const string mine = "{\"name\":\"mine\",\"params\":{\"from\":\"2024-04-01\"}}";
+            var (api, connections, _) = RowLevelApi();
+            for (var i = 0; i < 2; i++) Assert.Equal(200, (await Ask(api, mine, new DevBIUser { Id = "CORP\\yamada" })).Status);
+            // two queries, and access/user.sql once
+            Assert.Equal(3, connections.Count);
+            // :user.id only, -- access: all: no need for it
+            connections.Clear();
+            Assert.Equal(200, (await Ask(api, "{\"name\":\"me\"}", new DevBIUser { Id = "CORP\\nobody" })).Status);
+            Assert.Equal(200, (await Ask(api, "{\"name\":\"all\"}", new DevBIUser { Id = "CORP\\nobody" })).Status);
+            Assert.Equal(2, connections.Count);
+            // UserCache = 0: each time
+            (api, connections, _) = RowLevelApi(TimeSpan.Zero);
+            for (var i = 0; i < 2; i++) Assert.Equal(200, (await Ask(api, mine, new DevBIUser { Id = "CORP\\yamada" })).Status);
+            Assert.Equal(4, connections.Count);
+        }
     }
 }

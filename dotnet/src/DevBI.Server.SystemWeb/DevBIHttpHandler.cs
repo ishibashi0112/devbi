@@ -10,7 +10,9 @@
 //       });
 //   }
 //
-// and send the requests under the dashboards' api/ folder to it (web.config, IIS integrated pipeline):
+// and send the requests under the dashboards' api/ folder to it (web.config, IIS integrated pipeline). The signed-in
+// user (HttpContext.User: Windows authentication's CORP\yamada and AD groups) goes to the API for row-level security;
+// to take it from elsewhere, derive from DevBIHttpHandler, override UserOf and register that type instead.
 //
 //   <location path="Scripts/devbi/api">
 //     <system.webServer>
@@ -52,6 +54,7 @@ namespace DevBI.Server.SystemWeb
                         ContentType = request.ContentType,
                         AcceptEncoding = request.Headers["Accept-Encoding"],
                         Body = request.GetBufferlessInputStream(),
+                        User = UserOf(context),
                     },
                     cancel);
             }
@@ -82,6 +85,17 @@ namespace DevBI.Server.SystemWeb
                 }
             }
             if (request.HttpMethod != "HEAD") response.OutputStream.Write(answer.Body, 0, answer.Body.Length);
+        }
+
+        /// <summary>
+        /// The signed-in user (row-level security): <c>User.Identity.Name</c> as the id and <c>User.IsInRole</c> for
+        /// <c>-- roles:</c>. Null when nobody is signed in. Override it to take the id from another claim.
+        /// </summary>
+        protected virtual DevBIUser? UserOf(HttpContext context)
+        {
+            var principal = context.User;
+            if (principal?.Identity?.IsAuthenticated != true) return null;
+            return new DevBIUser { Id = principal.Identity.Name, IsInRole = principal.IsInRole };
         }
 
         /// <summary>Cancelled when the browser goes away (IIS integrated pipeline); elsewhere never.</summary>

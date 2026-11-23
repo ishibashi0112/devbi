@@ -368,6 +368,26 @@
     {
       "sql": "SELECT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, update_x, x_update, \"bbbbbbbbbb\" FROM t",
       "problem": null
+    },
+    {
+      "sql": "SELECT * FROM t WHERE r = :user.region AND s = :USER.Region AND o = :User.id AND x = :user.地域 AND y = :user_id",
+      "problem": null
+    },
+    {
+      "sql": "SELECT :user., :user..x, :user.1x, :userx.y, :user .x, x:user.y, :user.a.b, ':user.q', [:user.w], \"q:user.e\" FROM t",
+      "problem": null
+    },
+    {
+      "sql": "SELECT :ｕｓｅｒ.x, :uſer.x, :user.ſ, :user, :user.region::text, ::user.x FROM t -- :user.c",
+      "problem": null
+    },
+    {
+      "sql": "SELECT :user.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, :uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuser.x FROM t",
+      "problem": null
+    },
+    {
+      "sql": "SELECT :user.update, :user.into, :user.delete FROM t",
+      "problem": null
     }
   ],
   "parameters": [
@@ -596,6 +616,136 @@
     {
       "sql": "SELECT aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, update_x, x_update, \"bbbbbbbbbb\" FROM t",
       "parameters": []
+    },
+    {
+      "sql": "SELECT * FROM t WHERE r = :user.region AND s = :USER.Region AND o = :User.id AND x = :user.地域 AND y = :user_id",
+      "parameters": [
+        {
+          "name": "user.region",
+          "start": 26,
+          "end": 38
+        },
+        {
+          "name": "USER.Region",
+          "start": 47,
+          "end": 59
+        },
+        {
+          "name": "User.id",
+          "start": 68,
+          "end": 76
+        },
+        {
+          "name": "user.地域",
+          "start": 85,
+          "end": 93
+        },
+        {
+          "name": "user_id",
+          "start": 102,
+          "end": 110
+        }
+      ]
+    },
+    {
+      "sql": "SELECT :user., :user..x, :user.1x, :userx.y, :user .x, x:user.y, :user.a.b, ':user.q', [:user.w], \"q:user.e\" FROM t",
+      "parameters": [
+        {
+          "name": "user",
+          "start": 7,
+          "end": 12
+        },
+        {
+          "name": "user",
+          "start": 15,
+          "end": 20
+        },
+        {
+          "name": "user",
+          "start": 25,
+          "end": 30
+        },
+        {
+          "name": "userx",
+          "start": 35,
+          "end": 41
+        },
+        {
+          "name": "user",
+          "start": 45,
+          "end": 50
+        },
+        {
+          "name": "user.a",
+          "start": 65,
+          "end": 72
+        }
+      ]
+    },
+    {
+      "sql": "SELECT :ｕｓｅｒ.x, :uſer.x, :user.ſ, :user, :user.region::text, ::user.x FROM t -- :user.c",
+      "parameters": [
+        {
+          "name": "ｕｓｅｒ",
+          "start": 7,
+          "end": 12
+        },
+        {
+          "name": "uſer",
+          "start": 16,
+          "end": 21
+        },
+        {
+          "name": "user.ſ",
+          "start": 25,
+          "end": 32
+        },
+        {
+          "name": "user",
+          "start": 34,
+          "end": 39
+        },
+        {
+          "name": "user.region",
+          "start": 41,
+          "end": 53
+        }
+      ]
+    },
+    {
+      "sql": "SELECT :user.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, :uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuser.x FROM t",
+      "parameters": [
+        {
+          "name": "user.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "start": 7,
+          "end": 141
+        },
+        {
+          "name": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuser",
+          "start": 145,
+          "end": 274
+        }
+      ]
+    },
+    {
+      "sql": "SELECT :user.update, :user.into, :user.delete FROM t",
+      "parameters": [
+        {
+          "name": "user.update",
+          "start": 7,
+          "end": 19
+        },
+        {
+          "name": "user.into",
+          "start": 21,
+          "end": 31
+        },
+        {
+          "name": "user.delete",
+          "start": 33,
+          "end": 45
+        }
+      ]
     }
   ],
   "datasets": [
@@ -619,7 +769,10 @@
             "name": "from"
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -652,7 +805,10 @@
             "name": "to"
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -714,7 +870,10 @@
         "sql": "SELECT 1\n-- connection: erp\n-- snapshot: 06:00",
         "params": [],
         "parameters": [],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -803,7 +962,10 @@
         "sql": "(SELECT 1)",
         "params": [],
         "parameters": [],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -826,7 +988,224 @@
         "sql": "SELECT 1",
         "params": [],
         "parameters": [],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
+      }
+    },
+    {
+      "name": "rls",
+      "text": "-- 地域で絞る\n-- roles: 経理, CORP\\Managers、 経理\n\n-- 説明の 2 行目\nSELECT * FROM t WHERE r = :user.Region AND d >= :from AND o = :USER.id AND r2 = :user.region",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "説明の 2 行目",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE r = :user.Region AND d >= :from AND o = :USER.id AND r2 = :user.region",
+        "params": [
+          "from"
+        ],
+        "parameters": [
+          {
+            "name": "from"
+          }
+        ],
+        "key": null,
+        "user": [
+          "region",
+          "id"
+        ],
+        "roles": [
+          "経理",
+          "CORP\\Managers"
+        ],
+        "access": null
+      }
+    },
+    {
+      "name": "rls_all",
+      "text": "-- 全員\n-- Access : ALL\nSELECT * FROM t WHERE d >= :from",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "全員",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE d >= :from",
+        "params": [
+          "from"
+        ],
+        "parameters": [
+          {
+            "name": "from"
+          }
+        ],
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": "all"
+      }
+    },
+    {
+      "name": "rls_both",
+      "text": "-- access: all\nSELECT * FROM t WHERE r = :user.region",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/rls_both.sql: -- access: all（全員に全部の行）と :user.region（人で絞る）が両方あります。どちらかにしてください",
+        "status": 400
+      }
+    },
+    {
+      "name": "rls_snapshot_user",
+      "text": "-- snapshot: 06:00\nSELECT * FROM t WHERE r = :user.region",
+      "header": {
+        "connection": null,
+        "snapshot": [
+          "06:00"
+        ]
+      },
+      "dataset": {
+        "error": "api/rls_snapshot_user.sql: :user.region で人ごとに行が変わるので、-- snapshot: は書けません（スナップショットは全員に同じファイルです）",
+        "status": 400
+      }
+    },
+    {
+      "name": "rls_snapshot_roles",
+      "text": "-- snapshot: 06:00\n-- roles: a\n-- access: all\nSELECT * FROM t",
+      "header": {
+        "connection": null,
+        "snapshot": [
+          "06:00"
+        ]
+      },
+      "dataset": {
+        "error": "api/rls_snapshot_roles.sql: -- roles: の役割を、静的なファイルでは確かめられないので、-- snapshot: は書けません（スナップショットは全員に同じファイルです）",
+        "status": 400
+      }
+    },
+    {
+      "name": "rls_snapshot_all",
+      "text": "-- snapshot: 06:00\n-- access: all\nSELECT * FROM t",
+      "header": {
+        "connection": null,
+        "snapshot": [
+          "06:00"
+        ]
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": [
+          "06:00"
+        ],
+        "sql": "SELECT * FROM t",
+        "params": [],
+        "parameters": [],
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": "all"
+      }
+    },
+    {
+      "name": "rls_param_user",
+      "text": "-- param: user.region text\nSELECT * FROM t WHERE r = :user.region",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/rls_param_user.sql（1 行目）: user.region: user. で始まる名前は、ログインした人の値のために取ってあるので使えません",
+        "status": 400
+      }
+    },
+    {
+      "name": "rls_typed",
+      "text": "-- param: r text[]\nSELECT * FROM t WHERE r IN (:r) AND o = :user.id AND x IN (:user.id)",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE r IN (:r) AND o = :user.id AND x IN (:user.id)",
+        "params": [
+          "r"
+        ],
+        "parameters": [
+          {
+            "name": "r",
+            "type": "text",
+            "multiple": true
+          }
+        ],
+        "key": null,
+        "user": [
+          "id"
+        ],
+        "roles": null,
+        "access": null
+      }
+    },
+    {
+      "name": "rls_bare",
+      "text": "SELECT * FROM t WHERE r = :user AND s = :User",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE r = :user AND s = :User",
+        "params": [
+          "user"
+        ],
+        "parameters": [
+          {
+            "name": "user"
+          }
+        ],
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
+      }
+    },
+    {
+      "name": "rls_late",
+      "text": "-- 説明\nSELECT * FROM t WHERE r = :user.region\n-- roles: a",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/rls_late.sql（3 行目）: roles: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）",
+        "status": 400
+      }
+    },
+    {
+      "name": "rls_typo",
+      "text": "-- role: 経理\nSELECT * FROM t",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "error": "api/rls_typo.sql（1 行目）: -- role: は -- roles: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）",
+        "status": 400
       }
     },
     {
@@ -882,7 +1261,10 @@
           "受注番号",
           "行, 番号",
           "a\"b"
-        ]
+        ],
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -957,7 +1339,10 @@
             "default": "all"
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -1226,7 +1611,10 @@
             "name": "r"
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -1411,7 +1799,10 @@
             "name": "d"
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -1472,7 +1863,10 @@
             "multiple": true
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -1497,7 +1891,10 @@
             "multiple": true
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
       }
     },
     {
@@ -1568,7 +1965,726 @@
             "name": "d"
           }
         ],
-        "key": null
+        "key": null,
+        "user": null,
+        "roles": null,
+        "access": null
+      }
+    },
+    {
+      "name": "nonchar",
+      "text": "-- 受注￾\n-- roles: ａ￾\nSELECT * FROM t WHERE r = :user.region",
+      "header": {
+        "connection": null,
+        "snapshot": null
+      },
+      "dataset": {
+        "description": "受注￾",
+        "connection": null,
+        "snapshot": null,
+        "sql": "SELECT * FROM t WHERE r = :user.region",
+        "params": [],
+        "parameters": [],
+        "key": null,
+        "user": [
+          "region"
+        ],
+        "roles": [
+          "ａ￾"
+        ],
+        "access": null
+      }
+    }
+  ],
+  "access": [
+    {
+      "text": "-- roles: 経理, CORP\\Managers\nSELECT 1",
+      "lines": {
+        "roles": [
+          "経理",
+          "CORP\\Managers"
+        ],
+        "access": null
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- roles: 経理、経理 , ,b\n-- access: all\nSELECT 1",
+      "lines": {
+        "roles": [
+          "経理",
+          "b"
+        ],
+        "access": "all"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "﻿-- 説明\r\n\r\n  --ROLES:a\r\nSELECT 1",
+      "lines": {
+        "roles": [
+          "a"
+        ],
+        "access": null
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- roles:\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles: のあとに、読んでよい役割を , で区切って書いてください（例: -- roles: 経理, CORP\\Managers）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- roles: ,、 \nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles: のあとに、読んでよい役割を , で区切って書いてください（例: -- roles: 経理, CORP\\Managers）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- roles: a\n-- roles: b\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（2 行目）: -- roles: が 2 つあります（1 行目にも）。1 行に , で区切って書きます"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- access: all\n-- 説明\n-- access: all\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（3 行目）: -- access: が 2 つあります（1 行目にも）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- access: some\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- access: に書けるのは all だけです（some が書いてあります）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- access:\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- access: に書けるのは all だけです（空 が書いてあります）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- access: all rows\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- access: に書けるのは all だけです（all rows が書いてあります）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- Access: All\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": "all"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- ｒｏｌｅｓ： 経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles: は半角の英字と : で書いてください（このままでは読みません）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- roles：経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles: は半角の英字と : で書いてください（このままでは読みません）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- roleſ: 経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles: は半角の英字と : で書いてください（このままでは読みません）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "　-- access:　all　\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": "all"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- roles 経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles の行は -- roles: 経理 のように : を付けて書きます（説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- access all\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- access の行は -- access: all のように : を付けて書きます（説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- x\n-- access\tall\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（2 行目）: -- access の行は -- access: all のように : を付けて書きます（説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- access all_rows\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- accessall\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- Access log の SQL\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- access\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- role: 経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- role: は -- roles: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- rolse: 経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- rolse: は -- roles: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- Roels : 経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- Roels: は -- roles: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- acess: all\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- acess: は -- access: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- accesss: all\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- accesss: は -- access: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- rules: a\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- roads: a\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- ro: a\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- myroles: x\nSELECT 1",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "--- roles: a\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: roles: の行は、-- roles: 経理 のように -- のすぐあとに書いてください（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- @roles: a\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: roles: の行は、-- roles: 経理 のように -- のすぐあとに書いてください（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- ※access: all\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: access: の行は、-- access: all のように -- のすぐあとに書いてください（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- see roles: below\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: roles: の行は、-- roles: 経理 のように -- のすぐあとに書いてください（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- access::text\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- access: に書けるのは all だけです（:text が書いてあります）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- roles:: a\nSELECT 1",
+      "lines": {
+        "roles": [
+          ": a"
+        ],
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- roles: a\rb\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles: は -- roles: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- roles: a b\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- roles: は -- roles: の書き間違いではありませんか（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- ROLES: Ｃｏｒｐ\\ｘ\nSELECT 1",
+      "lines": {
+        "roles": [
+          "Ｃｏｒｐ\\ｘ"
+        ],
+        "access": null
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- connection: erp\n-- roles: a\n-- snapshot: 06:00\nSELECT 1",
+      "lines": {
+        "roles": [
+          "a"
+        ],
+        "access": null
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- only comments\n-- roles: a",
+      "lines": {
+        "roles": [
+          "a"
+        ],
+        "access": null
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "SELECT 1\n-- roles: a",
+      "lines": {
+        "error": "api/x.sql（2 行目）: roles: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "SELECT 1 -- access: all",
+      "lines": {
+        "error": "api/x.sql（1 行目）: access: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "/* roles: a */\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: roles: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "-- roles: a\n\nSELECT :user.id FROM t /* access: */",
+      "lines": {
+        "error": "api/x.sql（3 行目）: access: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": ":user."
+    },
+    {
+      "text": "SELECT a::text, access::int FROM t",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "SELECT 'roles: x' FROM t",
+      "lines": {
+        "error": "api/x.sql（1 行目）: roles: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": null
+    },
+    {
+      "text": "SELECT access FROM t\nWHERE x = :USER.x",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": ":user."
+    },
+    {
+      "text": "SELECT 1 FROM t -- ｒｏｌｅｓ：",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "SELECT '--' || 'access:' FROM t",
+      "lines": {
+        "error": "api/x.sql（1 行目）: access: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "SELECT 1\r-- roles: a",
+      "lines": {
+        "error": "api/x.sql（1 行目）: roles: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "SELECT 1 -- access: all",
+      "lines": {
+        "error": "api/x.sql（1 行目）: access: の行は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ の中では読みません。文字として使うなら言い回しを変えてください）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "SELECT 1\n-- Access log",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "SELECT 1 -- x￾",
+      "lines": {
+        "roles": null,
+        "access": null
+      },
+      "signal": null
+    },
+    {
+      "text": "-- 説明￾\n-- ｒｏｌｅｓ：￿経理\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（2 行目）: -- roles: は半角の英字と : で書いてください（このままでは読みません）"
+      },
+      "signal": "-- roles:"
+    },
+    {
+      "text": "-- ﷐access: all\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: access: の行は、-- access: all のように -- のすぐあとに書いてください（このままでは読みません。説明の文なら、言い回しを変えてください）"
+      },
+      "signal": "-- access:"
+    },
+    {
+      "text": "-- ａｃｃｅｓｓ：ａｌｌ￾\nSELECT 1",
+      "lines": {
+        "error": "api/x.sql（1 行目）: -- access: は半角の英字と : で書いてください（このままでは読みません）"
+      },
+      "signal": "-- access:"
+    }
+  ],
+  "tableUsers": [
+    {
+      "columns": [
+        {
+          "name": "region",
+          "type": "string"
+        },
+        {
+          "name": "roles",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "関東",
+        "営業、 経理 ,営業,, "
+      ],
+      "user": {
+        "attrs": {
+          "region": "関東"
+        },
+        "roles": [
+          "営業",
+          "経理"
+        ]
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "Region",
+          "type": "string"
+        },
+        {
+          "name": "ROLES",
+          "type": "string"
+        }
+      ],
+      "row": [
+        null,
+        null
+      ],
+      "user": {
+        "attrs": {
+          "region": null
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "region",
+          "type": "string"
+        },
+        {
+          "name": "roles",
+          "type": "string"
+        }
+      ],
+      "row": null,
+      "user": {
+        "attrs": {},
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "n",
+          "type": "int"
+        },
+        {
+          "name": "f",
+          "type": "float"
+        },
+        {
+          "name": "ok",
+          "type": "bool"
+        },
+        {
+          "name": "blank",
+          "type": "string"
+        }
+      ],
+      "row": [
+        3,
+        1.5,
+        false,
+        " 　"
+      ],
+      "user": {
+        "attrs": {
+          "n": 3,
+          "f": 1.5,
+          "ok": false,
+          "blank": null
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "since",
+          "type": "date"
+        },
+        {
+          "name": "at",
+          "type": "timestamp"
+        },
+        {
+          "name": "before",
+          "type": "timestamp"
+        }
+      ],
+      "row": [
+        "2024-01-02",
+        "2024-01-02 03:04:05.123",
+        "1969-12-31 23:59:59"
+      ],
+      "user": {
+        "attrs": {
+          "since": "2024-01-02",
+          "at": "2024-01-02 03:04:05.123",
+          "before": "1969-12-31 23:59:59"
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "id",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "x"
+      ],
+      "user": {
+        "error": "access/user.sql の列 id: id は属性の名前に使えません（:user.id はログインした人の ID です）"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "region",
+          "type": "string"
+        },
+        {
+          "name": "REGION",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a",
+        "b"
+      ],
+      "user": {
+        "error": "access/user.sql の列 REGION が 2 つあります（大文字と小文字は区別しません）"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "roles",
+          "type": "int"
+        }
+      ],
+      "row": [
+        1
+      ],
+      "user": {
+        "error": "access/user.sql の列 roles は、役割を , で区切った文字にしてください"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "地域",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a"
+      ],
+      "user": {
+        "attrs": {
+          "地域": "a"
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "a b",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a"
+      ],
+      "user": {
+        "error": "access/user.sql の列 a b: 属性の名前は文字・数字・_ で書きます（:user.a b と書けない名前です）"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "user",
+          "type": "string"
+        }
+      ],
+      "row": [
+        "a"
+      ],
+      "user": {
+        "attrs": {
+          "user": "a"
+        },
+        "roles": []
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "x",
+          "type": "string"
+        }
+      ],
+      "row": null,
+      "user": {
+        "attrs": {},
+        "roles": []
       }
     }
   ],
@@ -2810,6 +3926,434 @@
       "bound": {
         "error": "api/x.sql: パラメーターの値が全部で 2,001 個になります。1 つの SQL に渡せるのは 2,000 個までです。候補を絞るか、すべてのときはこのパラメーターを使わない SQL にしてください",
         "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": " CORP\\yamada ",
+        "attrs": {
+          "Region": "関東"
+        }
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1 AND o = @p2 AND d >= @p3 AND r2 = @p1",
+        "values": [
+          "関東",
+          "CORP\\yamada",
+          "2024-04-01"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": " 関東 ",
+          "dept": "営業"
+        }
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1 AND o = @p2 AND d >= @p3 AND r2 = @p1",
+        "values": [
+          " 関東 ",
+          "u",
+          "2024-04-01"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "REGION": 0
+        }
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1 AND o = @p2 AND d >= @p3 AND r2 = @p1",
+        "values": [
+          0,
+          "u",
+          "2024-04-01"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": false
+        }
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1 AND o = @p2 AND d >= @p3 AND r2 = @p1",
+        "values": [
+          false,
+          "u",
+          "2024-04-01"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": 1.5
+        }
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1 AND o = @p2 AND d >= @p3 AND r2 = @p1",
+        "values": [
+          1.5,
+          "u",
+          "2024-04-01"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": 1152921504606847000
+        }
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1 AND o = @p2 AND d >= @p3 AND r2 = @p1",
+        "values": [
+          1152921504606847000,
+          "u",
+          "2024-04-01"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {}
+      },
+      "bound": {
+        "error": "利用者 u に属性 region がありません（api/x.sql の :user.region）",
+        "status": 403
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u"
+      },
+      "bound": {
+        "error": "利用者 u に属性 region がありません（api/x.sql の :user.region）",
+        "status": 403
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": ""
+        }
+      },
+      "bound": {
+        "error": "利用者 u に属性 region がありません（api/x.sql の :user.region）",
+        "status": 403
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": " 　"
+        }
+      },
+      "bound": {
+        "error": "利用者 u に属性 region がありません（api/x.sql の :user.region）",
+        "status": 403
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": null
+        }
+      },
+      "bound": {
+        "error": "利用者 u に属性 region がありません（api/x.sql の :user.region）",
+        "status": 403
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": ""
+      },
+      "bound": {
+        "error": "ログインしていません（api/x.sql は、ログインした人の :user.region で行を絞ります）",
+        "status": 401
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": " \t"
+      },
+      "bound": {
+        "error": "ログインしていません（api/x.sql は、ログインした人の :user.region で行を絞ります）",
+        "status": 401
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "user": null,
+      "bound": {
+        "error": "ログインしていません（api/x.sql は、ログインした人の :user.region で行を絞ります）",
+        "status": 401
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01"
+      },
+      "bound": {
+        "error": "ログインしていません（api/x.sql は、ログインした人の :user.region で行を絞ります）",
+        "status": 401
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01",
+        "user.region": "近畿"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": "関東"
+        }
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター user.region は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "USER.Region": "近畿",
+        "from": "2024-04-01"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": "関東"
+        }
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター USER.Region は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.region AND o = :USER.Id AND d >= :from AND r2 = :User.REGION",
+      "values": {
+        "from": "2024-04-01",
+        "user.": "x"
+      },
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": "関東"
+        }
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター user. は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE o = :user.id",
+      "values": {
+        "uſer.id": "x"
+      },
+      "user": {
+        "id": "u"
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター uſer.id はありません（この SQL にはパラメーターがありません）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE o = :user.id",
+      "values": {
+        "user_id": "x"
+      },
+      "user": {
+        "id": "u"
+      },
+      "bound": {
+        "error": "api/x.sql: パラメーター user_id はありません（この SQL にはパラメーターがありません）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :user",
+      "values": {
+        "user": "x"
+      },
+      "rowLevel": true,
+      "bound": {
+        "error": "api/x.sql: パラメーター user は渡せません（行レベルのモードでは、user という名前はログインした人のために取ってあります）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :user",
+      "values": {
+        "USER": "x"
+      },
+      "rowLevel": false,
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          "x"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :User",
+      "values": {
+        "User": "x"
+      },
+      "user": {
+        "id": "u"
+      },
+      "rowLevel": true,
+      "bound": {
+        "error": "api/x.sql: パラメーター User は渡せません（行レベルのモードでは、user という名前はログインした人のために取ってあります）",
+        "status": 400
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE a = :user_id",
+      "values": {
+        "user_id": "x"
+      },
+      "user": {
+        "id": "u"
+      },
+      "rowLevel": true,
+      "bound": {
+        "sql": "SELECT * FROM t WHERE a = @p1",
+        "values": [
+          "x"
+        ]
+      }
+    },
+    {
+      "text": "-- param: r text[]\nSELECT * FROM t WHERE r IN (:r) AND o = :user.id AND x IN (:user.id)",
+      "values": {
+        "r": [
+          "a",
+          "b"
+        ]
+      },
+      "user": {
+        "id": "u"
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r IN (@p1, @p2) AND o = @p3 AND x IN (@p3)",
+        "values": [
+          "a",
+          "b",
+          "u"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.地域 AND o = :user.id",
+      "values": {},
+      "user": {
+        "id": "CORP\\鈴木",
+        "attrs": {
+          "地域": "近畿"
+        }
+      },
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1 AND o = @p2",
+        "values": [
+          "近畿",
+          "CORP\\鈴木"
+        ]
+      }
+    },
+    {
+      "text": "SELECT * FROM t WHERE r = :user.id",
+      "values": {},
+      "user": {
+        "id": "u",
+        "attrs": {
+          "region": "x"
+        }
+      },
+      "rowLevel": true,
+      "bound": {
+        "sql": "SELECT * FROM t WHERE r = @p1",
+        "values": [
+          "u"
+        ]
       }
     }
   ]

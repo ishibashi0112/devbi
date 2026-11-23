@@ -180,7 +180,7 @@ pnpm example:dev
 | --- | --- | --- |
 | 55 | `pnpm example:build` のあと、`ConnectionStrings__DEVBI_DB="Server=127.0.0.1,1433;Database=master;User Id=sa;Password=DevBI_test1;TrustServerCertificate=true" dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179`（Windows の PowerShell では `$env:ConnectionStrings__DEVBI_DB="…"` を先に実行） | `Now listening on: http://127.0.0.1:4179` と出る |
 | 56 | <http://127.0.0.1:4179/#/sales-db> を開き、「全期間」を押す | 売上が ¥193,161,410。ターミナルに `api/orders.sql: 6,044 行、… ms` が出る |
-| 57 | <http://127.0.0.1:4179/api/schema> を開く | `order_lines`・`orders`・`regions`・`sales_daily` が 30 と同じ `parameters` と `key` で並び、最後の `snapshots` は `[]`（C# の見本はスナップショットを作らない）。「売上の日次集計」は API から読むので、見出しの下の「…の時点」は出ない |
+| 57 | <http://127.0.0.1:4179/api/schema> を開く | `order_lines`・`orders`・`regions`・`sales_daily` が 30 と同じ `parameters` と `key` で並び、`snapshots` は `[]`（C# の見本はスナップショットを作らない）、最後に `"access":1`（行レベル制御を知っているサーバー）。「売上の日次集計」は API から読むので、見出しの下の「…の時点」は出ない |
 | 58 | 55 の `ConnectionStrings__DEVBI_DB` を付けずに起動し、56 を開く | タイルに「接続先がありません。DEVBI_DB の接続を DevBIOptions.Connect で返してください」 |
 | 59 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln` | `Passed!` と出て、`Failed:` が 0 |
 
@@ -461,7 +461,7 @@ GUI エディタの設定欄で、データセットの表の列を、データ�
 
 ### 行レベル制御（サーバーの中心）
 
-ログインした人ごとに見える行を変える仕組みの、サーバーの部分です（[リファレンス](reference.md#利用者ごとに見える行を変える行レベル制御)）。開発サーバーで「この人として見る」画面と、`devbi-serve` が前のサーバーからユーザー名を受け取る口はまだないので、ここではスナップショットの直しと、Node から利用者を渡したときの答えを確かめます。199〜202 は `pnpm example:serve` を動かしたまま、203 は `pnpm build` のあとで実行します。
+ログインした人ごとに見える行を変える仕組みの、サーバーの部分です（[リファレンス](reference.md#利用者ごとに見える行を変える行レベル制御)）。ここでは、スナップショットの直しと、Node から利用者を渡したときの答えを確かめます（開発サーバーの「この人として見る」画面、`devbi-serve`、ASP.NET は、このあとの節です）。199〜202 は `pnpm example:serve` を動かしたまま、203 は `pnpm build` のあとで実行します。
 
 | # | すること | 期待する結果 |
 | --- | --- | --- |
@@ -530,6 +530,16 @@ pnpm exec devbi-serve --dir e2e/rls --user-header X-DevBI-User
 | 218 | `curl -s -H 'X-DevBI-User: a' -H 'X-DevBI-User: b' http://127.0.0.1:8080/api/schema`、次に `curl -s -H 'X-DevBI-User: a, b' http://127.0.0.1:8080/api/schema` | 1 つ目は `{"error":"X-DevBI-User が 2 つあります。前のサーバーは、ブラウザから来た X-DevBI-User を上書きします（足しません）"}`、2 つ目は `{"error":"X-DevBI-User の値に , があります（2 つの値を 1 行にしたもののようです）。…"}`。ターミナルに「リクエストを断りました: …」 |
 | 219 | `devbi-serve` を止め、`--trusted-proxy 10.0.0.1` を足して動かし直し、215 の 2 つ目を 2 回 | 2 回とも `{"error":"ログインしていません（このサーバーは、前に置いたサーバーを通して開きます）","access":1}`。ターミナルには「X-DevBI-User を使いませんでした（127.0.0.1 は --trusted-proxy にありません）。…」が 1 回だけ |
 | 220 | `devbi-serve` を止め、`printf s3cret > /tmp/devbi-secret` のあと、`--trusted-proxy` の代わりに `--proxy-secret-file /tmp/devbi-secret` を付けて動かし直す。215 の 2 つ目と、それに `-H 'X-DevBI-Proxy-Secret: s3cret'` を足したもの | 1 つ目は「…前に置いたサーバーを通して開きます」、2 つ目は 215 と同じ `"user":{"id":"CORP\\yamada"}` |
+
+### 行レベル制御（ASP.NET（C#））
+
+ASP.NET Core と WebForms の API が、ログインした人（`HttpContext.User`）を利用者として受け取るかを確かめます（[リファレンス](reference.md#aspnetcでログインした人を渡す)）。55 の SQL Server と .NET 10 SDK を使います。
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 221 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln --filter "FullyQualifiedName~User"` | `Passed!` と出て、`Failed: 0, Passed: 10`（SQL Server で人ごとの行と `access/user.sql`（日付の列も）、ASP.NET Core の `HttpContext.User` と `user:`、形の違う利用者の断り方など、名前に User を含むテスト）。`:user.`・`-- roles:`・`-- access:` の読み方が Node と同じことは、59 の `ParityTests` が確かめる |
+| 222 | 55 のコマンドの前に `DevBI__RequireUser=true` を足して起動し（PowerShell では `$env:DevBI__RequireUser="true"`）、<http://127.0.0.1:4179/api/schema> と <http://127.0.0.1:4179/#/sales-db> を開く | `{"error":"ログインしていません","access":1}`。タイルにも「API の orders を読めません（401）: ログインしていません」。見本にはログインがないので、行レベルのモードではだれにも行を返さない |
+| 223 | （Windows の IIS があるとき）WebForms のアプリで `RequireUser = true` にし、IIS で Windows 認証をかけて、`~/App_Data/devbi/api/` に `SELECT :user.id AS 見ている人` だけの `whoami.sql` を置く。ダッシュボードのページを開いたまま、ブラウザの開発者ツールのコンソールで `(await fetch("Scripts/devbi/api/query", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name: "whoami"})})).status` | `200`（ログインした人として読めた）。`DevBIOptions.Log` に渡したログに `CORP\<自分> api/whoami.sql: 1 行、… ms`。IIS の Windows 認証を外して匿名認証にすると `401` |
 
 ## 4. 自分の Excel で試す
 

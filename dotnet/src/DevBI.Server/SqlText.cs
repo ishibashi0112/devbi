@@ -322,7 +322,8 @@ namespace DevBI.Server
 
         /// <summary>
         /// The <c>:name</c> parameters outside quotes and comments, in order (a name may appear more than once). Not
-        /// <c>::</c> (<c>geography::Point</c>), not <c>:=</c>, and not a colon right after a name.
+        /// <c>::</c> (<c>geography::Point</c>), not <c>:=</c>, and not a colon right after a name. <c>:user.region</c> is
+        /// one name with its dot (<c>user.region</c>, the signed-in user's value: row-level security).
         /// </summary>
         public static List<SqlParameterPlace> Parameters(string sql)
         {
@@ -352,6 +353,12 @@ namespace DevBI.Server
                     var length = ParameterNameLength(sql, i + 1);
                     if (length > 0 && !IsNameChar(sql, i - 1))
                     {
+                        // :user.region as one name with its dot: `user` in ASCII letters only (docs/design/row-level-security.md 10 章の 4)
+                        if (length == 4 && Access.IsUserWord(sql, i + 1) && i + 5 < sql.Length && sql[i + 5] == '.')
+                        {
+                            var attr = ParameterNameLength(sql, i + 6);
+                            if (attr > 0) length += 1 + attr;
+                        }
                         output.Add(new SqlParameterPlace(sql.Substring(i + 1, length), i, i + 1 + length));
                         i += 1 + length;
                         continue;
