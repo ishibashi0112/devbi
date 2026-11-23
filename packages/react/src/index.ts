@@ -1,6 +1,6 @@
 export { Dashboard, DevbiApp, themeAttribute, type Theme } from "./Dashboard.js";
 export { EXPORT_KINDS, type ExportKind } from "./ExportMenu.js";
-export type { DevServer, EditorModule, DashboardEditorProps, NewDashboardProps, SavedDashboard, FileChange } from "./dev.js";
+export type { DevServer, DevUserInfo, EditorModule, DashboardEditorProps, NewDashboardProps, SavedDashboard, FileChange } from "./dev.js";
 export { mountDashboard, unmountDashboard, type MountOptions, type MountedDashboard } from "./mount.js";
 export { startEmbed, optionsFromAttributes, type DevbiEmbed } from "./embed.js";
 export { TileFrame } from "./TileFrame.js";

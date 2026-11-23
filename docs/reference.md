@@ -723,7 +723,8 @@ createRoot(document.getElementById("root")!).render(<DevbiApp project={project} 
 - `api/` があると、開発サーバーと `vite preview` に読み取り API を付けます（[データベースから読む](#データベースから読むdevbiserver)）。`snapshots/` の下の `.arrows`（`devbi-serve` が `dist/snapshots/` に作ったものなど）は、API からだけ返し、静的なファイルとしては配りません。`api/` は起動したときにあるかを見るので、あとから作ったときは起動し直します。接続先は環境変数か、Vite のやり方で読む `.env` ファイル（Vite の `envDir`、ふつうは root の `.env`、`.env.local`、`.env.[mode]`）の `DEVBI_DB…` から読みます。
 - `api/` の SQL の先頭の `-- snapshot:` の行を読み、どの SQL を[スナップショット](#毎朝のスナップショット)から読むかを `virtual:devbi` に入れます（SQL の中身は入れません）。開発サーバーと `vite preview` は、スナップショットのファイルを保存せず、聞かれるたびにデータベースから読んで返します。
 - 開発サーバーと `vite preview` の読み取り API は、知らない `Host`（IP・localhost・`server.allowedHosts` / `preview.allowedHosts` 以外の名前）の要求に答えず、Vite の確認（403）に回します（ほかのサイトが自分の名前をこのパソコンに向けて API を読む DNS rebinding を防ぐ）。
-- 開発サーバーは、`api/` の SQL と SQLite のファイル（`*.sqlite`、`*.sqlite3`、`*.db` と、`DEVBI_DB…` の `sqlite:` が指すファイル）をブラウザに渡しません（Vite の `server.fs.deny` に足します。`.env` は Vite がもとから渡しません）。
+- 開発サーバーは、`api/` の SQL、`access/` のファイル、SQLite のファイル（`*.sqlite`、`*.sqlite3`、`*.db` と、`DEVBI_DB…` の `sqlite:` が指すファイル）をブラウザに渡しません（Vite の `server.fs.deny` に足します。`.env` は Vite がもとから渡しません）。
+- `devUsers`（`{ 名前: { id?, roles?, attrs? } }`）を書くと、開発サーバーの画面で、だれとして API を読むかを選べます（[開発サーバーで、この人として見る](#開発サーバーでこの人として見るdevusers)）。
 
 ## GUI エディタ（@devbi/editor）
 
@@ -1111,7 +1112,7 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - `metrics.yaml` と `dash.json` の書き方は変わりません。同じダッシュボードが、人ごとに違う行で動きます。
 - いちばん確かな守りは、今と同じくデータベースの権限です（DevBI のユーザーは SELECT だけ）。
 
-今はまず、Node のサーバー（`@devbi/server` の `createApiHandler`・`devbi-serve`）でこの形が動きます。開発サーバーの「この人として見る」と `devbi-check` の確かめ、`devbi-serve` が前のサーバーからユーザー名を受け取る口、C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。それまで `devbi-serve` は利用者を受け取れないので、行レベルのモードでは、どのリクエストも `401` になります。
+今は、Node のサーバー（`@devbi/server` の `createApiHandler`・`devbi-serve`）と、開発サーバーの「[この人として見る](#開発サーバーでこの人として見るdevusers)」でこの形が動きます。`devbi-check` の確かめ、`devbi-serve` が前のサーバーからユーザー名を受け取る口、C#（ASP.NET）と Next.js の見本は、このあと順に足します（[設計書の作る順番](design/row-level-security.md#10-作る順番pr-の分け方)）。それまで `devbi-serve` は利用者を受け取れないので、行レベルのモードでは、どのリクエストも `401` になります。
 
 #### `:user.<属性>` と `:user.id`
 
@@ -1192,6 +1193,29 @@ await api.run("orders", { from: "2024-04-01" }, { user });
 - サーバーのログの 1 行に、利用者の ID が付きます（`CORP\yamada api/orders.sql: 1,234 行、85 ms`）。だれが何を読んだかの記録になります。
 - 同じオリジンの API なら、アプリの Cookie や Windows 認証がそのまま API に届くので、ホストはそこから利用者を作ります。ほかのオリジンの API には Cookie が送られないので、行レベル制御は同じオリジンの API でだけ使えます。
 - ページを読み込み直さずに利用者が変わるアプリ（SPA でログアウトして、別の人でログインする）では、ページの中に前の人の行が残ります。ログアウトしたら、ページを読み込み直します。
+- `{ user }` と一緒に `signInHint` を渡すと、ログインしていないときの `401` のメッセージの（ ）に入ります（`{ user, signInHint: "社内ポータルからログインします" }` → 「ログインしていません（社内ポータルからログインします）」）。タイルにそのまま出ます。
+
+#### 開発サーバーで、この人として見る（`devUsers`）
+
+```ts
+// vite.config.ts
+devbi({
+  devUsers: {
+    yamada: { id: "CORP\\yamada", roles: ["営業"], attrs: { region: "関東" } },
+    suzuki: { roles: ["営業"], attrs: { region: "近畿" } },
+    admin: { roles: ["管理"] },
+  },
+});
+```
+
+- `devUsers` を書くと、開発サーバー（`vite`）のダッシュボードの上と一覧に「表示する利用者 （ログインなし）▾」が出ます。選ぶとページを読み込み直し、API がその人として答えます（Power BI の「ロールとして表示」と同じ使い方）。前の人の行はページに残りません。選んだ人はブラウザに一つです。ほかのタブで選び直すと、前のタブも、戻ったときに読み込み直します（同じパソコンのほかの開発サーバーとも同じ選択です）。
+- 最初は「（ログインなし）」で、行レベルのモードのプロジェクトでは、タイルに「API の orders を読めません（401）: ログインしていません（開発サーバーのダッシュボードの右上の『表示する利用者』で選びます）」と出ます。埋め込み（`embed`）や自作の `<Dashboard>` のページには選ぶ欄がないので、ダッシュボードのページで選んでから開きます。
+- 形はホストが渡す利用者と同じ `{ id, roles, attrs }` です（[ホストから利用者を渡す](#ホストから利用者を渡す)）。`id` を書かないと、`devUsers` の名前（`suzuki`）が `:user.id` になります。`attrs` を書かない人は、`access/user.sql` があればそこから引きます（開発用のデータベースに表があれば）。形が違うと、開発サーバーが起動しません（「devbi: devUsers の yamada: …」）。名前は空でない文字で書きます。
+- 選んだ人は、Cookie（`devbi-dev-user`）で開発サーバーに伝えます。開発サーバーはこの Cookie を、**開発サーバーを動かしているパソコンで開いたページからだけ**読みます（GUI エディタの保存と同じ確かめ方）。`vite --host` でほかのパソコンから開いた人が Cookie を自分で付けても、だれにもなれません（`.env` のデータベースを読まれないため）。
+- 「このパソコンから」は、開発サーバーへのつながりがこのパソコンから来ていることです。プロキシーやトンネルを通ったしるしのヘッダー（`X-Forwarded-For`・`Forwarded`・`Via` など）があるリクエストの Cookie は読みません。`server.allowedHosts: true` のときは、localhost か IP アドレスで開いたページの Cookie だけを読みます（ほかのサイトが自分の名前をこのパソコンに向けて読むのを止めるため）。それでも、ターミナルサーバーのように何人もが使うパソコンでは、ほかの人もこのパソコンからつなげます。開発サーバーは、自分だけが使うパソコンで動かします
+- `devUsers` の名前・ID・役割・属性はページに入るので、`vite --host` では、ほかのパソコンで開いたページにも見えます（選んでも読めません）。実在の人の情報は書かず、開発用の人を書きます
+- `vite preview`、ビルドしたサイト、`devbi-serve`、C# は、この Cookie も `devUsers` も読みません。本番では、ホストがログインした人を渡します。
+- 見本: `examples/sales/e2e/rls/`（`api/orders.sql` が `:user.region` で絞る小さなプロジェクト）を、`examples/sales` で `pnpm exec vite --config e2e/rls.vite.config.ts` で開きます（<http://127.0.0.1:5180>）。
 
 #### 利用者の属性と役割を表から引く（`access/user.sql`）
 
@@ -1334,7 +1358,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。行レベルのモードでは、ログインしていないと、作る前に `401` です。
 - ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
 
-`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, describe?, log?, snapshotDir?, requireUser?, userCacheMs? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。どちらも、3 つめ（`fetch` は 2 つめ）の引数 `{ user }` でログインした人を渡します（[ホストから利用者を渡す](#ホストから利用者を渡す)）。`run(name, params, { user }?)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します。`api/query` と同じ確かめをし、エラーには `status` が付きます）、`describe(name)` でその結果の列を聞き（`describe: true` でなくても使えます。`describe: true` は `api/describe` の口を開けるだけ）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, describe?, log?, snapshotDir?, requireUser?, userCacheMs? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。どちらも、3 つめ（`fetch` は 2 つめ）の引数 `{ user, signInHint? }` でログインした人を渡します（[ホストから利用者を渡す](#ホストから利用者を渡す)）。`run(name, params, { user }?)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します。`api/query` と同じ確かめをし、エラーには `status` が付きます）、`describe(name)` でその結果の列を聞き（`describe: true` でなくても使えます。`describe: true` は `api/describe` の口を開けるだけ）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
 ## レポート（パラメーターの欄と、SQL の結果の表）
 
@@ -1798,7 +1822,7 @@ function DevbiDashboard({ name }: { name: string }) {
 | `<Dashboard project={…} name="sales" back?="#/" theme? isolate? exports? actions? params? onParamsChange? paramsInUrl? />` | ダッシュボード 1 つ。`params` と `onParamsChange` は[パラメーターの値](#url埋め込みreact-から値を渡す)を渡す口と聞く口。`paramsInUrl` で値を URL（`#/<名前>?from=…`）に読み書きする（`<DevbiApp>` が付ける）。見出しの右に「ファイル出力」のメニュー（[ファイル出力](#ファイル出力)。`exports={false}` で出さない、`exports={["xlsx", "pdf"]}` でそれだけ）。`actions` はその右に置くボタンなど。`project` は `loadProject()` の戻り値で、毎回同じものを渡す（別のものだと最初から）。`theme` は `"auto"`（既定。OS の設定）、`"light"`、`"dark"`。`isolate` で、ページの CSS の要素の名前だけの指定を打ち消す（[埋め込み](#2-画面に-2-行を足す)と同じ）。幅が 720px より狭いとタイルを 1 列に並べる |
 | `mountDashboard(要素, project, { dashboard?, theme?, apiUrl?, fetch?, isolate?, exports?, params?, onParamsChange? })` / `unmountDashboard(要素)` | React を使っていないページの要素に、ダッシュボードを出す / 消す。`devbi-embed.js` の `mount` の中身 |
 | `startEmbed(input, { auto?, global? })` | `devbi-embed.js` の中身。`data-devbi` の要素に出し（`auto: false` で出さない）、`window.DevBI` を作って `devbi:ready` を出す（`global: false` でしない）。ふつうは `@devbi/vite` の `embed` が使う |
-| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.datasets` は、`api/*.sql` ごとのパラメーターと `-- key:`（`{ parameters, key? }`。`@devbi/vite` が入れる）。`ProjectInput.perspective` は Perspective の WebAssembly の URL（`{ server, client }`。`explore` が使う。`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`。型は `DevServer`） |
+| `loadProject(input)` | `virtual:devbi` の中身（`ProjectInput`）を検証して `Project` にする。`<DevbiApp>` は中でこれを呼ぶ。`ProjectInput.snapshots` は、`-- snapshot:` の行がある SQL の名前と時刻（`@devbi/vite` が入れる）。`ProjectInput.datasets` は、`api/*.sql` ごとのパラメーターと `-- key:`（`{ parameters, key? }`。`@devbi/vite` が入れる）。`ProjectInput.perspective` は Perspective の WebAssembly の URL（`{ server, client }`。`explore` が使う。`@devbi/vite` が入れる）。`ProjectInput.dev` は開発サーバーでだけ `@devbi/vite` が入れる（GUI エディタ、ファイルの変更の知らせ、ページを開いたあとに書き出した自作タイルを読む `importTile(path)`、`devUsers` の一覧 `users`（`{ name, note? }[]`。`<DevbiApp>` の「表示する利用者」）。型は `DevServer`） |
 | `EXPORT_KINDS` / `ExportKind` | 「ファイル出力」の種類（`"xlsx"`・`"pdf"`・`"csv"`）。`exports` に並べる |
 | `themeAttribute(theme)` / `injectStyles()` | `.devbi-root` に付ける `data-theme` / DevBI の CSS をページに入れる（`<Dashboard>` は自分で入れる）。GUI エディタが使う |
 | `snapshotTimesOf(project, dashboard)` | そのダッシュボードが読むスナップショットの時刻（`["06:00"]` など。なければ空）。一覧の「毎日 6:00 の時点のデータ」に使っている |

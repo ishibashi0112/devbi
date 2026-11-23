@@ -353,7 +353,7 @@ devbi({
 });
 ```
 
-- `devUsers` があると、開発サーバー（`vite`）の画面の上に「表示する利用者: （ログインなし）▾」が出ます。選ぶと、その人として API が答えます（Power BI の「ロールとして表示」と同じ使い方）。最初は「（ログインなし）」で、選ぶまでタイルには「ログインしていません（上の『表示する利用者』で選びます）」と出ます。
+- `devUsers` があると、開発サーバー（`vite`）の画面の上に「表示する利用者: （ログインなし）▾」が出ます。選ぶと、その人として API が答えます（Power BI の「ロールとして表示」と同じ使い方）。最初は「（ログインなし）」で、選ぶまでタイルには「ログインしていません（開発サーバーのダッシュボードの右上の『表示する利用者』で選びます）」と出ます。
 - 選んだ人は Cookie（`devbi-dev-user`）で開発サーバーに伝えます。この Cookie は、**開発サーバーを動かしているパソコンからのリクエストでだけ**使います（GUI エディタの書き込みと同じ確かめ方）。`vite --host` でほかのパソコンから開いた人が、Cookie を自分で付けて `admin` になり、`.env` の本物のデータベースを読むことを防ぐためです。
 - `vite preview`、ビルドしたサイト、`devbi-serve`、C# は、この Cookie を読みません（`vite preview` はビルドしたものを出すので、選ぶ画面も入りません）。
 - `attrs` を書かない人は、`access/user.sql` で引きます（開発用のデータベースに表があれば）。
@@ -456,7 +456,7 @@ devbi({
 ## 10. 作る順番（PR の分け方）
 
 1. **サーバーの中心（Node）**: 利用者の形、`:user.` の読み方と束縛（ブラウザのパラメーターと利用者を分けて受け取る）、`-- roles:`、`-- access: all` と書き間違いのエラー、行レベルのモード（`requireUser` とファイルの文字の検索）、`401` / `403`、`api/schema` の絞り込みと `"access": 1`、`handle` / `fetch` / `run` の `{ user }`、`access/user.sql`、スナップショットのジョブとログインの順番、古いスナップショットの片付け、`devbi-serve` の静的なファイルで `snapshots/` を配らないこと、ログ。reference の「データベースから読む」に節を足す。**作りました。** 作るときに変えたこと: `snapshots/` の下は、行レベルのモードでなくても静的には配らない（API の口だけ。ずっと安全側で、困ることがないため）。2 の `server.fs.deny` の `access/**` も、`access/user.sql` と一緒にここで足した。`describe`（列を聞くだけで行は読まない）は、ツールからは利用者なしで呼べる（`:user.` には `"1"` を入れる）。`DevBI.reset()` はまだ。レビューで変えたこと: モードにする文字の検索は、`--` のコメントの中の `roles:`・`access:`（`:` が要る。全角は半角として読む）にした（`-- Access log` のような説明で、ログインのないプロジェクトが全部 `401` になるため）。そのかわり、`--` のすぐあとでない `roles:`（`--- roles:`、`-- @roles:`）と全角の `ｒｏｌｅｓ:` は、黙って読まないのではなくエラーにする。`:` のない `-- access` はエラーにしない（書き忘れても断るほうに倒れるだけ。`-- access all` だけはエラー）。属性の `undefined` は「渡していない」（`access/user.sql` の値を使う）。行レベルのモードで作らないスナップショットは、片付けを止める「読めないファイル」に数えない。`schedule: false` でも最初にジョブを見たときに片付ける。開発サーバーと `vite preview` も、`snapshots/` の下の `.arrows` を静的には配らない。ログは 1 行ずつ（改行や制御文字は `?`）。C# でも同じ読み方にする（4）。
-2. **開発サーバーと検査**: `devUsers` と「この人として見る」（このパソコンからだけ）、`server.fs.deny` に `access/**`、`devbi-check` の検査と `--as`・`--url`、`devbi-inspect --as`。サンプル（`examples/sales`）に、地域で絞る SQL と 2 人の開発用の利用者を足し、e2e で 2 人の合計が違うことを確かめる（ダッシュボードの数を数えている e2e と manual-check の項目に気をつける）。
+2. **開発サーバーと検査**: `devUsers` と「この人として見る」（このパソコンからだけ）、`server.fs.deny` に `access/**`、`devbi-check` の検査と `--as`・`--url`、`devbi-inspect --as`。サンプル（`examples/sales`）に、地域で絞る SQL と 2 人の開発用の利用者を足し、e2e で 2 人の合計が違うことを確かめる（ダッシュボードの数を数えている e2e と manual-check の項目に気をつける）。 2a（開発サーバー）と 2b（検査）に分けた。**2a を作りました。** 作るときに変えたこと: 見本は `examples/sales` ではなく、`examples/sales/e2e/rls/` の小さなプロジェクトにした（`examples/sales` に `:user.` を足すと、サンプル全体が行レベルのモードになり、ログインのない最初の見本と、利用者をまだ渡せない `devbi-serve`・C#・Next.js の e2e がすべて `401` になるため）。選ぶ欄は、ダッシュボードの見出しの右（「編集」の隣）と一覧に出す。選ぶとページを読み込み直す（前の人の表を残さない）。`401` のメッセージの（ ）は、ホストが `{ user, signInHint }` で渡す文字（Node の `RequestOptions`）。
 3. **`devbi-serve`**: `--user-header`、`--trusted-proxy`、`--proxy-secret-file`、`--user-lowercase`、`--user-cache`、`--require-user`。deploying.md に nginx・oauth2-proxy の例。
 4. **C#**: `DevBIUser`、`ApiRequest.User`、`DevBIOptions.RequireUser`、`MapDevBIApi` と `DevBIHttpHandler` が `HttpContext.User` から作る形、`access/user.sql`、パリティのテスト（`:user.` の読み方、`user` の名前の断り方、空の値）。IIS 用のヘッダーのモジュールは、IIS で確かめられたら足す。
 5. **Next.js の例**: セッションから利用者を作る `route.ts`（ログインは見本の簡単なもの）。

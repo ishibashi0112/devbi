@@ -33,7 +33,7 @@ export function versionOf(text: string | Buffer): string {
 }
 
 /** Loopback, or the machine's own address (the dev server opened by its LAN address on the same computer). */
-function sameMachine(req: IncomingMessage): boolean {
+export function sameMachine(req: IncomingMessage): boolean {
   const remote = (req.socket.remoteAddress ?? "").replace(/^::ffff:/, "");
   const local = (req.socket.localAddress ?? "").replace(/^::ffff:/, "");
   if (remote === "::1" || (isIP(remote) === 4 && remote.startsWith("127."))) return true;

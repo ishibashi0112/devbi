@@ -16,7 +16,7 @@ export default defineConfig({
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1400, height: 1000 } }, testIgnore: /(mobile|editor)\.spec\.ts/ },
+    { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1400, height: 1000 } }, testIgnore: /(mobile|editor|rls)\.spec\.ts/ },
     { name: "phone", use: { ...devices["Pixel 7"] }, testMatch: /mobile\.spec\.ts/ },
     // The GUI editor on Vite's dev server (only there; another server given by E2E_BASE_URL has no editor).
     ...(baseURL
@@ -26,6 +26,12 @@ export default defineConfig({
             name: "editor",
             use: { ...devices["Desktop Chrome"], viewport: { width: 1400, height: 1000 }, baseURL: "http://127.0.0.1:5179" },
             testMatch: /editor\.spec\.ts/,
+          },
+          // Row-level security on the dev server: 「表示する利用者」 (devUsers) on the small project in e2e/rls/.
+          {
+            name: "rls",
+            use: { ...devices["Desktop Chrome"], viewport: { width: 1400, height: 1000 }, baseURL: "http://127.0.0.1:5180" },
+            testMatch: /rls\.spec\.ts/,
           },
         ]),
   ],
@@ -42,6 +48,12 @@ export default defineConfig({
         {
           command: "pnpm exec vite --config e2e/editor.vite.config.ts",
           url: "http://127.0.0.1:5179",
+          reuseExistingServer: !process.env.CI,
+        },
+        // Vite's dev server on e2e/rls/ (api/*.sql filtered by :user.region), with devUsers to view it as.
+        {
+          command: "pnpm exec vite --config e2e/rls.vite.config.ts",
+          url: "http://127.0.0.1:5180",
           reuseExistingServer: !process.env.CI,
         },
       ],

@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { isIP } from "node:net";
 import path from "node:path";
 import {
   DashboardError,
@@ -18,8 +19,9 @@ import {
 } from "devbi";
 import { loadEnv, version as viteVersion, type Connect, type Plugin, type PreviewServer, type ResolvedConfig, type UserConfig, type ViteDevServer } from "vite";
 import { parse as parseYaml } from "yaml";
-import type { ApiHandler } from "@devbi/server";
-import { createEditorHandler, versionOf } from "./editor.js";
+import type { IncomingMessage } from "node:http";
+import type { ApiHandler, RequestOptions } from "@devbi/server";
+import { createEditorHandler, sameMachine, versionOf } from "./editor.js";
 import { generate } from "./gen.js";
 
 export { generate, envDts, schemaNames, type GenerateResult } from "./gen.js";
@@ -38,6 +40,38 @@ export interface DevbiOptions {
    * page (`<div data-devbi="sales">`), with the data, the engine and the API next to it. Default off.
    */
   embed?: boolean;
+  /**
+   * Users to view the dashboards as, on the dev server (row-level security: `:user.<attr>` in `api/*.sql`): the page
+   * gets 「表示する利用者」 at the top, and the API answers as the one picked there. By name:
+   * `{ yamada: { roles: ["営業"], attrs: { region: "関東" } } }`. Only for requests from this computer; never in a
+   * build, `vite preview` or `devbi-serve`.
+   */
+  devUsers?: Record<string, DevUser>;
+}
+
+/** A user of `devUsers`: as the host app would pass them to the API (`{ id, roles, attrs }`). */
+export interface DevUser {
+  /** The id `:user.id` reads (`CORP\\yamada`). Default: the name in `devUsers`. */
+  id?: string;
+  roles?: string[];
+  attrs?: Record<string, string | number | boolean | null>;
+}
+
+/** The cookie that says which of `devUsers` the page views as (the dev server only; from this computer only). */
+export const DEV_USER_COOKIE = "devbi-dev-user";
+
+/** A cookie's value from a Cookie header; undefined when it has none (or one that does not decode). */
+export function cookieValue(header: string | undefined, name: string): string | undefined {
+  for (const part of (header ?? "").split(";")) {
+    const at = part.indexOf("=");
+    if (at < 0 || part.slice(0, at).trim() !== name) continue;
+    try {
+      return decodeURIComponent(part.slice(at + 1).trim());
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 const VIRTUAL = "virtual:devbi";
@@ -338,6 +372,81 @@ function realPath(p: string): string {
   }
 }
 
+/**
+ * Whether a request to the dev server may say which of devUsers it views as: it comes straight from this computer.
+ * Not through a proxy or tunnel (a header that says it passed one: the request may be anyone's), and, when
+ * `server.allowedHosts` is `true` (which lets any page point a name of its own at this server), only to localhost or
+ * an IP address. `"proxy"` and `"host"` are those cases, `false` another computer.
+ */
+export function devUserOrigin(
+  req: { socket: { remoteAddress?: string | undefined; localAddress?: string | undefined }; headers: Record<string, string | string[] | undefined> },
+  allowedHosts: unknown,
+): boolean | "proxy" | "host" {
+  if (!sameMachine(req as IncomingMessage)) return false;
+  if (PROXY_HEADERS.some((h) => req.headers[h] !== undefined)) return "proxy";
+  if (allowedHosts === true && !localHostName(req.headers.host)) return "host";
+  return true;
+}
+
+const PROXY_HEADERS = ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "via", "cf-connecting-ip", "true-client-ip", "x-client-ip"];
+
+/** localhost, a name under .localhost, or an IP address (no page can point those at this server). */
+function localHostName(host: string | string[] | undefined): boolean {
+  if (typeof host !== "string") return false;
+  const name = host.startsWith("[") ? host.slice(1, host.indexOf("]")) : host.replace(/:\d*$/, "");
+  const lower = name.toLowerCase().replace(/\.$/, "");
+  return lower === "localhost" || lower.endsWith(".localhost") || isIP(lower) !== 0;
+}
+
+/**
+ * Who the API of Vite's server answers as. The dev server: the one of devUsers the page picked (its cookie), for
+ * requests straight from this computer only (devUserOrigin). Otherwise nobody, with how to pick one for the 401's
+ * message. `vite preview`: nobody.
+ */
+export function devUserRequest(
+  users: Record<string, DevUser> | undefined | "preview",
+  cookie: string | undefined,
+  fromThisComputer: boolean | "proxy" | "host",
+): RequestOptions {
+  if (users === "preview") return { signInHint: "vite preview では利用者を選べません。開発サーバー（vite）の『表示する利用者』で確かめます" };
+  if (!users || !Object.keys(users).length) {
+    return { signInHint: "開発サーバーでは、vite.config.ts の devbi({ devUsers }) に書いた人として見られます" };
+  }
+  const picked = cookieValue(cookie, DEV_USER_COOKIE);
+  if (picked === undefined || picked === "") return { signInHint: "開発サーバーのダッシュボードの右上の『表示する利用者』で選びます" };
+  // Another computer (vite --host) does not become someone by sending the cookie: the API reads .env's databases.
+  if (fromThisComputer === false) return { signInHint: "『表示する利用者』は、開発サーバーを動かしているパソコンで開いたページからだけ使えます" };
+  if (fromThisComputer === "proxy") {
+    return { signInHint: "『表示する利用者』は、開発サーバーにじかにつないだページからだけ使えます（プロキシーやトンネルを通したページからは使えません）" };
+  }
+  if (fromThisComputer === "host") {
+    return { signInHint: "server.allowedHosts が true なので、『表示する利用者』は localhost か IP アドレスで開いたページからだけ使えます" };
+  }
+  if (!Object.hasOwn(users, picked)) return { signInHint: `devUsers に ${shortName(picked)} がありません。『表示する利用者』で選び直します` };
+  const u = users[picked]!;
+  return { user: { id: u.id ?? picked, ...(u.roles ? { roles: u.roles } : {}), ...(u.attrs ? { attrs: u.attrs } : {}) } };
+}
+
+/** A cookie's value as a message shows it: one line, at most 40 characters. */
+function shortName(name: string): string {
+  const line = name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ");
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line;
+}
+
+/** devUsers as the page lists them: `{ name: "yamada", note: "営業・region 関東" }`. */
+function devUserList(users: Record<string, DevUser> | undefined): { name: string; note?: string }[] {
+  return Object.entries(users ?? {}).map(([name, u]) => {
+    const parts = [
+      ...(u?.id !== undefined && u.id !== name ? [u.id] : []),
+      ...(Array.isArray(u?.roles) ? u.roles : []),
+      ...Object.entries(u?.attrs ?? {})
+        .filter(([, v]) => v !== null && v !== undefined && v !== "")
+        .map(([k, v]) => `${k} ${String(v)}`),
+    ];
+    return parts.length ? { name, note: parts.join("・") } : { name };
+  });
+}
+
 /** Vite's server.fs.deny when a project sets none (it is replaced, not added to, when one is given). */
 const VITE_DENY = [".env", ".env.*", "*.{crt,pem}", "**/.git/**"];
 /** Files the read-only API reads, which the browser must not get from the dev server (access/: row-level security). */
@@ -444,7 +553,7 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       handler
         .then(async (h) => {
           if (!(await allowedHost(req.headers.host, preview))) return next();
-          if (await h.handle(req, res)) return;
+          if (await h.handle(req, res, asUser(req, preview))) return;
           if (isSnapshotPath(req.url)) {
             res.statusCode = 404;
             res.end();
@@ -455,6 +564,9 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
         .catch(next);
     });
   };
+
+  const asUser = (req: IncomingMessage, preview: boolean): RequestOptions =>
+    devUserRequest(preview ? "preview" : options.devUsers, req.headers.cookie, devUserOrigin(req, config.server.allowedHosts));
 
   /** A dashboard, metrics, data or api file, by its path in the project folder; anything else: undefined. */
   const projectChange = (file: string): string | undefined => {
@@ -560,6 +672,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
       const prefix = relDir ? `/${relDir}` : "";
       const base = relDir ? `${relDir}/` : "";
       const dev = config.command === "serve";
+      // devUsers for the page's 「表示する利用者」: names, and what each is (the API reads the cookie, not these).
+      const devUsers = dev ? devUserList(options.devUsers) : [];
       return [
         `import mainModule from ${JSON.stringify(`${posix(duck.wasm)}?url`)};`,
         `import mainWorker from ${JSON.stringify(`${posix(duck.worker)}?url`)};`,
@@ -598,13 +712,28 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
               // A tile file written after the page loaded (the editor's "コードにする"): not in the glob above yet.
               `    importTile: (path) => import(/* @vite-ignore */ import.meta.env.BASE_URL + ${JSON.stringify(base)} + encodeURI(path.slice(1))),`,
               `    onChange(listener) { devbiListeners.add(listener); return () => devbiListeners.delete(listener); },`,
+              devUsers.length ? `    users: ${JSON.stringify(devUsers)},` : "",
               `  },`,
             ].join("\n")
           : "",
         `};`,
       ].join("\n");
     },
-    configureServer(server: ViteDevServer) {
+    async configureServer(server: ViteDevServer) {
+      // devUsers as the API takes users: a mistake stops the dev server here, not each request later.
+      if (options.devUsers) {
+        const { viewerOf } = await import("@devbi/server");
+        for (const [name, u] of Object.entries(options.devUsers)) {
+          try {
+            if (!name.trim()) throw new TypeError("名前は空でない文字で書いてください");
+            if (typeof u !== "object" || u === null || Array.isArray(u)) throw new TypeError("{ roles, attrs } の形で書いてください");
+            if (u.id !== undefined && (typeof u.id !== "string" || !u.id.trim())) throw new TypeError("id は空でない文字で書いてください");
+            viewerOf({ id: u.id ?? name, ...(u.roles ? { roles: u.roles } : {}), ...(u.attrs ? { attrs: u.attrs } : {}) });
+          } catch (e) {
+            throw new Error(`devbi: devUsers の ${name}: ${(e as Error).message}`);
+          }
+        }
+      }
       mountApi(server.middlewares, server.httpServer, false);
       const handleEditor = createEditorHandler({
         dir,
