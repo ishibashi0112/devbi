@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ApiHandler, ColumnType, DescribedColumn } from "@devbi/server";
 import { dashboardJsonSchema, metricsJsonSchema, MetricsError, parseMetricsYaml, type MetricsView, type SchemaNames } from "devbi";
-import { askColumns } from "./describe.js";
+import { askColumns, type Described } from "./describe.js";
 
 export interface GenerateOptions {
   /** Write nothing: `changed` lists the files that are out of date. */
@@ -159,7 +159,7 @@ export async function generate(dir: string, options: GenerateOptions = {}): Prom
     ["dash.schema.json", json(dashboardJsonSchema(schemaNames(views, datasets.map((d) => d.name))))],
     ["metrics.schema.json", json(metricsJsonSchema())],
     // Written when a database was asked (a run that asks none keeps the file as it is).
-    ...(options.describe && datasets.length ? [["columns.json", json(known)] as [string, string]] : []),
+    ...(options.describe && datasets.length ? [["columns.json", columnsJson(known)] as [string, string]] : []),
   ];
   const changed: string[] = [];
   for (const [name, text] of outputs) {
@@ -169,9 +169,24 @@ export async function generate(dir: string, options: GenerateOptions = {}): Prom
     changed.push(file);
     if (options.check) continue;
     await mkdir(outDir, { recursive: true });
-    await writeFile(file, text);
+    // Whole or not at all: the dev server's runs can overlap, and one must not read a half-written file.
+    const temp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    await writeFile(temp, text);
+    await rename(temp, file);
   }
   return { changed, problems, unasked };
+}
+
+/** `.devbi/columns.json`, kept in git: datasets in name order, a column a line (a changed column is a changed line). */
+function columnsJson(known: ColumnsFile): string {
+  const names = Object.keys(known).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const one = (c: KnownColumn) => `{ ${Object.entries(c).map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(", ")} }`;
+  const body = names.map((n) => {
+    const { sql, columns } = known[n]!;
+    const list = columns.length ? `[\n${columns.map((c) => `      ${one(c)}`).join(",\n")}\n    ]` : "[]";
+    return `  ${JSON.stringify(n)}: {\n    "sql": ${JSON.stringify(sql)},\n    "columns": ${list}\n  }`;
+  });
+  return names.length ? `{\n${body.join(",\n")}\n}\n` : "{}\n";
 }
 
 const sqlHash = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
@@ -224,7 +239,16 @@ async function datasetTypes(
   if (ask.length) {
     const api = options.api ?? server.createApiHandler({ dir, env, exposeErrors: true });
     try {
-      const answers = await Promise.all(ask.map(async (name) => [name, await askColumns(api, name)] as const));
+      // One at a time (the pool is the pages' too), and a connection that does not answer is not asked again.
+      const answers: [string, Described][] = [];
+      const offline = new Map<string, Described>();
+      for (const name of ask) {
+        const connection = server.connectionVariable(server.connectionOf(texts.get(name)!));
+        const d = offline.get(connection) ?? (await askColumns(api, name));
+        // (the reason without the first file's name, for the others)
+        if (d.offline) offline.set(connection, { ...d, why: (d.why ?? "").replace(/^api\/.+?\.sql: /, "") });
+        answers.push([name, d]);
+      }
       for (const [name, d] of answers) {
         if (d.columns) {
           known[name] = {

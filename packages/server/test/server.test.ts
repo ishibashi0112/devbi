@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bindParameters, connectionOf, createApiHandler, isHostAllowed, parameters, parseDataset, readOnlyProblem, serve, toArrowTable, type ApiHandler, type RunningServer } from "../src/index.js";
+import { errorText } from "../src/result.js";
 import { SAMPLE_DB, typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
 
 describe("parameters", () => {
@@ -421,11 +422,12 @@ describe("devbi-serve (SQLite)", () => {
     // as the dev server makes it: the database's messages as they are
     const api = createApiHandler({ dir, env: { DEVBI_DB: "sqlite:db/shop.sqlite" }, describe: true, exposeErrors: true });
     try {
-      // declared types; an expression's only from its values; typed parameters get values that pass their checks
+      // declared types; an expression's only from its values; typed parameters get values that pass their checks.
+      // A DATE column's text is read as dates only when all of it is (its values tell).
       expect(await api.describe("orders")).toEqual({
         name: "orders",
         columns: [
-          { name: "order_date", type: "date", dbType: "DATE" },
+          { name: "order_date", dbType: "DATE" },
           { name: "region", type: "string", dbType: "TEXT" },
           { name: "amount", type: "float", dbType: "REAL" },
           { name: "qty", type: "int", dbType: "INTEGER" },
@@ -528,5 +530,17 @@ describe("devbi-serve (SQLite)", () => {
   it("does not serve files outside the site", async () => {
     const res = await fetch(new URL("/..%2f..%2fdb%2fshop.sqlite", running.url));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("errorText", () => {
+  it("says why when the message is empty (every address of a host refused the connection)", () => {
+    const refused = (address: string) => Object.assign(new Error(`connect ECONNREFUSED ${address}`), { code: "ECONNREFUSED" });
+    expect(errorText(new AggregateError([refused("::1:5432"), refused("127.0.0.1:5432")], ""))).toBe(
+      "connect ECONNREFUSED ::1:5432; connect ECONNREFUSED 127.0.0.1:5432",
+    );
+    expect(errorText(Object.assign(new Error(""), { code: "ETIMEDOUT" }))).toBe("ETIMEDOUT");
+    expect(errorText(new Error("no such table: x"))).toBe("no such table: x");
+    expect(errorText("text")).toBe("text");
   });
 });

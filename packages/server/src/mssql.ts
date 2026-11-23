@@ -148,14 +148,32 @@ export async function connectMssql(url: URL): Promise<Connection> {
       const columns = names.map((name, i): ResultColumn => ({ name, type: typeOf(types[i], rows.map((r) => r[i])) }));
       return { columns, rows: rows.map((r) => r.map((v, i) => valueOf(v, columns[i]!.type, types[i]))) };
     },
-    async describe(sql, values) {
-      // Not run: the server reads the statement. The placeholders are declared as text (dates are CAST in the SQL).
+    async describe(sql, values, options = {}) {
+      // Not run: the server reads the statement. The placeholders are declared as `query` sends their values (a
+      // column that is a parameter has its type; dates are text, CAST in the SQL).
+      const declared = (v: unknown) =>
+        typeof v === "boolean" ? "bit" : typeof v === "number" || typeof v === "bigint" ? (Number.isInteger(Number(v)) ? "bigint" : "float") : "nvarchar(4000)";
       const req = new mssql.Request(pool);
       req.input("tsql", mssql.NVarChar(mssql.MAX), sql);
-      req.input("params", mssql.NVarChar(mssql.MAX), values.map((_, i) => `@p${i + 1} nvarchar(4000)`).join(", ") || null);
-      const res = await req.query<{ name: string | null; system_type_name: string | null; is_nullable: boolean | null; is_hidden: boolean }>(
-        "EXEC sp_describe_first_result_set @tsql = @tsql, @params = @params, @browse_information_mode = 0",
-      );
+      req.input("params", mssql.NVarChar(mssql.MAX), values.map((v, i) => `@p${i + 1} ${declared(v)}`).join(", ") || null);
+      // Reading the statement can wait for a lock on a table (a change to it not yet committed): stopped after the limit.
+      let timedOut = false;
+      const timer = options.timeoutMs
+        ? setTimeout(() => {
+            timedOut = true;
+            req.cancel();
+          }, options.timeoutMs)
+        : undefined;
+      let res;
+      try {
+        res = await req.query<{ name: string | null; system_type_name: string | null; is_nullable: boolean | null; is_hidden: boolean }>(
+          "EXEC sp_describe_first_result_set @tsql = @tsql, @params = @params, @browse_information_mode = 0",
+        );
+      } catch (e) {
+        throw timedOut ? new Error(timeoutMessage(options.timeoutMs!)) : e;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
       const shown = res.recordset.filter((c) => !c.is_hidden);
       checkColumnNames(shown.map((c) => c.name ?? ""));
       return shown.map((c): DescribedColumn => {

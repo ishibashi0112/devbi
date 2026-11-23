@@ -153,10 +153,15 @@ export function defineQuery<
  * ({@link DatasetRow}).
  */
 export type RowOf<Q> = Q extends TypedQuery<infer M, infer D, infer T, infer S>
-  ? [S] extends [string]
-    ? DatasetRow<S>
-    : { [K in M]: number | null } & { [K in D]: Scalar } & ([T] extends [Grain] ? TimeColumns : unknown)
+  ? // A dataset's name as written (not `string`, as in a query typed `Query`, which may be either kind).
+    [S] extends [string]
+    ? string extends S
+      ? MetricsRow<M, D, T>
+      : DatasetRow<S>
+    : MetricsRow<M, D, T>
   : Row;
+
+type MetricsRow<M extends string, D extends string, T> = { [K in M]: number | null } & { [K in D]: Scalar } & ([T] extends [Grain] ? TimeColumns : unknown);
 
 // Without generated names the time column's name is unknown, so it is left out (rather than typing every key).
 type TimeColumns = string extends TimeName ? unknown : { [K in TimeName]: Date | null };

@@ -187,21 +187,36 @@ export async function connectMysql(url: URL): Promise<Connection> {
         }
       }
     },
-    async describe(sql) {
+    async describe(sql, _params, options = {}) {
       // Prepared, not run: the server's description of the result's columns.
       const conn = await take();
+      // Preparing can wait for a lock on a table (lock_wait_timeout is a year): the connection is closed after the limit.
+      let timedOut = false;
+      const timer = options.timeoutMs
+        ? setTimeout(() => {
+            timedOut = true;
+            conn.destroy();
+          }, options.timeoutMs)
+        : undefined;
       try {
         const stmt = await conn.prepare(sql);
-        try {
-          // the promise API's statement wraps the driver's, which has the columns
-          const fields = (stmt as unknown as { statement: { columns?: Field[] } }).statement.columns ?? [];
-          checkColumnNames(fields.map((f) => f.name));
-          return fields.map((f): DescribedColumn => ({ name: f.name, type: typeOf(f), ...(f.flags !== undefined ? { nullable: (f.flags & NOT_NULL) === 0 } : {}) }));
-        } finally {
-          await stmt.close();
-        }
+        // the promise API's statement wraps the driver's, which has the columns
+        const fields = (stmt as unknown as { statement: { columns?: Field[] } }).statement.columns ?? [];
+        // Closed on the server and dropped from the connection's cache (which would answer the same SQL again
+        // without asking, after the table changed).
+        conn.unprepare(sql);
+        checkColumnNames(fields.map((f) => f.name));
+        return fields.map((f): DescribedColumn => {
+          const type = typeOf(f);
+          // A NOT NULL date can still hold MySQL's zero date (0000-00-00), which comes as null.
+          const nullable = f.flags === undefined ? undefined : (f.flags & NOT_NULL) === 0 || type === "date" || type === "timestamp";
+          return { name: f.name, type, ...(nullable !== undefined ? { nullable } : {}) };
+        });
+      } catch (e) {
+        throw timedOut ? new Error(timeoutMessage(options.timeoutMs!)) : e;
       } finally {
-        conn.release();
+        if (timer) clearTimeout(timer);
+        if (!timedOut) conn.release();
       }
     },
     async close() {

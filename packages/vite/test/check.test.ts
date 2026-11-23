@@ -68,6 +68,23 @@ describe("devbi-check", () => {
     expect(r.tiles.find((t) => t.id === "c")?.note).toBe("データセット broken（api/broken.sql）を読むタイル。列の名前は確かめていません。行はデータベースから読むため数えていません");
   }, 60_000);
 
+  it("a report whose database does not answer: its columns are not checked, and that is a note, not a warning", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-check-"));
+    for (const d of ["api", "dashboards"]) mkdirSync(path.join(dir, d));
+    const files: Record<string, string> = {
+      "api/a.sql": "SELECT 1 AS x",
+      "api/b.sql": "SELECT 2 AS y",
+      "dashboards/r.dash.json": JSON.stringify({
+        tiles: [tile("a", 0, { type: "table", query: { dataset: "a" }, options: { columns: ["nope"] } }), tile("b", 2, { type: "table", query: { dataset: "b" } })],
+      }),
+    };
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+    // a port nothing listens on: the connection is refused when the pool first connects (the describe's error)
+    const r = await checkProject(dir, { env: { DEVBI_DB: "postgres://devbi@127.0.0.1:1/x" } });
+    expect(r.findings).toEqual([]);
+    for (const id of ["a", "b"]) expect(r.tiles.find((t) => t.id === id)?.note).toContain("データベースにつながらないため、列の名前は確かめていません。");
+  }, 60_000);
+
   it("names the file, the tile and what to fix", async () => {
     const dir = project({
       "models/sales.metrics.yaml": [

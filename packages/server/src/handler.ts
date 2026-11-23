@@ -5,6 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { toArrowStream } from "./arrow.js";
 import { connect, dialectOf, type Connection, type DescribedColumn } from "./connect.js";
 import { DatasetError, bindParameters, connectionOf, connectionVariable, describeValues, listDatasets, parseDataset, readDatasetText } from "./datasets.js";
+import { errorText } from "./result.js";
 import { createSnapshots, type Snapshots } from "./snapshot.js";
 import { promisify } from "node:util";
 import { createGzip, gzip } from "node:zlib";
@@ -73,6 +74,8 @@ export interface ApiHandler {
 export const ARROW_STREAM = "application/vnd.apache.arrow.stream";
 /** Room for a multiple-value parameter: up to 1,000 values. */
 const MAX_BODY = 256 * 1024;
+/** How long a database may take to describe a dataset's columns (api/describe). */
+const DESCRIBE_TIMEOUT_MS = 20_000;
 
 export class HttpError extends Error {
   constructor(
@@ -212,7 +215,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     try {
       conn = await open(url);
     } catch (e) {
-      const detail = (e as Error).message;
+      const detail = errorText(e);
       log(`${connectionVariable(connection)}: ${detail}`);
       throw new HttpError(500, options.exposeErrors ? `データベースにつなげません: ${detail}` : "データベースにつなげません（くわしくはサーバーのログにあります）");
     }
@@ -229,7 +232,7 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
       // One row past the limit tells whether there were more.
       result = await conn.query(bound.sql, bound.params, { timeoutMs, maxRows: maxRows + 1 });
     } catch (e) {
-      const detail = (e as Error).message;
+      const detail = errorText(e);
       log(`api/${name}.sql: ${detail}`);
       throw new HttpError(500, options.exposeErrors ? `api/${name}.sql: ${detail}` : `api/${name}.sql を実行できませんでした（くわしくはサーバーのログにあります）`);
     }
@@ -244,9 +247,10 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
     if (!conn.describe) throw new HttpError(501, `この接続先（${conn.dialect}）では列を聞けません`);
     const bound = bindParameters(dataset, conn.dialect, describeValues(dataset));
     try {
-      return { name, columns: await conn.describe(bound.sql, bound.params) };
+      // Shorter than a query's limit: it reads no rows, and a wait is for a lock or a database that does not answer.
+      return { name, columns: await conn.describe(bound.sql, bound.params, { timeoutMs: Math.min(timeoutMs, DESCRIBE_TIMEOUT_MS) }) };
     } catch (e) {
-      const detail = (e as Error).message;
+      const detail = errorText(e);
       log(`api/${name}.sql: ${detail}`);
       throw new HttpError(500, options.exposeErrors ? `api/${name}.sql: ${detail}` : `api/${name}.sql の列を聞けませんでした（くわしくはサーバーのログにあります）`);
     }

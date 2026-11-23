@@ -77,7 +77,8 @@ describe("generate (.devbi/)", () => {
     expect(await dts()).toContain('    "broken": {\n      params: string;\n    };');
     expect(existsSync(path.join(dir, ".devbi/columns.json"))).toBe(false);
 
-    // Asked: the columns as SQLite declares them (an expression's type is only known from its values).
+    // Asked: the columns as SQLite declares them (an expression's type is only known from its values, and so is a
+    // DATE column's: its text is read as dates only when all of it is).
     const all = await generate(dir, { env, describe: "all" });
     expect(all.unasked.map((u) => [u.name, u.offline])).toEqual([["broken", false]]);
     expect(await dts()).toContain(
@@ -86,7 +87,7 @@ describe("generate (.devbi/)", () => {
         '      params: "from";',
         "      row: {",
         '        "id": number | null;',
-        '        "day": Date | null;',
+        '        "day": import("devbi").Scalar;',
         '        "amount": number | null;',
         '        "name": string | null;',
         '        "twice": import("devbi").Scalar;',
@@ -109,13 +110,23 @@ describe("generate (.devbi/)", () => {
     await generate(dir, { env, describe: "changed", api });
     expect(asked).toEqual(["orders"]);
     expect(await dts()).toContain('      row: {\n        "id": number;\n      };');
+    // in name order whatever order they were answered in, a column a line (the file is kept in git)
+    expect(await readFile(path.join(dir, ".devbi/columns.json"), "utf8")).toMatch(
+      /^\{\n {2}"broken": \{\n {4}"sql": "\w+",\n {4}"columns": \[\n {6}\{ "name": "id", "type": "int", "nullable": false \}\n {4}\]\n {2}\},\n {2}"orders": \{/,
+    );
 
     // A database that does not answer: the columns last asked stay, and it is reported.
     answer = async () => {
       throw new Error("データベースにつなげません（sqlite:shop.sqlite）: nope");
     };
+    asked.length = 0;
     const offline = await generate(dir, { env, describe: "all", api });
-    expect(offline.unasked.map((u) => [u.name, u.offline])).toEqual([["broken", true], ["orders", true]]);
+    expect(offline.unasked.map((u) => [u.name, u.offline, u.why])).toEqual([
+      ["broken", true, "データベースにつなげません（sqlite:shop.sqlite）: nope"],
+      ["orders", true, "データベースにつなげません（sqlite:shop.sqlite）: nope"],
+    ]);
+    // the same connection is not asked again
+    expect(asked).toEqual(["broken"]);
     expect(await dts()).toContain('      row: {\n        "id": number;\n      };');
 
     // A dataset removed: gone from the types.

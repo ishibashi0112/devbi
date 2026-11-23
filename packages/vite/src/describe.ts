@@ -9,8 +9,11 @@ export interface Described {
   offline?: boolean;
 }
 
-/** How long to wait for a database to describe a dataset (one that does not answer is left as not asked). */
-export const DESCRIBE_SECONDS = 20;
+/**
+ * How long to wait for a database to describe a dataset (one that does not answer is left as not asked). The API
+ * stops the database after 20 seconds itself; this is for a driver that does not stop.
+ */
+export const DESCRIBE_SECONDS = 30;
 
 // No database to ask: none written (接続先がありません), a driver that cannot connect, no answer in time, or the
 // network refusing (pools connect on the first query, so a refused connection comes back as the query's error:

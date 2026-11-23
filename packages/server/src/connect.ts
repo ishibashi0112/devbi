@@ -127,11 +127,13 @@ async function connectSqlite(file: string): Promise<Connection> {
       return { columns, rows };
     },
     async describe(sql) {
-      // Prepared, not run: the declared type of a table's column, none for an expression (its values tell).
+      // Prepared, not run: the declared type of a table's column, none for an expression (its values tell). Nor for
+      // a DATE or BOOLEAN column: `query` reads its text as dates (its 0 / 1 as true / false) only when all of it is.
       const info = db.prepare(sql).columns();
       checkColumnNames(info.map((c) => c.name));
       return info.map((c) => {
-        const type = sqliteDeclaredType(c.type);
+        const declared = sqliteDeclaredType(c.type);
+        const type = declared === "date" || declared === "timestamp" || declared === "bool" ? undefined : declared;
         return { name: c.name, ...(type ? { type } : {}), ...(c.type ? { dbType: c.type } : {}) };
       });
     },
@@ -183,6 +185,8 @@ async function connectPostgres(url: URL): Promise<Connection> {
   const pool = new pg.Pool({
     connectionString: url.toString(),
     max: 4,
+    // A host that does not answer (a VPN that is off) fails after this, not after the system's TCP time limit.
+    connectionTimeoutMillis: 15_000,
     // Every value as the server's text; DevBI turns it into numbers and dates itself (pg's Date would move
     // DATE and TIMESTAMP by the Node process's time zone).
     types: { getTypeParser: (() => (v: string) => v) as unknown as typeof pg.types.getTypeParser },
@@ -211,11 +215,11 @@ async function connectPostgres(url: URL): Promise<Connection> {
         client.release();
       }
     },
-    async describe(sql, params) {
+    async describe(sql, params, options) {
       // Run with no rows (PREPARE does not give the columns' names), then the types' names in one more query.
       const client = await pool.connect();
       try {
-        await client.query("BEGIN READ ONLY; SET LOCAL statement_timeout = 30000");
+        await client.query(`BEGIN READ ONLY; SET LOCAL statement_timeout = ${Math.round(options?.timeoutMs ?? 30_000)}`);
         const res = await client.query({ text: limited(sql, 0), values: params, rowMode: "array" });
         checkColumnNames(res.fields.map((f) => f.name));
         const names = await client.query({

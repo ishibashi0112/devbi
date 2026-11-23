@@ -230,16 +230,25 @@ export async function checkProject(dir: string, options: CheckOptions = {}): Pro
   // Their columns, asked of their databases once each (api/describe): only where one answers.
   let api: ApiHandler | undefined;
   const described = new Map<string, Promise<Described>>();
+  // A connection that did not answer (DEVBI_DB…): its other datasets are not asked (each would wait again).
+  const offline = new Map<string, Described>();
   const describe = (name: string): Promise<Described> => {
     let found = described.get(name);
     if (!found) {
       found = (async () => {
+        let connection: string;
         try {
-          api ??= (await import("@devbi/server")).createApiHandler({ dir, env, exposeErrors: true });
+          const server = await import("@devbi/server");
+          connection = server.connectionVariable(server.connectionOf(await server.readDatasetText(dir, name)));
+          api ??= server.createApiHandler({ dir, env, exposeErrors: true });
         } catch (e) {
           return { why: message(e) };
         }
-        return askColumns(api, name);
+        const before = offline.get(connection);
+        if (before) return before;
+        const d = await askColumns(api, name);
+        if (d.offline) offline.set(connection, d);
+        return d;
       })();
       described.set(name, found);
     }

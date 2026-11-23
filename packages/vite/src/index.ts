@@ -367,7 +367,8 @@ export default function devbi(options: DevbiOptions = {}): Plugin {
    * dataset the first time (the database may have changed since), then those whose SQL changed. One run at a time.
    */
   const describeColumns = (mode: "all" | "changed") => {
-    if (!devApi) return;
+    // Not for a test run that starts Vite (Vitest): no databases asked behind the tests.
+    if (!devApi || process.env.VITEST) return;
     if (describing) {
       describeAgain = true;
       return;

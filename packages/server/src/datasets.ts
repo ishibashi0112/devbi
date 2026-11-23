@@ -173,7 +173,9 @@ function inList(sql: string, start: number, end: number): boolean {
 
 export type ParamValue = string | number | boolean | null;
 
-const SAMPLES: Record<ParamType, ParamValue> = { text: "x", integer: 0, number: 0, date: "2000-01-01", datetime: "2000-01-01 00:00:00", boolean: false };
+// PostgreSQL works out constant expressions with the values while it plans (even under LIMIT 0): values that most
+// expressions take (a text that is also a number, no zero to divide by).
+const SAMPLES: Record<ParamType, ParamValue> = { text: "1", integer: 1, number: 1, date: "2000-01-01", datetime: "2000-01-01 00:00:00", boolean: false };
 
 /**
  * A value for each parameter that passes its checks (`-- param:` typed ones as their type, a list of one for a

@@ -2,8 +2,11 @@ node_modules/
 dist/
 # The documentation site's cache (pnpm docs:build / docs:dev; the site itself goes to docs/.vitepress/dist/)
 docs/.vitepress/cache/
-# pnpm gen / the Vite plugin writes these from models/ (they include local_* names, so keep them out of git)
-.devbi/
+# pnpm gen / the Vite plugin writes these from models/ and api/ (they include local_* names, so keep them out of
+# git), except columns.json (the datasets' columns as their databases answered): kept, so a machine without the
+# database (CI, a colleague) gets the same row types
+**/.devbi/*
+!**/.devbi/columns.json
 *.tsbuildinfo
 .vite/
 test-results/

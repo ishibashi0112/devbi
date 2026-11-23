@@ -273,8 +273,10 @@ for (const c of CASES) {
         expect(described.map((col) => col.name)).toEqual(["受注日", "受注番号", "行番号", "顧客", "地域", "商品分類", "商品", "数量", "単価", "金額"]);
         const col = (n: string) => described.find((x) => x.name === n)!;
         expect([col("受注日").type, col("顧客").type, col("数量").type]).toEqual(["date", "string", "int"]);
-        // NOT NULL columns through inner joins, where the database says
-        for (const n of ["受注日", "顧客"]) if (col(n).nullable !== undefined) expect(col(n).nullable).toBe(false);
+        // NOT NULL columns through inner joins, where the database says (MySQL's NOT NULL dates can hold the zero
+        // date, which comes as null)
+        if (col("顧客").nullable !== undefined) expect(col("顧客").nullable).toBe(false);
+        if (col("受注日").nullable !== undefined) expect(col("受注日").nullable).toBe(mysqlLike(c));
         expect((await big.describe("customer_totals")).columns.map((x) => x.name)).toEqual(["顧客ID", "地域", "顧客", "受注数", "数量", "金額"]);
         const until = tableFromIPC((await big.run("order_lines", { from: "2024-04-01", to: "2024-04-02", regions: ["関東"], customer: null })).bytes);
         expect(until.numRows).toBeGreaterThan(0);
