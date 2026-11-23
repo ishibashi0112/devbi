@@ -178,6 +178,15 @@ describe("DashboardParams", () => {
     expect("error" in req && req.error).toMatch(/^地域（1,001 個）: 1 つのパラメーターで送れる値は 1,000 個までです/);
   });
 
+  it("opens with none picked from the address (regions=), after the choices too", async () => {
+    const { s, settle } = store({ tiles: [linesTile] }, { from: "2024-04-01", regions: [] });
+    s.start();
+    await settle();
+    expect(s.value("regions")).toEqual([]);
+    expect(s.request({ dataset: "order_lines" }, datasets.order_lines!)).toEqual({ missing: ["地域"] });
+    expect(s.changedValues()).toEqual({ from: "2024-04-01", regions: [] });
+  });
+
   it("an address sets its values and puts the ones it leaves out back to their default", async () => {
     const { s, settle } = store({ fiscalYearStart: 4, tiles: [linesTile] });
     s.start();
@@ -185,6 +194,10 @@ describe("DashboardParams", () => {
     s.setValues({ from: "2024-04-01", regions: ["近畿"] });
     s.setValues({ regions: [] }, { others: "default" });
     expect([s.value("from"), s.value("regions")]).toEqual(["2026-04-01", []]);
+    // None picked stays none when the choices are read again.
+    s.refresh();
+    await settle();
+    expect(s.value("regions")).toEqual([]);
     s.setValues({}, { others: "default" });
     expect(s.value("regions")).toEqual(["関東", "近畿"]);
   });

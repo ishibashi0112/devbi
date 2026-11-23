@@ -239,6 +239,9 @@ export function createEditorHandler(options: EditorOptions) {
         }
         const problems = await options.problems(rel, dashboard);
         if (problems.length) throw new HttpError(422, problems.join("\n"));
+        // The datasets were read meanwhile: another save may have come in since the check above.
+        const now = existsSync(file) ? versionOf(await readFile(file)) : null;
+        if (now !== current) throw new HttpError(409, `${rel} は、エディタで開いたあとに書き換えられています`, { version: now });
         const text = formatDashboardJson(body.spec);
         // Write next to it and rename: the dev server (and VS Code) never read half a file.
         const tmp = path.join(dashDir, `.${name}.dash.json.${process.pid}-${Date.now()}.tmp`);

@@ -106,6 +106,12 @@ export class DashboardParams {
     }
   }
 
+  /** The choices as read for the bar's values now (not while they are being read, nor after they failed). */
+  private readyChoices(p: DashboardParam): Choice[] | undefined {
+    const st = this.choices.get(p.name);
+    return st && !st.loading && !st.error ? st.items : undefined;
+  }
+
   private defaultOf(p: DashboardParam, choices?: Choice[]): Value {
     return resolveDefault(p, { now: this.now, fiscalYearStart: this.dashboard.fiscalYearStart ?? 1, ...(choices ? { choices: choices.map((c) => c.value) } : {}) });
   }
@@ -159,7 +165,7 @@ export class DashboardParams {
     for (const p of this.list) {
       const v = this.applied[p.name];
       if (v === undefined) continue;
-      const def = this.defaultOf(p, this.choices.get(p.name)?.items);
+      const def = this.defaultOf(p, this.readyChoices(p));
       if (!same(v, def)) out[p.name] = v;
     }
     return out;
@@ -209,8 +215,10 @@ export class DashboardParams {
     if (options.others === "default") {
       for (const p of this.list) {
         if (given.has(p.name)) continue;
-        const def = this.defaultOf(p, this.choices.get(p.name)?.items);
-        const waits = def === undefined && p.multiple && p.default === "all" && !!p.values && Object.hasOwn(this.datasets, p.values);
+        const def = this.defaultOf(p, this.readyChoices(p));
+        // `all` while its choices are being read: it waits for them (not when they failed).
+        const waits =
+          def === undefined && p.multiple && p.default === "all" && !!p.values && Object.hasOwn(this.datasets, p.values) && !this.choices.get(p.name)?.error;
         if (same(this.applied[p.name], def) && same(this.draft[p.name], def) && !waits) continue;
         this.applied[p.name] = def;
         this.draft[p.name] = def;
@@ -260,7 +268,8 @@ export class DashboardParams {
       }
       const v = from[p.name];
       if (this.pendingAll.has(p.name)) {
-        // `all` waits for its choices; when those need values not filled in yet, the tile asks for them.
+        // `all` waits for its choices; when those need values not filled in yet, the tile asks for them. The choices
+        // are read with the bar's values (with apply: "button", before 表示 too), so this asks with those.
         const ds = p.values && !seen.has(p.values) ? this.datasets[p.values] : undefined;
         const before = ds ? this.valuesFor(ds, this.draft, undefined, new Set([...seen, p.values!])) : undefined;
         if (before && "missing" in before) missing.push(...before.missing.filter((m) => !missing.includes(m)));
@@ -359,6 +368,8 @@ export class DashboardParams {
     const fitted = (v: Value): Value => {
       if (truncated || v === undefined || v === null) return v;
       if (Array.isArray(v)) {
+        // None picked on purpose (`regions=` in the address) stays none.
+        if (!v.length) return v;
         const kept = v.filter((x) => known.has(key(x)));
         return kept.length ? (kept.length === v.length ? v : kept) : this.defaultOf(p, items);
       }

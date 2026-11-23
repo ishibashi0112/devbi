@@ -1,4 +1,13 @@
-import { checkParamValues, dashboardParams, datasetTiles, paramsFromSearch, paramsToSearch, type ParamValue, type TileSpec } from "devbi";
+import {
+  checkParamValues,
+  dashboardParams,
+  datasetTiles,
+  paramsFromSearch,
+  paramsToSearch,
+  type DashboardParam,
+  type ParamValue,
+  type TileSpec,
+} from "devbi";
 import { useCallback, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { DevbiProvider, fieldInfo, useDevbi, useParamsVersion, useSelectionVersion } from "./context.js";
 import { describeFilter, snapshotText } from "./describe.js";
@@ -153,6 +162,11 @@ function ParamsSync({
   return null;
 }
 
+/** The latest values, for this dashboard's parameters as they are now (a saved file may have changed a type). */
+function seedFor(list: DashboardParam[] | undefined, values: Record<string, ParamValue>): Record<string, ParamValue> {
+  return list ? checkParamValues(list, values).values : {};
+}
+
 function tileStyle(t: TileSpec, rowHeight: number): CSSProperties {
   return {
     gridColumn: `${t.x + 1} / span ${t.w}`,
@@ -278,7 +292,7 @@ export function Dashboard({
   const tiles = [...dashboard.tiles].sort((a, b) => a.y - b.y || a.x - b.x);
   const readsDatasets = datasetTiles(dashboard.tiles).length > 0;
   return (
-    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard} params={seed.current}>
+    <DevbiProvider key={projectKey(project)} project={project} dashboard={dashboard} params={seedFor(checked?.list, seed.current)}>
       <ParamsSync given={givenLater} onChange={onParamsChange} onValues={(v) => (seed.current = v)} url={paramsInUrl ? name : undefined} />
       <div className="devbi-root" ref={rootRef} {...root}>
         <div className="devbi-dashboard">

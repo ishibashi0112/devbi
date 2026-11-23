@@ -535,7 +535,7 @@ export function paramsToSearch(params: readonly DashboardParam[], values: Record
   const q = new URLSearchParams();
   for (const p of params) {
     const v = values[p.name];
-    if (v === undefined) continue;
+    if (v === undefined || (v === null && p.multiple)) continue;
     if (Array.isArray(v)) {
       for (const x of v) q.append(p.name, paramText(x));
       if (!v.length) q.append(p.name, ""); // none picked
