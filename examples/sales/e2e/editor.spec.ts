@@ -463,7 +463,8 @@ test("the property panel: a report's table, its columns and groups written as JS
   const p = panel(page);
 
   // A list, not an object: what is wrong shows under it, and nothing is written.
-  const groups = p.getByLabel("グループ");
+  // The JSON boxes under 表示 (the list of columns above has checkboxes named グループ too).
+  const groups = p.getByRole("textbox", { name: "グループ", exact: true });
   await expect(groups).toHaveValue(JSON.stringify(["地域"], null, 2));
   await groups.fill('{ "地域": true }');
   await groups.blur();
@@ -473,7 +474,7 @@ test("the property panel: a report's table, its columns and groups written as JS
   await expect(p.getByText("[ ] で囲んだ JSON の配列にしてください")).toHaveCount(0);
   await expect(headers).toHaveText(["顧客", "受注数", "数量", "金額"]);
 
-  const columns = p.getByLabel("列", { exact: true });
+  const columns = p.getByRole("textbox", { name: "列", exact: true });
   await columns.fill('[{ "field": "顧客ID", "hidden": true }, "顧客", { "field": "金額", "format": "¥#,##0" }]');
   await columns.blur();
   await expect(headers).toHaveText(["顧客", "金額"]);
@@ -484,6 +485,88 @@ test("the property panel: a report's table, its columns and groups written as JS
   expect(options?.columns).toEqual([{ field: "顧客ID", hidden: true }, "顧客", { field: "金額", format: "¥#,##0" }]);
   expect(options).not.toHaveProperty("groupBy");
   expect(options?.click).toEqual({ params: { customer: "顧客ID" } });
+});
+
+test("the property panel: a report's table from its dataset's columns, as the database describes them", async ({ page }) => {
+  writeFileSync(reportFile, report);
+  await page.goto("/#/sales-report");
+  await page.getByRole("button", { name: "編集", exact: true }).click();
+  const headers = item(page, "customers").locator("[role=columnheader] .ssg-header-label");
+  await expect(headers).toHaveText(["地域", "顧客", "受注数", "数量", "金額"]);
+  await pick(page, "customers");
+  const p = panel(page);
+  await expect(p.getByLabel("データの元")).toHaveValue("dataset");
+  await expect(p.getByLabel("データセット", { exact: true })).toHaveValue("customer_totals");
+  await expect(p.getByText("パラメーター: 受注日（から）、受注日（まで）、地域")).toBeVisible();
+
+  // The list's columns in options.columns' order, then the result's others (地域: a group, not in the list).
+  const list = p.getByRole("group", { name: "列", exact: true });
+  const boxes = list.getByRole("checkbox");
+  await expect(boxes).toHaveCount(6);
+  const box = (name: string) => list.getByRole("checkbox", { name: new RegExp(`^${name}( |$)`) });
+  await expect(box("顧客ID")).toBeChecked();
+  await expect(box("顧客ID")).toHaveAccessibleName(/INTEGER 隠す$/);
+  await expect(box("地域")).not.toBeChecked();
+  await expect(box("地域")).toHaveAccessibleName(/グループ$/);
+
+  // Not shown: one checkbox. Its label and format: under ⋯. Before the one above: ↑.
+  await box("受注数").uncheck();
+  await expect(headers).toHaveText(["地域", "顧客", "数量", "金額"]);
+  await list.getByRole("button", { name: "金額の設定" }).click();
+  const detail = list.locator(".devbi-ed-column-detail");
+  await expect(detail.getByLabel("数の書式")).toHaveValue("¥#,##0");
+  await detail.getByLabel("列の見出し", { exact: true }).fill("売上");
+  await expect(headers).toHaveText(["地域", "顧客", "数量", "売上"]);
+  await list.getByRole("button", { name: "売上を前へ" }).click();
+  await expect(headers).toHaveText(["地域", "顧客", "売上", "数量"]);
+  // A column not in the list has only its group box.
+  await list.getByRole("button", { name: "地域の設定" }).click();
+  await expect(detail.getByLabel("数の書式")).toHaveCount(0);
+  await detail.getByLabel("この列の値で行をまとめる（グループ）").uncheck();
+  await expect(headers).toHaveText(["顧客", "売上", "数量"]);
+  await expect(box("地域")).toHaveAccessibleName("地域 TEXT");
+
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const read = () => (JSON.parse(readFileSync(reportFile, "utf8")) as { tiles: { id: string; query?: unknown; options?: Record<string, unknown> }[] }).tiles.find((t) => t.id === "customers")!;
+  expect(read().options).toEqual({
+    columns: [{ field: "顧客ID", hidden: true }, "顧客", { field: "金額", label: "売上", format: "¥#,##0", style: "bar" }, "数量"],
+    totals: true,
+    click: { params: { customer: "顧客ID" } },
+  });
+
+  // Another dataset: its columns, all shown; the list, groups and the row's click (names of the other's columns) go.
+  await p.getByLabel("データセット", { exact: true }).selectOption("regions");
+  await expect(boxes).toHaveCount(1);
+  await expect(box("地域")).toBeChecked();
+  await expect(headers).toHaveText(["地域"]);
+  // Back to the metrics: a new table's measures and dimensions (as 「表」 added from the palette), no dataset's options.
+  await p.getByLabel("データの元").selectOption("metrics");
+  await expect(p.getByLabel("データセット", { exact: true })).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toContainText("保存しました");
+  const back = read();
+  expect(back.query).not.toHaveProperty("dataset");
+  expect(back.query).toHaveProperty("measures", ["revenue"]);
+  expect(back.options).toBeUndefined();
+});
+
+test("the property panel: a metrics table set to read a dataset shows its rows at once, with its parameters' defaults", async ({ page }) => {
+  await openEditor(page);
+  await pick(page, "products");
+  const p = panel(page);
+  const headers = item(page, "products").locator("[role=columnheader]");
+  await expect(p.getByLabel("データの元")).toHaveValue("metrics");
+  await p.getByLabel("データの元").selectOption("dataset");
+  // The first dataset by name, whose parameters (受注日, 地域) this dashboard did not have: their defaults.
+  await expect(p.getByLabel("データセット", { exact: true })).toHaveValue("customer_totals");
+  await expect(item(page, "products").locator("[role=columnheader] .ssg-header-label")).toHaveText(["顧客ID", "地域", "顧客", "受注数", "数量", "金額"]);
+  await expect(item(page, "products").getByText(/欄がありません/)).toHaveCount(0);
+  // Back to a metrics file: a new table's measures and dimensions.
+  await p.getByLabel("データの元").selectOption("metrics");
+  await expect(p.getByRole("group", { name: "指標", exact: true })).toBeVisible();
+  await expect(headers.first()).toBeVisible();
+  await expect(headers.filter({ hasText: "顧客ID" })).toHaveCount(0);
 });
 
 test("the property panel: a query written in Malloy or SQL shows on the tile at once, and so does what is wrong with it", async ({ page }) => {

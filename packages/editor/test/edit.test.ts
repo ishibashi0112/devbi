@@ -2,6 +2,9 @@ import { defineMetricsView, formatDashboardJson } from "devbi";
 import { describe, expect, it } from "vitest";
 import {
   changeType,
+  columnRows,
+  datasetOf,
+  groupsOf,
   readsRows,
   fieldsOf,
   filterRow,
@@ -10,7 +13,10 @@ import {
   moveUp,
   promoteTile,
   rowFilter,
+  setColumnKey,
+  setColumnRows,
   setDashboardKey,
+  setDataset,
   setOption,
   setQueryKey,
   setQueryMode,
@@ -244,3 +250,81 @@ describe("filters", () => {
     }
   });
 });
+
+describe("a report table (a dataset's rows)", () => {
+  const spec: RawDashboard = { tiles: [] };
+  const result = ["日付", "顧客", "金額"];
+
+  it("reads a dataset, another one, or a metrics file again; the options naming its columns go with it", () => {
+    const t = tile({ type: "table", query: { measures: ["revenue"], dimensions: ["region"] } });
+    const report = setDataset(spec, t, "orders", metrics);
+    expect(report.query).toEqual({ dataset: "orders" });
+    expect(datasetOf(report)).toBe("orders");
+    const dressed = { ...report, options: { columns: ["顧客"], groupBy: ["顧客"], totals: true, click: { params: { c: "顧客" } } } };
+    expect(setDataset(spec, dressed, "lines", metrics)).toMatchObject({ query: { dataset: "lines" }, options: { totals: true } });
+    expect(setDataset(spec, dressed, "lines", metrics).options).toEqual({ totals: true });
+    const back = setDataset(spec, dressed, undefined, metrics);
+    expect(datasetOf(back)).toBeUndefined();
+    expect(back.query).toEqual(expect.objectContaining({ measures: expect.any(Array) }));
+    expect(back).not.toHaveProperty("options");
+    expect(setDataset(spec, report, "orders", metrics)).toBe(report);
+  });
+
+  it("lists the columns: the options' first, in order, then the result's others; all of them without options", () => {
+    expect(columnRows({}, result).map((r) => [r.field, r.shown])).toEqual([["日付", true], ["顧客", true], ["金額", true]]);
+    const rows = columnRows({ columns: ["金額", { field: "顧客", label: "得意先" }, "ない"] }, result);
+    expect(rows).toEqual([
+      { field: "金額", shown: true, spec: {}, missing: false, entry: "金額" },
+      { field: "顧客", shown: true, spec: { label: "得意先" }, missing: false, entry: { field: "顧客", label: "得意先" } },
+      { field: "ない", shown: true, spec: {}, missing: true, entry: "ない" },
+      { field: "日付", shown: false, spec: {}, missing: false },
+    ]);
+    // the database not asked yet: what the options say
+    expect(columnRows({ columns: ["金額"] }, undefined).map((r) => r.field)).toEqual(["金額"]);
+    expect(columnRows({}, undefined)).toEqual([]);
+    // the groups' columns too, not shown (they head the groups), when they are not in the list
+    expect(columnRows({ columns: ["金額"], groupBy: ["日付", "金額"] }, undefined).map((r) => [r.field, r.shown])).toEqual([["金額", true], ["日付", false]]);
+    expect(columnRows({ groupBy: "地域" }, result).map((r) => [r.field, r.shown, r.missing])).toEqual([
+      ["日付", true, false],
+      ["顧客", true, false],
+      ["金額", true, false],
+      ["地域", false, true],
+    ]);
+  });
+
+  it("writes the shown columns back, a name alone when it has nothing else, and none at all when it is every column as it is", () => {
+    const t = tile({ type: "table", query: { dataset: "orders" } });
+    const all = columnRows({}, result);
+    const hidden = setColumnRows(t, all.map((r) => (r.field === "日付" ? { ...r, shown: false } : r)), result);
+    expect(hidden.options).toEqual({ columns: ["顧客", "金額"] });
+    const labelled = setColumnRows(hidden, setColumnKey(columnRows(hidden.options, result), "金額", "format", "¥#,##0"), result);
+    expect(labelled.options).toEqual({ columns: ["顧客", { field: "金額", format: "¥#,##0" }] });
+    // label goes before format (the keys' usual order); an empty one is removed
+    const both = setColumnKey(setColumnKey(columnRows(labelled.options, result), "金額", "label", "売上"), "金額", "format", "");
+    expect(both.find((r) => r.field === "金額")?.spec).toEqual({ label: "売上" });
+    // every column, in the result's order, nothing else: options.columns goes
+    expect(setColumnRows(hidden, all, result)).not.toHaveProperty("options");
+    // no column at all is not written
+    expect(setColumnRows(t, all.map((r) => ({ ...r, shown: false })), result)).toBe(t);
+  });
+
+  it("writes a column back as it was written: its keys where they are, a new one in the usual order, a name alone once nothing else is left", () => {
+    const t = tile({ type: "table", query: { dataset: "orders" }, options: { columns: [{ label: "売上", field: "金額", width: 90 }, { field: "顧客" }, "日付"] } });
+    const rows = columnRows(t.options, result);
+    expect(setColumnRows(t, setColumnKey(rows, "金額", "format", "¥#,##0"), result).options).toEqual({
+      columns: [{ label: "売上", field: "金額", format: "¥#,##0", width: 90 }, { field: "顧客" }, "日付"],
+    });
+    expect(JSON.stringify((setColumnRows(t, setColumnKey(rows, "金額", "format", "¥#,##0"), result).options as { columns: unknown[] }).columns[0])).toBe(
+      '{"label":"売上","field":"金額","format":"¥#,##0","width":90}',
+    );
+    const bare = setColumnKey(setColumnKey(rows, "金額", "label", ""), "金額", "width", undefined);
+    expect(setColumnRows(t, bare, result).options).toEqual({ columns: ["金額", { field: "顧客" }, "日付"] });
+  });
+
+  it("reads the groups as a list", () => {
+    expect(groupsOf({ groupBy: "地域" })).toEqual(["地域"]);
+    expect(groupsOf({ groupBy: ["地域", 1, "顧客"] })).toEqual(["地域", "顧客"]);
+    expect(groupsOf(undefined)).toEqual([]);
+  });
+});
+
