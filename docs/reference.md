@@ -837,8 +837,77 @@ SELECT o.order_date AS 受注日, c.name AS 顧客, c.region AS 地域, l.qty * 
 - SELECT のすぐ上のコメントは、説明として `api/schema` に出ます。
 - ファイルの先頭の `--` のコメントの中に `-- connection: erp` の行を書くと、接続先を `DEVBI_DB_ERP` にします（SELECT より前に書きます。間に空の行があってもかまいません）。
 - 同じところに `-- snapshot: 06:00` の行を書くと、[スナップショット](#毎朝のスナップショット)から読むようになります。
+- 同じところに `-- param:` の行（[パラメーターの型](#パラメーターの型---param)）と `-- key:` の行（[行を見分ける列](#行を見分ける列---key)）も書けます。`-- connection:`・`-- snapshot:`・`-- param:`・`-- key:` の行は、説明には入りません。
 - 引用符などの読み方は、接続先のデータベースに合わせます（SQLite と SQL Server の `[列名]`、PostgreSQL の `$$ … $$`）。
 - ファイルを保存すると、開発サーバーではページを読み込み直します。`devbi-serve` は呼ばれるたびにファイルを読むので、止めなくても反映されます。
+
+### パラメーターの型（`-- param:`）
+
+SSRS のレポートのパラメーターのように、パラメーターに型・表示名・既定値・候補を付けます。ファイルの先頭のコメントに、1 つのパラメーターにつき 1 行書きます（サンプルの `examples/sales/api/order_lines.sql`）。
+
+```sql
+-- 受注の明細を、受注日と地域で絞る。
+-- param: from date label=受注日（から） default=fiscal_year_start
+-- param: to date label=受注日（まで） optional
+-- param: regions text[] label=地域 values=regions default=all
+-- key: 受注番号, 行番号
+SELECT …
+ WHERE o.order_date >= :from
+   AND (:to IS NULL OR o.order_date <= :to)
+   AND c.region IN (:regions)
+```
+
+- 形は `-- param: <名前> <型> <キー>=<値> …` です。値に空白を入れるときは `label="受注日 から"` と `"` で囲みます（`"` そのものは `""`）。`<名前>` は SQL の `:名前` と同じ（大文字と小文字は区別しない）です。
+- 型を書いたパラメーターは、サーバーが値を型で確かめてから、データベースに型付きで渡します。合わない値は `400` と「パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（"2024/04/01" が来ました）」のようなメッセージです。`read_api` の値も同じように確かめます。
+- `-- param:` を書かないパラメーターは今までどおりです（型なし。文字・数値・真偽・null をそのまま渡す）。
+- 書き方が違うと、`api/order_lines.sql（3 行目）: 型 day は使えません。…` のように、何行目の何が違うかを出します（`api/schema` のそのデータセットの `error` と、`api/query` の `400`）。SQL にない名前、型のない行、同じ名前の 2 行目、知らないキー、型に合わない既定値はエラーです。
+- 名前が `user.` で始まるパラメーターは書けません（ログインした人の値のために取ってあります。大文字と小文字は問いません）。`user_id`、`username` などは使えます。
+- `-- param:` と `-- key:` は、`-- connection:` と同じく、ファイルの先頭から続く `--` のコメント（空の行は入ってよい）の中に書きます。SQL や `/* … */` よりあとの行に書くと、何もしない代わりに「api/x.sql（5 行目）: -- param: は、ファイルの先頭から続く -- のコメントの中に書いてください…」のエラーになります。
+- 0.1.1 までは、`-- param: …` や `-- key: …` で始まる行は、先頭なら説明の文、SQL の中ならただのコメントでした。今は指示として読む（SQL の中ではエラーになる）ので、そう書いていたら言い方を変えてください。
+
+| 型 | 送る値 | 確かめること |
+| --- | --- | --- |
+| `text` | 文字 | 4,000 文字まで |
+| `integer` | 数（整数） | 整数か（±9,007,199,254,740,991 まで） |
+| `number` | 数 | 有限の数か |
+| `date` | `"2024-04-01"` | 暦にある日付か |
+| `datetime` | `"2024-04-01T09:00"`（`T` は空白でも。秒と 6 桁までの小数も書ける。時差は書かない） | 日時として読めるか。`"2024-04-01"` は 0:00 |
+| `boolean` | `true` / `false` | 真偽か |
+
+| キー | 中身 |
+| --- | --- |
+| `label` | 入力欄の名前。書かなければパラメーターの名前 |
+| `default` | 既定値。`2024-04-01`、`10` のような値のほか、日付と日時では `today`・`tomorrow`・`yesterday`・`month_start`・`next_month_start`・`previous_month_start`・`year_start`・`fiscal_year_start` と、`today-30` のような日数の足し引き。複数の値では `関東,近畿`（`,` 区切り）と、候補（`values`）があれば `all`（候補の全部） |
+| `values` | 候補の一覧を出すデータセットの名前（`api/regions.sql` なら `regions`）。1 列目が値、2 列目（あれば）が表示名 |
+| `optional` | 空でもよい（`null` を受け付け、データベースには NULL を渡す）。書かなければ `null` は `400` |
+| `hidden` | 入力欄を出さない |
+
+`label`・`default`・`values`・`hidden` は、ダッシュボードの入力欄のためのものです（サーバーは `api/schema` に出すだけで、既定値を入れることはしません。値はいつも送る側が渡します）。入力欄は次の版で入ります。
+
+**複数の値**: 型に `[]` を付ける（`text[]`、`integer[]` など）と、値を配列で受け取ります（1 つの値だけ送ると、1 つの値の配列として読みます）。SQL では `IN (:regions)`（`NOT IN` も）の形でだけ使えます（ほかの場所に書くとエラー）。サーバーは値の数だけプレースホルダーを並べ（`IN (?, ?, ?)`）、値はすべてパラメーターで渡します。
+
+- 1 つも選ばないことはできません（空の配列は `400`）。`optional` も付けられません。
+- 1 つのパラメーターに 1,000 個まで、1 つの SQL の全体で 2,000 個まで（MySQL と SQLite は、同じパラメーターを 2 か所に書くと 2 つ分に数えます）です。超えるときは、候補を絞るか、「すべて」のときはこのパラメーターを使わない SQL にします。
+- 「すべて」を候補の値の全部で送ると、その列が NULL の行と候補にない値の行は出ません。NULL の行も出したいときは、複数の値にせず、`optional` の 1 つの値で `(:customer IS NULL OR c.id = :customer)` と書きます。
+- `read_api` からは配列を渡せないので、`read_api('order_lines', regions = '関東')` のように 1 つの値で読みます。
+
+**データベースへの渡し方**: 日付と日時は `YYYY-MM-DD` と `YYYY-MM-DD HH:MM:SS` の文字で渡し、SQL の側で日付として読みます。データベースやセッションの日付の書き方の設定によらず同じに読めます。
+
+| データベース | 型を書いたパラメーターの書き換え |
+| --- | --- |
+| PostgreSQL | どの型も `CAST($1 AS date)`（`timestamp`、`bigint`、`numeric`、`text`、`boolean`）。型の決まらない場所（`:customer IS NULL OR …`）でも「could not determine data type」にならない。`uuid` や列挙型の列と比べるときは `CAST(:id AS uuid)` か `id::text = :id` と書く |
+| SQL Server | 日付は `CAST(@p1 AS date)`、日時は `CAST(@p1 AS datetime2)`。ほかは今までどおり |
+| Oracle | 日付は `TO_DATE(:p1, 'YYYY-MM-DD')`、日時は `TO_DATE(:p1, 'YYYY-MM-DD HH24:MI:SS')`（秒の小数があるときだけ `TO_TIMESTAMP`。DATE の列の索引が使えるように） |
+| MySQL / MariaDB | 日付は `CAST(? AS DATE)`、日時は `CAST(? AS DATETIME(6))` |
+| SQLite | 書き換えない（日付を文字で持つため）。日時は `2024-04-01 09:00:00` の形（日付と時刻の間は空白。SQLite の `datetime()` や `CURRENT_TIMESTAMP` と同じ）で渡す。文字どうしで比べるので、列が `2024-04-01T08:00:00` のように `T` で持つときは `replace(ts, 'T', ' ') >= :since` と書くか、型を書かずに送られた文字のまま渡す。日付だけの列と日時のパラメーターは `'2024-04-03' < '2024-04-03 00:00:00'` になる |
+
+### 行を見分ける列（`-- key:`）
+
+```sql
+-- key: 受注番号, 行番号
+```
+
+結果の 1 行を見分ける列（結果の列の名前）を `,` 区切りで書きます。名前に `,` があるときは `"行, 番号"` と囲みます。`api/schema` の `key` に出ます。表で行を選んだまま読み直したときと、サーバーでページを送る表（次の版から）に使います。
 
 ### `read_api`
 
@@ -847,7 +916,7 @@ model: SELECT * FROM read_api('orders', from = '2024-04-01')
 ```
 
 - 最初の引数は `api/` のファイル名（`.sql` なし）です。
-- パラメーターは `名前 = 値` の形で書きます。値に書けるのは文字（`'…'`）、数値、`true` / `false`、`null` だけです。SQL のすべてのパラメーターに値が要ります。
+- パラメーターは `名前 = 値` の形で書きます。値に書けるのは文字（`'…'`）、数値、`true` / `false`、`null` だけです。SQL のすべてのパラメーターに値が要ります。`-- param:` で型を書いたパラメーターは、その型で確かめます（`date` なら `from = '2024-04-01'`）。
 - `read_api` の結果は、ほかの `read_*` と同じように `model` の SQL の中で表として使えます（JOIN、WHERE、`CAST` など）。
 - ビルドの時に、`api/<名前>.sql` があるかを確かめます。
 
@@ -984,8 +1053,17 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 ```json
 {
   "datasets": [
-    { "name": "orders", "description": "受注の明細…", "params": ["from"], "connection": "DEVBI_DB" },
-    { "name": "sales_daily", "description": "…", "params": ["from"], "connection": "DEVBI_DB", "snapshot": ["06:00"] }
+    { "name": "order_lines", "description": "受注の明細を…", "params": ["from", "to", "regions"],
+      "parameters": [
+        { "name": "from", "type": "date", "label": "受注日（から）", "default": "fiscal_year_start" },
+        { "name": "to", "type": "date", "label": "受注日（まで）", "optional": true },
+        { "name": "regions", "type": "text", "multiple": true, "label": "地域", "default": "all", "values": "regions" }
+      ],
+      "key": ["受注番号", "行番号"], "connection": "DEVBI_DB" },
+    { "name": "orders", "description": "受注の明細…", "params": ["from"], "parameters": [{ "name": "from", "type": "date", "label": "受注日（から）" }], "connection": "DEVBI_DB" },
+    { "name": "regions", "description": "地域の一覧…", "params": [], "parameters": [], "connection": "DEVBI_DB" },
+    { "name": "sales_daily", "description": "…", "params": ["from"], "parameters": [{ "name": "from", "type": "date", "label": "受注日（から）" }],
+      "connection": "DEVBI_DB", "snapshot": ["06:00"] }
   ],
   "snapshots": [
     { "file": "sales_daily~9e979dd94c517434.arrows", "name": "sales_daily", "params": { "from": "2024-04-01" },
@@ -994,13 +1072,22 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 }
 ```
 
+- `params` はパラメーターの名前（SQL に出てくる順）です。
+- `parameters` はパラメーターごとに 1 つで、`-- param:` を書いたものがその行の順に先、書いていないものがそのあとに SQL に出てくる順（`name` だけ）です。キーは書いたものだけが出ます（`multiple`、`optional`、`hidden` は `true` のときだけ。`label` と `default` は書いたとおりの文字）。
+- `key` は `-- key:` の列で、書いていなければありません。
+- 読めないファイルは `{ "name": …, "error": "…" }` です。
+
 `snapshots` は、作るスナップショットと、最後に作った時刻（まだなければ `null`）です。作れなかったときは `error` も付きます。
 
 `POST <場所>/api/query`（`Content-Type: application/json`）
 
 ```json
 { "name": "orders", "params": { "from": "2024-04-01" } }
+{ "name": "order_lines", "params": { "from": "2024-04-01", "to": null, "regions": ["関東", "近畿"] } }
 ```
+
+- `params` の値は、文字・数値・`true` / `false`・`null` と、複数の値のパラメーター（`text[]` など）には配列です。本文は 256 KB まで（超えると `413`）。
+- 名前が `user.` で始まるパラメーターは、いつも `400` です（ログインした人の値のために取ってあります）。
 
 - 成功: `200`、`Content-Type: application/vnd.apache.arrow.stream`（Arrow IPC のストリーム）。8 KB を超えて `Accept-Encoding: gzip` なら gzip で返す。行数は `X-DevBI-Rows` ヘッダー。
 - 失敗: `{ "error": "日本語のメッセージ" }` と、`400`（パラメーターや SQL の決まり違反）、`404`（その名前の SQL がない）、`405`、`413`、`415`（JSON 以外）、`422`（行が多すぎる）、`500`（データベースのエラー、接続先がない）。ブラウザはこのメッセージをタイルに出します。
@@ -1014,7 +1101,7 @@ npx devbi-serve --dir .     # http://127.0.0.1:8080/
 - `devbi-serve` では、まだなければ作ってから返し、`If-Modified-Since` に `304` で答えます。`models/` の `read_api` で使っていないものは `404` です。作れなかったときは、API と同じ `{ "error": … }` と、SQL の失敗なら同じ状態コード（行が多すぎれば `422`）を返します。
 - ファイル名は、`read_api` の名前とパラメーターから決めます。パラメーターがなければ `<名前>.arrows` です。あれば、引数の名前（小文字）を UTF-16 の順（JavaScript の `sort()`、C# の `StringComparer.Ordinal`）で並べた `[[名前, 値], …]` を JavaScript の `JSON.stringify` で書いた文字列（空白なし、日本語はそのまま）の UTF-8 に、FNV-1a（64 ビット）をかけた値を 16 桁の小文字の 16 進数にして、`<名前>~<16 桁>.arrows` とします。値は文字・数値・`true` / `false`・`null` で、数値は JavaScript の書き方です。`read_api('orders', from = '2024-04-01')` は `[["from","2024-04-01"]]` から `orders~9e979dd94c517434.arrows` になり、`read_api('売上', 地域 = '関東', n = 1.5, all = true, none = null)` は `[["all",true],["n",1.5],["none",null],["地域","関東"]]` から `売上~ada27a0b5a13b1c4.arrows` になります（devbi の `snapshotFile(name, params)`）。
 
-`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。`run(name, params)` で SQL を 1 つ実行し、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
+`createApiHandler({ dir, env?, maxRows?, timeoutMs?, exposeErrors?, log?, snapshotDir? })` は、この API を Node の `http` のハンドラーとして返します（`handle(req, res)` が `false` なら API 以外のリクエスト）。Web 標準の `Request` / `Response` で書くサーバー（Next.js の `route.ts` など）では `fetch(request)` を使います（API 以外のリクエストなら `undefined`）。`fetch` は gzip で返しません（[Next.js に置く](#nextjs-に置く)）。`run(name, params)` で SQL を 1 つ実行し（複数の値のパラメーターには配列を渡します）、`snapshots`（`make`、`catchUp`、`schedule`、`status` など）でスナップショットを扱えます。`snapshotDir` がなければ、スナップショットは聞かれるたびに作って保存しません。ホスト名の確認はしないので、自分のサーバーに組み込むときはそちらで確かめます（`isHostAllowed(req.headers.host, allowedHosts)` が使えます）。`serve(options)` は `devbi-serve` の中身で、`allowedHosts` も受け取ります。
 
 ## ASP.NET（C#）で API を出す
 
@@ -1100,11 +1187,11 @@ protected void Application_Start(object sender, EventArgs e)
 | `ExposeErrors` | データベースのエラーをそのままブラウザに返す（`devbi-serve` の `--debug`）。既定は `false` |
 | `Log` | 1 回ごとの行（`api/orders.sql: 6,044 行、381 ms`）と、エラーのくわしい内容を受け取る関数 |
 
-`api.RunAsync(name, parameters)` で SQL を 1 つ実行できます（戻り値は Arrow のバイト列と行数）。`api.HandleAsync(request)` は HTTP の 1 回分で、ほかの Web の仕組みにつなぐときに使います（パスから `schema` / `query` を取るのは `DevBIApi.ActionOf(path)`）。
+`api.RunAsync(name, parameters)` で SQL を 1 つ実行できます（戻り値は Arrow のバイト列と行数。複数の値のパラメーターには `string[]` などの配列を渡します）。`Dataset.Parse(name, text)` の `Parameters` と `Key` で、`-- param:` と `-- key:` の中身を読めます。`api.HandleAsync(request)` は HTTP の 1 回分で、ほかの Web の仕組みにつなぐときに使います（パスから `schema` / `query` を取るのは `DevBIApi.ActionOf(path)`）。
 
 ### `devbi-serve` との違い
 
-- SQL Server だけです。SQL は SQL Server の書き方（`[名前]` の引用符など）で確かめ、パラメーターは `@p1`、`@p2` … で渡します。型の受け取り方（[接続先](#接続先)の表）、状態コード、メッセージは `devbi-serve` と同じです。違うメッセージは、接続先がないとき（「DEVBI_DB の接続を DevBIOptions.Connect で返してください」）と、時間切れの案内（「`DevBIOptions.Timeout` で延ばせます」）だけです。
+- SQL Server だけです。SQL は SQL Server の書き方（`[名前]` の引用符など）で確かめ、パラメーターは `@p1`、`@p2` … で渡します。`-- param:` の型の確かめ方とメッセージ、日付の渡し方（`CAST(@p1 AS date)`）、複数の値の広げ方も `devbi-serve` と同じです。型の受け取り方（[接続先](#接続先)の表）、状態コード、メッセージは `devbi-serve` と同じです。違うメッセージは、接続先がないとき（「DEVBI_DB の接続を DevBIOptions.Connect で返してください」）と、時間切れの案内（「`DevBIOptions.Timeout` で延ばせます」）だけです。
 - `geography`・`geometry`・`hierarchyid` の列は、読めずにエラーになります。`location.STAsText() AS location` や `node.ToString() AS node` のように、SQL で文字にしてください。
 - スナップショットは作りません。`api/schema` の `snapshots` はいつも空です。`-- snapshot:` の行がある SQL のダッシュボードは、`devbi-snapshot`（Node）でサイトの `snapshots/` に作ったファイルがあればそれを、なければ API を読みます。
 - 知らないホスト名を断る仕組み（DNS リバインディングの対策）は持ちません。ASP.NET Core では `AllowedHosts`（appsettings.json）、IIS ではサイトのバインドにホスト名を書きます。

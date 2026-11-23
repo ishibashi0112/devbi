@@ -122,7 +122,7 @@ pnpm example:dev
 | --- | --- | --- |
 | 28 | `pnpm example:serve` を実行して <http://localhost:8080> を開き、「売上ダッシュボード（DB から）」を開く。期間の「全期間」を押す | 売上が ¥193,161,410 で、Excel の「売上ダッシュボード」の全期間と同じ。ターミナルに `api/orders.sql: 6,044 行` のような行が出る |
 | 29 | ブラウザの開発者ツールの「ネットワーク」で `query` を見る | 送っているのは `{"name":"orders","params":{"from":"2024-04-01"}}` だけで、SQL はブラウザに出てこない。絞り込みをしても `query` は増えない（ブラウザの中で集計し直している） |
-| 30 | <http://localhost:8080/api/schema> を開く | `orders` の説明とパラメーター `from` が JSON で出る |
+| 30 | <http://localhost:8080/api/schema> を開く | `order_lines`・`orders`・`regions`・`sales_daily` の 4 つの説明とパラメーターが JSON で出る。`orders` は `"params": ["from"]` と `"parameters": [{"name": "from", "type": "date", "label": "受注日（から）"}]`、`order_lines` は `"key": ["受注番号", "行番号"]` も持つ（型の書き方は 150〜154） |
 | 31 | `pnpm example:dev` で開き、`examples/sales/api/orders.sql` の最後の行の下に `AND c.region = '関東'` を足して保存 | ページが読み込み直され、DB 版のダッシュボードが関東だけの数字になる。消すと元に戻る |
 | 32 | 同じファイルの `SELECT` を `DELETE FROM orders` に変えて保存 | タイルに「API の orders を読めません（400）: api/orders.sql: SELECT か WITH で始まる文だけ使えます（DELETE で始まっています）」と出る。戻すと直る |
 | 33 | `pnpm example:dev` を動かしたまま <http://localhost:5173/api/orders.sql> と <http://localhost:5173/db/sales.sqlite> を開く | どちらも 403 で、中身は出ない（SQL とデータベースはサーバーだけが使う） |
@@ -179,7 +179,7 @@ pnpm example:dev
 | --- | --- | --- |
 | 55 | `pnpm example:build` のあと、`ConnectionStrings__DEVBI_DB="Server=127.0.0.1,1433;Database=master;User Id=sa;Password=DevBI_test1;TrustServerCertificate=true" dotnet run --project dotnet/samples/DevBI.Sample -- --urls http://127.0.0.1:4179`（Windows の PowerShell では `$env:ConnectionStrings__DEVBI_DB="…"` を先に実行） | `Now listening on: http://127.0.0.1:4179` と出る |
 | 56 | <http://127.0.0.1:4179/#/sales-db> を開き、「全期間」を押す | 売上が ¥193,161,410。ターミナルに `api/orders.sql: 6,044 行、… ms` が出る |
-| 57 | <http://127.0.0.1:4179/api/schema> を開く | `orders` と `sales_daily` が並び、最後の `snapshots` は `[]`（C# の見本はスナップショットを作らない）。「売上の日次集計」は API から読むので、見出しの下の「…の時点」は出ない |
+| 57 | <http://127.0.0.1:4179/api/schema> を開く | `order_lines`・`orders`・`regions`・`sales_daily` が 30 と同じ `parameters` と `key` で並び、最後の `snapshots` は `[]`（C# の見本はスナップショットを作らない）。「売上の日次集計」は API から読むので、見出しの下の「…の時点」は出ない |
 | 58 | 55 の `ConnectionStrings__DEVBI_DB` を付けずに起動し、56 を開く | タイルに「接続先がありません。DEVBI_DB の接続を DevBIOptions.Connect で返してください」 |
 | 59 | `DEVBI_TEST_MSSQL=mssql://sa:DevBI_test1@127.0.0.1:1433/master dotnet test dotnet/DevBI.sln` | `Passed!` と出て、`Failed:` が 0 |
 
@@ -194,7 +194,7 @@ WebForms（.NET Framework）の `DevBIHttpHandler` は、Windows の IIS でだ�
 | 60 | `pnpm example:nextjs` | `examples/sales/dist` を `public/devbi` に写し、`next build` のあと `Ready` と出る。初回は `[devbi] スナップショット sales_daily~9e979dd94c517434.arrows（api/sales_daily.sql）: 4,014 行、… ms` も出る |
 | 61 | <http://127.0.0.1:3000/> を開き、ダッシュボードの「全期間」を押す | 紺の帯（社内ポータル）の下に赤い見出し「売上」と、「売上ダッシュボード（DB から）」。売上が ¥193,161,410。ダッシュボードの見出しは赤くならない。ターミナルに `[devbi] api/orders.sql: 6,044 行、… ms` |
 | 62 | 上の帯の「日次集計（毎朝）」を押す | ページを読み込み直さずに「売上の日次集計」に変わり、見出しの下に「データは …の時点（毎日 6:00 に更新）」。「全期間」で ¥193,161,410。ブラウザの「戻る」で 61 のダッシュボードに戻る |
-| 63 | <http://127.0.0.1:3000/devbi/api/schema> を開く | `orders` と `sales_daily` が並び、`snapshots` に `updatedAt`（60 で作った時刻）がある |
+| 63 | <http://127.0.0.1:3000/devbi/api/schema> を開く | `order_lines`・`orders`・`regions`・`sales_daily` が並び、`snapshots` に `updatedAt`（60 で作った時刻）がある |
 | 64 | 60 を止め、`pnpm --filter devbi-example-nextjs dev` で開発サーバーを動かし、61 を開く | 同じ金額が出る（開発サーバーでも route.ts の API が動く） |
 | 65 | （SQL Server があるとき）50 の `copy-db` と `pnpm --filter devbi-example-nextjs build` のあと、`DEVBI_DB=mssql://sa:DevBI_test1@127.0.0.1:1433/master DEVBI_SNAPSHOTS=snapshots-mssql pnpm --filter devbi-example-nextjs start` で起動し、61 を開く | 同じ ¥193,161,410。ターミナルに `[devbi] api/orders.sql: 6,044 行` が出て、「mssql が要ります」は出ない |
 | 66 | `pnpm e2e:nextjs` | `4 passed` |
@@ -360,6 +360,24 @@ README.md と docs/*.md（`handoff.md` を除く）を、VitePress（`docs/.vite
 | 147 | 上の検索（Ctrl+K、Mac は ⌘K）に「スナップショット」、次に「埋め込む」と入れる | どちらもリファレンス・社内に公開する・動作チェックの手順の見出しが出て、押すとその見出しに動く（日本語の単語で引ける） |
 | 148 | 「ライブデモ」を押す | `pnpm docs:dev` では 404（デモはサイトに入っていないため）。公開したサイトではデモが開く（143） |
 | 149 | `pnpm docs:build` | 「build complete」で `docs/.vitepress/dist/` にできる。ページ・ファイル・見出し（`#…`）へのリンクが切れていると、どのファイルのどのリンクかを出して止まる |
+
+### SQL のパラメーターの型と複数の値
+
+`examples/sales/api/order_lines.sql` は、先頭の `-- param:` の行でパラメーターの型を決めています（受注日の「から」「まで」は日付、地域は複数の文字。書き方は[リファレンス](reference.md#パラメーターの型---param)）。サーバーは、型に合わない値を SQL に渡す前に断ります。下の curl は、どれも `pnpm example:serve` を動かしたまま、次のコマンドの `-d '…'` の中身を表のとおりに変えて実行します。
+
+```sh
+curl -s -X POST -H "Content-Type: application/json" -d '{"name":"order_lines","params":{"from":"2024-04-01","to":null,"regions":["関東","近畿"]}}' http://localhost:8080/api/query -o /dev/null -w "%{http_code} %header{x-devbi-rows}\n"
+```
+
+| # | すること | 期待する結果 |
+| --- | --- | --- |
+| 150 | 上のコマンドをそのまま実行し、次に `"regions":["関東","近畿"]` を `"regions":"関東"` にする | `200 3647`（関東と近畿の 2024/4/1 からの明細）、次は `200 2322`（配列でない 1 つの値は、1 つだけの一覧として読む） |
+| 151 | `"from":"2024-04-01"` を `"from":"2024/04/01"` に、次に `"to":null` を `"to":"2024-04-31"` にする（`-o /dev/null` を外すと文も出る） | どちらも `400`。文は「api/order_lines.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（"2024/04/01" が来ました）」と、`to` の同じ文（4 月 31 日はない日） |
+| 152 | `"regions":[]` にする | `400` で「パラメーター regions に 1 つ以上の値を渡してください」 |
+| 153 | `params` の中に `"user.region":"関東"` を足す | `400` で「パラメーター user.region は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）」（ブラウザから、ログインした人の値を装えない） |
+| 154 | `order_lines.sql` の `-- param: to date` を `-- param: to day` に変えて保存し、<http://localhost:8080/api/schema> を開く。150 のコマンドも実行する | `order_lines` は `error` だけになり「api/order_lines.sql（4 行目）: 型 day は使えません。text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）」。curl も `400`。`date` に戻すと直る |
+
+ASP.NET（C#）の見本（55）でも、アドレスを `http://127.0.0.1:4179/api/query` にして 150〜153 が同じ結果になります。Next.js の見本（61）では `http://127.0.0.1:3000/devbi/api/query` です。SQL Server・Oracle・MySQL（50〜53）でも同じ行数です。
 
 ## 4. 自分の Excel で試す
 

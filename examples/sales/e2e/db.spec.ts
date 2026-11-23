@@ -25,9 +25,23 @@ test("a dashboard reads a database through the API and shows the same numbers as
 
 test("the API lists its SQL files and answers in Japanese when something is wrong", async ({ request }) => {
   const schema = await (await request.get("/api/schema")).json();
+  const from = { name: "from", type: "date", label: "受注日（から）" };
   expect(schema.datasets).toEqual([
-    { name: "orders", description: expect.stringContaining("受注の明細"), params: ["from"], connection: "DEVBI_DB" },
-    { name: "sales_daily", description: expect.stringContaining("日・地域・商品分類"), params: ["from"], connection: "DEVBI_DB", snapshot: ["06:00"] },
+    {
+      name: "order_lines",
+      description: expect.stringContaining("受注日と地域で絞る"),
+      params: ["from", "to", "regions"],
+      parameters: [
+        { ...from, default: "fiscal_year_start" },
+        { name: "to", type: "date", label: "受注日（まで）", optional: true },
+        { name: "regions", type: "text", multiple: true, label: "地域", default: "all", values: "regions" },
+      ],
+      key: ["受注番号", "行番号"],
+      connection: "DEVBI_DB",
+    },
+    { name: "orders", description: expect.stringContaining("受注の明細"), params: ["from"], parameters: [from], connection: "DEVBI_DB" },
+    { name: "regions", description: expect.stringContaining("地域の一覧"), params: [], parameters: [], connection: "DEVBI_DB" },
+    { name: "sales_daily", description: expect.stringContaining("日・地域・商品分類"), params: ["from"], parameters: [from], connection: "DEVBI_DB", snapshot: ["06:00"] },
   ]);
   // The snapshots, and when each was made (devbi-serve makes a missing one when it starts, or when it is asked for).
   expect(schema.snapshots).toEqual([expect.objectContaining({ name: "sales_daily", params: { from: "2024-04-01" }, times: ["06:00"], models: ["sales_daily"] })]);
@@ -36,6 +50,11 @@ test("the API lists its SQL files and answers in Japanese when something is wron
   const res = await request.post("/api/query", { data: { name: "orders", params: {} } });
   expect(res.status()).toBe(400);
   expect((await res.json()).error).toBe("api/orders.sql: パラメーター :from の値がありません。read_api('orders', from = ...) と書きます");
+  // Several values for a text[] parameter, and the types checked (the same answers from the C# reference)
+  const lines = await request.post("/api/query", { data: { name: "order_lines", params: { from: "2024-04-01", to: null, regions: ["関東", "近畿"] } } });
+  expect(lines.status()).toBe(200);
+  const bad = await request.post("/api/query", { data: { name: "order_lines", params: { from: "2024/04/01", to: null, regions: ["関東"] } } });
+  expect([bad.status(), (await bad.json()).error]).toEqual([400, `api/order_lines.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（"2024/04/01" が来ました）`]);
 });
 
 test("no rows, or a computed column with only NULLs: the tiles still work", async ({ page }) => {

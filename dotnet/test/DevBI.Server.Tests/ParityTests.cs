@@ -33,6 +33,14 @@ namespace DevBI.Server.Tests
                 _ => throw new InvalidOperationException(v.GetType().Name),
             };
 
+        /// <summary>A parameter as api/schema writes it.</summary>
+        private static JsonNode ParameterJson(DatasetParameter p)
+        {
+            using var stream = new MemoryStream();
+            using (var w = new System.Text.Json.Utf8JsonWriter(stream)) p.WriteJson(w);
+            return JsonNode.Parse(stream.ToArray())!;
+        }
+
         /// <summary>Each case's answer from the C# code next to the TypeScript one; the cases that differ.</summary>
         private static void Compare(string group, Func<JsonObject, (string label, JsonNode? expected, JsonNode? actual)> check)
         {
@@ -108,6 +116,8 @@ namespace DevBI.Server.Tests
                         ["snapshot"] = d.Snapshot == null ? null : Strings(d.Snapshot),
                         ["sql"] = d.Sql,
                         ["params"] = Strings(d.Params),
+                        ["parameters"] = new JsonArray(d.Parameters.Select(p => (JsonNode?)ParameterJson(p)).ToArray()),
+                        ["key"] = d.Key == null ? null : Strings(d.Key),
                     };
                 }
                 catch (DatasetException e)

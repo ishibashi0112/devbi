@@ -100,14 +100,14 @@ describe("createApiHandler: fetch (the web's Request / Response) and handle (Nod
     expect((await error(await post({ name: "writes" })))[0]).toBe(400);
     expect((await error(await post("{", { "Content-Type": "application/json" })))[0]).toBe(400);
     expect((await error(await post({ name: "orders", params: { from: "x" } }, { "Content-Type": "text/plain" })))[0]).toBe(415);
-    expect(await error(await post({ name: "orders", params: { from: "x".repeat(70_000) } }))).toEqual([413, "リクエストが大きすぎます"]);
+    expect(await error(await post({ name: "orders", params: { from: "x".repeat(270_000) } }))).toEqual([413, "リクエストが大きすぎます"]);
     expect(await error(await ask("api/query"))).toEqual([405, "POST で呼んでください"]);
     expect(await error(await ask("api/schema", { method: "POST" }))).toEqual([405, "GET で呼んでください"]);
     expect(await error(await ask(`snapshots/${daily}`, { method: "DELETE" }))).toEqual([405, "GET で呼んでください"]);
     expect(await error(await ask("snapshots/%E3%81.arrows"))).toEqual([404, "スナップショットの名前を読めません"]);
   });
 
-  it("a body over 64 KB: 413, and the rest is not read (the browser's stream is cancelled)", async () => {
+  it("a body over 256 KB: 413, and the rest is not read (the browser's stream is cancelled)", async () => {
     let pulls = 0;
     let cancelled = false;
     const endless = new ReadableStream<Uint8Array>({
@@ -122,7 +122,7 @@ describe("createApiHandler: fetch (the web's Request / Response) and handle (Nod
     const init = { method: "POST", headers: { "Content-Type": "application/json" }, body: endless, duplex: "half" } as RequestInit;
     expect(await error(await ask("api/query", init))).toEqual([413, "リクエストが大きすぎます"]);
     expect(cancelled).toBe(true);
-    expect(pulls).toBeLessThan(10);
+    expect(pulls).toBeLessThan(25);
   });
 
   it("snapshots: made when missing, then streamed from the file, with 304 and HEAD", async () => {

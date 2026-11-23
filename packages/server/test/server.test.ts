@@ -4,7 +4,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { tableFromIPC } from "apache-arrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bindParameters, connectionOf, isHostAllowed, parameters, parseDataset, readOnlyProblem, serve, toArrowTable, type RunningServer } from "../src/index.js";
+import { bindParameters, connectionOf, createApiHandler, isHostAllowed, parameters, parseDataset, readOnlyProblem, serve, toArrowTable, type ApiHandler, type RunningServer } from "../src/index.js";
+import { SAMPLE_DB, typedParameterTests, writeTypedDatasets } from "./typed-cases.js";
 
 describe("parameters", () => {
   it("finds :name outside quotes and comments, not casts", () => {
@@ -58,6 +59,188 @@ describe("bindParameters", () => {
     expect(() => bindParameters(d, "postgres", { from: "x", to: "y", region: "関東" })).toThrow(/region はありません/);
     expect(() => bindParameters(d, "postgres", { from: "x", to: { a: 1 } })).toThrow(/文字・数値・真偽・null/);
   });
+  it("names starting with user. are the signed-in user's: never from the request", () => {
+    const u = parseDataset("u", "SELECT * FROM t WHERE r = :user");
+    expect(() => bindParameters(u, "postgres", { "user.region": "関東", user: "x" })).toThrow(/user.region は渡せません/);
+    expect(() => bindParameters(u, "postgres", { "USER.id": 1, user: "x" })).toThrow(/USER.id は渡せません/);
+    // a parameter named user itself is fine (until a project uses row-level security)
+    expect(bindParameters(u, "postgres", { user: "x" }).params).toEqual(["x"]);
+  });
+});
+
+describe("-- param: and -- key:", () => {
+  const text = [
+    "-- 受注の明細",
+    "-- param: from date label=受注日（から） default=month_start",
+    "-- param: regions text[] label=\"地域 （複数）\" values=regions default=all",
+    "--param:customer integer optional hidden",
+    "-- key: 受注番号, \"行, 番号\"",
+    "",
+    "-- 説明の 2 行目",
+    "-- param: status text default=\"受付 \"\"中\"\"\"",
+    "SELECT * FROM t WHERE d >= :from AND r IN (:Regions) AND (:customer IS NULL OR c = :customer) AND s = :status AND x = :plain",
+  ].join("\n");
+  it("reads the lines at the top: types, labels, defaults, choices, flags, and the key", () => {
+    const d = parseDataset("lines", text, "postgres");
+    expect(d.description).toBe("説明の 2 行目");
+    expect(d.params).toEqual(["from", "Regions", "customer", "status", "plain"]);
+    expect(d.parameters).toEqual([
+      { name: "from", type: "date", label: "受注日（から）", default: "month_start" },
+      { name: "regions", type: "text", multiple: true, label: "地域 （複数）", default: "all", values: "regions" },
+      { name: "customer", type: "integer", optional: true, hidden: true },
+      { name: "status", type: "text", default: '受付 "中"' },
+      { name: "plain" },
+    ]);
+    expect(d.key).toEqual(["受注番号", "行, 番号"]);
+  });
+  it("says which line is wrong, and what", () => {
+    const err = (head: string, sql = "SELECT * FROM t WHERE d = :d AND r IN (:r)") => {
+      try {
+        parseDataset("x", `-- 説明\n${head}\n${sql}`);
+      } catch (e) {
+        return (e as Error).message;
+      }
+      return "no error";
+    };
+    expect(err("-- param: d")).toBe("api/x.sql（2 行目）: パラメーター d の型がありません。text・integer・number・date・datetime・boolean のどれかを書いてください（複数の値は text[] のように）");
+    expect(err("-- param:")).toMatch(/2 行目）: -- param: のあとにパラメーターの名前と型/);
+    expect(err("-- param: d day")).toMatch(/型 day は使えません/);
+    expect(err("-- param: nope date")).toBe("api/x.sql（2 行目）: パラメーター nope は SQL にありません（SQL に :nope と書くか、この行を消してください）");
+    expect(err("-- param: d date\n-- param: D date")).toBe("api/x.sql（3 行目）: パラメーター D の -- param: が 2 つあります（2 行目にも）");
+    expect(err("-- param: d date colour=red")).toMatch(/colour は知らない指定です。label・default・values・optional・hidden を書けます/);
+    expect(err("-- param: d date label")).toMatch(/label には値を書いてください/);
+    expect(err("-- param: d date optional=yes")).toMatch(/optional は値を付けずに書きます/);
+    expect(err("-- param: d date label=a label=b")).toMatch(/label が 2 回あります/);
+    expect(err('-- param: d date label="a')).toMatch(/" が閉じていません/);
+    expect(err("-- param: r text[] optional")).toMatch(/複数の値（text\[\]）には optional を付けられません/);
+    expect(err("-- param: user.region text")).toMatch(/user. で始まる名前は、ログインした人の値のために取ってあるので使えません/);
+    expect(err("-- param: d integer default=1.5")).toMatch(/default=1.5 は integer の値として読めません/);
+    expect(err("-- param: d date default=2024-02-30")).toMatch(/default=2024-02-30 は date の値として読めません/);
+    expect(err("-- param: d date default=today+")).toMatch(/default=today\+ は date の値として読めません/);
+    expect(err("-- param: r integer[] default=1,,2")).toMatch(/空の値があります/);
+    expect(err("-- param: r integer[] default=all")).toMatch(/default の all は integer\[\] の値として読めません/);
+    expect(err("-- param: d boolean default=yes")).toMatch(/default=yes は boolean の値として読めません/);
+    expect(err("-- param: d date values=../x")).toMatch(/values には候補を出すデータセットの名前/);
+    expect(err("-- key:")).toMatch(/-- key: のあとに、行を見分ける列の名前/);
+    expect(err("-- key: a, a")).toMatch(/列 a が 2 回あります/);
+    expect(err("-- key: a\n-- key: b")).toMatch(/3 行目）: -- key: が 2 つあります（2 行目にも）/);
+    expect(err('-- key: "a" b')).toMatch(/"a" のあとは , で区切ります/);
+    // a multiple-value parameter only as IN (:x)
+    expect(err("-- param: r text[]", "SELECT * FROM t\nWHERE d = :d\n  AND r = :r")).toBe("api/x.sql（5 行目）: :r は複数の値（text[]）なので、IN (:r) の形でだけ使えます");
+    expect(err("-- param: r text[]", "SELECT * FROM t WHERE d = :d AND r IN (:r, 'x')")).toMatch(/IN \(:r\) の形でだけ/);
+    expect(err("-- param: r text[]", "SELECT * FROM t WHERE d = :d AND rIN (:r)")).toMatch(/IN \(:r\) の形でだけ/);
+    expect(err("-- param: r text[]", "SELECT * FROM t WHERE d = :d AND r NOT IN(\n  :r\n)")).toBe("no error");
+  });
+  it("accepts the defaults the browser reads", () => {
+    const ok = (head: string) => parseDataset("x", `${head}\nSELECT * FROM t WHERE a = :a`).parameters[0];
+    expect(ok("-- param: a date default=today-30")).toMatchObject({ default: "today-30" });
+    expect(ok("-- param: a datetime default=2024-04-01T09:00")).toMatchObject({ default: "2024-04-01T09:00" });
+    expect(ok("-- param: a text default=all")).toMatchObject({ default: "all" });
+    expect(ok('-- param: a text default=""')).toMatchObject({ default: "" });
+    expect(ok("-- param: a number default=-1.5e3")).toMatchObject({ default: "-1.5e3" });
+    expect(ok("-- param: a boolean default=false")).toMatchObject({ default: "false" });
+    expect(ok("-- param: a  text   label=名前")).toMatchObject({ label: "名前" });
+  });
+  it("only the comment lines at the top count, as for -- connection:, and one further down is an error", () => {
+    expect(parseDataset("x", "-- param: a date\n\n\n-- 説明\nSELECT * FROM t WHERE a = :a").parameters).toEqual([{ name: "a", type: "date" }]);
+    const late = "は、ファイルの先頭から続く -- のコメントの中に書いてください（SQL や /* */ よりあとの行は読みません）";
+    expect(() => parseDataset("x", "SELECT * FROM t WHERE a = :a\n-- param: a date")).toThrow(`api/x.sql（2 行目）: -- param: ${late}`);
+    expect(() => parseDataset("x", "/* 受注 */\n-- param: a date\nSELECT * FROM t WHERE a = :a")).toThrow(`api/x.sql（2 行目）: -- param: ${late}`);
+    expect(() => parseDataset("x", "-- 説明\nSELECT * FROM t\n  -- KEY : id\nWHERE a = :a")).toThrow(`api/x.sql（3 行目）: -- key: ${late}`);
+    // not a line of its own, or not param / key
+    expect(parseDataset("x", "SELECT * FROM t WHERE a = :a -- param: a date\n-- keys: a").parameters).toEqual([{ name: "a" }]);
+  });
+});
+
+describe("bindParameters with -- param: types", () => {
+  const typed = parseDataset(
+    "typed",
+    [
+      "-- param: from date",
+      "-- param: at datetime optional",
+      "-- param: n integer",
+      "-- param: r number",
+      "-- param: ok boolean",
+      "-- param: s text",
+      "-- param: regions text[]",
+      "SELECT * FROM t WHERE d >= :from AND t < :at AND n = :n AND r = :r AND ok = :ok AND s = :s AND x IN (:regions) AND d < :from",
+    ].join("\n"),
+  );
+  const values = { from: "2024-04-01", at: "2024-04-01T09:00", n: 10, r: 1.5, ok: true, s: "関東", regions: ["関東", "近畿"] };
+  it("PostgreSQL: every typed value cast, several values one placeholder each", () => {
+    expect(bindParameters(typed, "postgres", values)).toEqual({
+      sql:
+        "SELECT * FROM t WHERE d >= CAST($1 AS date) AND t < CAST($2 AS timestamp) AND n = CAST($3 AS bigint) AND r = CAST($4 AS numeric) AND ok = CAST($5 AS boolean)" +
+        " AND s = CAST($6 AS text) AND x IN (CAST($7 AS text), CAST($8 AS text)) AND d < CAST($1 AS date)",
+      params: ["2024-04-01", "2024-04-01 09:00:00", 10, 1.5, true, "関東", "関東", "近畿"],
+    });
+  });
+  it("SQL Server, Oracle, MySQL: dates and times read in ISO form; SQLite: as text", () => {
+    expect(bindParameters(typed, "mssql", values).sql).toBe(
+      "SELECT * FROM t WHERE d >= CAST(@p1 AS date) AND t < CAST(@p2 AS datetime2) AND n = @p3 AND r = @p4 AND ok = @p5 AND s = @p6 AND x IN (@p7, @p8) AND d < CAST(@p1 AS date)",
+    );
+    expect(bindParameters(typed, "oracle", values).sql).toBe(
+      "SELECT * FROM t WHERE d >= TO_DATE(:p1, 'YYYY-MM-DD') AND t < TO_DATE(:p2, 'YYYY-MM-DD HH24:MI:SS') AND n = :p3 AND r = :p4 AND ok = :p5 AND s = :p6 AND x IN (:p7, :p8) AND d < TO_DATE(:p1, 'YYYY-MM-DD')",
+    );
+    expect(bindParameters(typed, "oracle", { ...values, at: "2024-04-01 09:00:00.25" }).sql).toContain("TO_TIMESTAMP(:p2, 'YYYY-MM-DD HH24:MI:SS.FF')");
+    const mysql = bindParameters(typed, "mysql", values);
+    expect(mysql.sql).toBe("SELECT * FROM t WHERE d >= CAST(? AS DATE) AND t < CAST(? AS DATETIME(6)) AND n = ? AND r = ? AND ok = ? AND s = ? AND x IN (?, ?) AND d < CAST(? AS DATE)");
+    expect(mysql.params).toEqual(["2024-04-01", "2024-04-01 09:00:00", 10, 1.5, true, "関東", "関東", "近畿", "2024-04-01"]);
+    const sqlite = bindParameters(typed, "sqlite", values);
+    expect(sqlite.sql).toBe("SELECT * FROM t WHERE d >= ? AND t < ? AND n = ? AND r = ? AND ok = ? AND s = ? AND x IN (?, ?) AND d < ?");
+    expect(sqlite.params).toEqual(["2024-04-01", "2024-04-01 09:00:00", 10n, 1.5, 1n, "関東", "関東", "近畿", "2024-04-01"]);
+  });
+  it("checks each value against its type", () => {
+    const bad = (patch: Record<string, unknown>) => {
+      try {
+        bindParameters(typed, "postgres", { ...values, ...patch });
+      } catch (e) {
+        expect((e as { status?: number }).status).toBe(400);
+        return (e as Error).message;
+      }
+      return "no error";
+    };
+    expect(bad({ from: "2024-02-30" })).toBe(`api/typed.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（"2024-02-30" が来ました）`);
+    expect(bad({ from: 20240401 })).toMatch(/from には日付/);
+    expect(bad({ from: null })).toBe("api/typed.sql: パラメーター from の値がありません（null にできるのは -- param: に optional を付けたパラメーターだけです）");
+    expect(bad({ at: null })).toBe("no error");
+    expect(bad({ at: "2024-04-01T24:00" })).toMatch(/at には日時/);
+    expect(bad({ at: "2024-04-01T09:00Z" })).toMatch(/at には日時/);
+    expect(bad({ at: "2024-04-01" })).toBe("no error");
+    expect(bad({ n: 1.5 })).toMatch(/n には整数を渡してください（1.5 が来ました）/);
+    expect(bad({ n: "10" })).toMatch(/n には整数/);
+    expect(bad({ n: 2 ** 60 })).toMatch(/n には整数/);
+    expect(bad({ r: "1.5" })).toMatch(/r には数値/);
+    expect(bad({ ok: 1 })).toMatch(/ok には真偽（true か false）を渡してください/);
+    expect(bad({ s: 1 })).toMatch(/s には文字/);
+    expect(bad({ s: "x".repeat(4001) })).toBe("api/typed.sql: パラメーター s の文字が長すぎます（4,000 文字まで）");
+    expect(bad({ s: ["a"] })).toMatch(/s は 1 つの値です（複数の値にするには -- param: の型を text\[\] にします）/);
+    expect(bad({ regions: [] })).toBe("api/typed.sql: パラメーター regions に 1 つ以上の値を渡してください");
+    expect(bad({ regions: null })).toMatch(/regions に 1 つ以上の値/);
+    expect(bad({ regions: ["a", null] })).toMatch(/regions の値に null は入れられません/);
+    expect(bad({ regions: ["a", 1] })).toMatch(/regions には文字/);
+    expect(bad({ regions: "関東" })).toBe("no error");
+    expect(bad({ regions: Array.from({ length: 1001 }, (_, i) => String(i)) })).toMatch(/regions の値が 1,001 個あります。1 つのパラメーターに渡せるのは 1,000 個までです/);
+  });
+  it("2,000 placeholders at most in one statement (MySQL and SQLite count each place)", () => {
+    const twice = parseDataset("twice", "-- param: ids integer[]\nSELECT * FROM t WHERE a IN (:ids) OR b IN (:ids) OR c IN (:ids)");
+    const ids = Array.from({ length: 700 }, (_, i) => i);
+    expect(bindParameters(twice, "postgres", { ids }).params).toHaveLength(700);
+    expect(() => bindParameters(twice, "mysql", { ids })).toThrow(/全部で 2,100 個になります。1 つの SQL に渡せるのは 2,000 個までです/);
+  });
+});
+
+describe("typed parameters on SQLite", () => {
+  let api: ApiHandler;
+  beforeAll(() => {
+    const dir = mkdtempSync(path.join(tmpdir(), "devbi-typed-"));
+    writeTypedDatasets(dir, "sqlite");
+    api = createApiHandler({ dir, env: { DEVBI_DB: `sqlite:${SAMPLE_DB}` }, exposeErrors: true });
+  });
+  afterAll(async () => {
+    await api?.close();
+  });
+  typedParameterTests(() => api, "sqlite");
 });
 
 describe("toArrowTable", () => {
@@ -169,6 +352,10 @@ describe("devbi-serve (SQLite)", () => {
     writeFileSync(path.join(dir, "api", "events.sql"), "SELECT id AS [update], at, code, disc, rate, done FROM events WHERE code = :code OR :all = 1");
     writeFileSync(path.join(dir, "api", "computed.sql"), "SELECT region, qty * 2 AS twice, NULL AS blank FROM orders WHERE order_date >= :from");
     writeFileSync(path.join(dir, "api", "twice.sql"), "SELECT o.id, e.id FROM orders o JOIN events e ON e.id = o.id");
+    writeFileSync(
+      path.join(dir, "api", "typed.sql"),
+      "-- 地域で絞る\n-- param: regions text[] label=地域 values=regions_list\n-- param: from date optional\n-- key: id\nSELECT id, region FROM orders WHERE region IN (:regions) AND (:from IS NULL OR order_date >= :from)\n",
+    );
     writeFileSync(path.join(dir, "dist", "index.html"), "<!doctype html><title>t</title>");
     writeFileSync(path.join(dir, "dist", "data.csv"), "a,b\n1,2\n3,4\n");
     writeFileSync(path.join(dir, "dist", "assets", "index-AbCdEf12.js"), "console.log(1)");
@@ -185,6 +372,29 @@ describe("devbi-serve (SQLite)", () => {
     expect(body.datasets.find((d) => d.name === "orders")).toMatchObject({ description: "受注", params: ["from"], connection: "DEVBI_DB" });
     expect(body.datasets.find((d) => d.name === "erp")).toMatchObject({ connection: "DEVBI_DB_ERP" });
     expect(body.datasets.find((d) => d.name === "writes")?.error).toMatch(/SELECT か WITH/);
+    expect(body.datasets.find((d) => d.name === "orders")).toMatchObject({ parameters: [{ name: "from" }] });
+    expect(body.datasets.find((d) => d.name === "orders")).not.toHaveProperty("key");
+    expect(body.datasets.find((d) => d.name === "typed")).toEqual({
+      name: "typed",
+      description: "地域で絞る",
+      params: ["regions", "from"],
+      parameters: [
+        { name: "regions", type: "text", multiple: true, label: "地域", values: "regions_list" },
+        { name: "from", type: "date", optional: true },
+      ],
+      key: ["id"],
+      connection: "DEVBI_DB",
+    });
+  });
+
+  it("query takes several values for a text[] parameter, checks types, and refuses user. names", async () => {
+    const res = await post({ name: "typed", params: { regions: ["関東", "九州"], from: null } });
+    expect(res.status).toBe(200);
+    expect(tableFromIPC(new Uint8Array(await res.arrayBuffer())).numRows).toBe(2);
+    const bad = await post({ name: "typed", params: { regions: ["関東"], from: "4/1" } });
+    expect([bad.status, ((await bad.json()) as { error: string }).error]).toEqual([400, `api/typed.sql: パラメーター from には日付（'2024-04-01' の形の文字）を渡してください（"4/1" が来ました）`]);
+    const user = await post({ name: "typed", params: { regions: ["関東"], from: null, "user.region": "関東" } });
+    expect([user.status, ((await user.json()) as { error: string }).error]).toEqual([400, "api/typed.sql: パラメーター user.region は渡せません（user. で始まる名前は、ログインした人の値のために取ってあります）"]);
   });
 
   it("query returns Arrow with dates as dates", async () => {

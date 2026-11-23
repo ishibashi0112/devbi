@@ -102,7 +102,8 @@ namespace DevBI.Server
     public sealed class DevBIApi
     {
         public const string ArrowStreamType = "application/vnd.apache.arrow.stream";
-        private const int MaxBody = 64 * 1024;
+        /// <summary>Room for a multiple-value parameter: up to 1,000 values.</summary>
+        private const int MaxBody = 256 * 1024;
         private const string TimeoutHint = "DevBIOptions.Timeout で延ばせます";
 
         private static readonly JsonWriterOptions JsonOptions = new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -218,6 +219,15 @@ namespace DevBI.Server
                         w.WriteStartArray("params");
                         foreach (var p in d.Params) w.WriteStringValue(p);
                         w.WriteEndArray();
+                        w.WriteStartArray("parameters");
+                        foreach (var p in d.Parameters) p.WriteJson(w);
+                        w.WriteEndArray();
+                        if (d.Key != null)
+                        {
+                            w.WriteStartArray("key");
+                            foreach (var k in d.Key) w.WriteStringValue(k);
+                            w.WriteEndArray();
+                        }
                         w.WriteString("connection", Dataset.ConnectionVariable(d.Connection));
                         if (d.Snapshot != null)
                         {
@@ -253,8 +263,9 @@ namespace DevBI.Server
         }
 
         /// <summary>
-        /// Run <c>api/&lt;name&gt;.sql</c> with the parameters (text, numbers, booleans or null): the Arrow IPC stream
-        /// <c>POST …/api/query</c> answers, and its row count. Throws <see cref="ApiException"/> or <see cref="DatasetException"/>.
+        /// Run <c>api/&lt;name&gt;.sql</c> with the parameters (text, numbers, booleans or null; a list such as <c>string[]</c> for
+        /// a multiple-value parameter): the Arrow IPC stream <c>POST …/api/query</c> answers, and its row count. Throws
+        /// <see cref="ApiException"/> or <see cref="DatasetException"/>.
         /// </summary>
         public async Task<QueryResult> RunAsync(string name, IEnumerable<KeyValuePair<string, object?>>? parameters = null, CancellationToken cancellationToken = default)
         {
@@ -314,6 +325,9 @@ namespace DevBI.Server
                     return Normalize((double)f);
                 case decimal m:
                     return Normalize((double)m);
+                // a list for a multiple-value parameter (string[], List<int>…): its values the same way
+                case System.Collections.IList list:
+                    return list.Cast<object?>().Select(Normalize).ToList();
                 // whole numbers as BIGINT up to its limit, as Node's mssql package sends them (2^63 is a double exactly)
                 case double d when Math.Floor(d) == d && Math.Abs(d) < 9223372036854775808.0:
                     return (long)d;
@@ -412,9 +426,15 @@ namespace DevBI.Server
             return output;
         }
 
-        /// <summary>A JSON value as Bind takes it: text, a number, a boolean, null, or (an object or an array) the element, which Bind refuses.</summary>
-        internal static object? ValueOf(JsonElement v)
+        /// <summary>
+        /// A JSON value as Bind takes it: text, a number, a boolean, null, a list of those for an array (for a
+        /// multiple-value parameter), or (an object, an array in an array) the element, which Bind refuses.
+        /// </summary>
+        internal static object? ValueOf(JsonElement v) => ValueOf(v, true);
+
+        private static object? ValueOf(JsonElement v, bool top)
         {
+            if (top && v.ValueKind == JsonValueKind.Array) return v.EnumerateArray().Select(x => ValueOf(x, false)).ToList();
             switch (v.ValueKind)
             {
                 case JsonValueKind.String:

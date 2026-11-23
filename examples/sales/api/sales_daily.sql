@@ -1,6 +1,7 @@
 -- 日・地域・商品分類ごとの売上と数量。受注日が :from 以降のもの。
 -- 明細を 1 行ずつ渡す api/orders.sql と違い、データベースで集計して行を減らし、毎朝 6:00 に作ったものを読む。
 -- snapshot: 06:00
+-- param: from date label=受注日（から）
 SELECT o.order_date AS 受注日, c.region AS 地域, p.category AS 商品分類,
        SUM(l.qty * l.unit_price) AS 金額, SUM(l.qty) AS 数量, COUNT(*) AS 明細数
   FROM orders o

@@ -55,7 +55,8 @@ export interface ApiHandler {
 }
 
 export const ARROW_STREAM = "application/vnd.apache.arrow.stream";
-const MAX_BODY = 64 * 1024;
+/** Room for a multiple-value parameter: up to 1,000 values. */
+const MAX_BODY = 256 * 1024;
 
 export class HttpError extends Error {
   constructor(
@@ -174,6 +175,8 @@ export function createApiHandler(options: ApiOptions): ApiHandler {
           name,
           description: d.description,
           params: d.params,
+          parameters: d.parameters,
+          ...(d.key ? { key: d.key } : {}),
           connection: connectionVariable(d.connection),
           ...(d.snapshot ? { snapshot: d.snapshot } : {}),
         });

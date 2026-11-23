@@ -161,7 +161,7 @@ function commentEnd(src: string, i: number, syntax: Syntax): number {
 }
 
 /** Letters, digits and _ $ # @ continue a name, and so do non-ASCII characters other than spaces (受注番号). */
-const isNameChar = (c: string | undefined) => c !== undefined && (/[A-Za-z0-9_$#@]/.test(c) || (c > "\x7f" && !/\s/.test(c)));
+export const isNameChar = (c: string | undefined) => c !== undefined && (/[A-Za-z0-9_$#@]/.test(c) || (c > "\x7f" && !/\s/.test(c)));
 const Q_CLOSERS: Record<string, string> = { "[": "]", "(": ")", "{": "}", "<": ">" };
 
 /** When a quote starts at i: the index after it ends (or the end of the text). Otherwise i. */
