@@ -1,7 +1,7 @@
 # SQL データセットを表に繋ぐ（設計）
 
 状態: 設計（実装はまだ）。2026-11-23 作成。
-関連: 行レベル制御の設計（`docs/design/row-level-security.md`、別の PR）。パラメーターの予約名 `:user.*`、権限の確かめ、スナップショットの扱いはそちらに合わせる（[9 章](#9-守りと行レベル制御)）。
+関連: 行レベル制御の設計（`docs/design/row-level-security.md`、PR #29）。パラメーターの予約名 `:user.*`、権限の確かめ、スナップショットの扱いはそちらに合わせる（[9 章](#9-守りと行レベル制御)）。
 
 このファイルはドキュメントサイトのページにはならない（`docs/` の下のフォルダは載せない）。実装した分は、その PR で [reference.md](../reference.md) と [manual-check.md](../manual-check.md) に書く。
 
@@ -56,8 +56,9 @@ SELECT o.order_date AS 受注日, o.order_no AS 受注番号, l.line_no AS 行�
 
 ### 2.2 いまの DevBI にあるもの
 
-- `api/<名前>.sql`: サーバーに置く SELECT 1 文。`:名前` がパラメーター、`-- connection:` で接続先、`-- snapshot:` で毎朝のファイル。書き込みにつながる文は通さず、読み取り専用のトランザクションで実行する（SQLite / PostgreSQL / SQL Server / Oracle / MySQL）。コードの中でもこれを `Dataset` と呼んでいて、`GET api/schema` は `datasets` を返す。つまり **SSRS の共有データセットにあたるものは、もうある**。
+- `api/<名前>.sql`: サーバーに置く SELECT 1 文。`:名前` がパラメーター、`-- connection:` で接続先、`-- snapshot:` で毎朝のファイル。書き込みにつながる文は通さず、読み取りだけの形で実行する（PostgreSQL・Oracle・MySQL は読み取り専用のトランザクション、SQL Server は毎回ロールバックするトランザクション、SQLite は読み取り専用で開く）。コードの中でもこれを `Dataset` と呼んでいて、`GET api/schema` は `datasets` を返す。つまり **SSRS の共有データセットにあたるものは、もうある**。
 - `read_api('<名前>', from = '2024-04-01')`: metrics.yaml の `model` から読む。パラメーターは**書いた値で固定**。ページを開くと 1 回だけ読み、あとはブラウザの DuckDB-wasm で集計する。
+- ブラウザは `api/schema` を読まない。どの `read_api` をスナップショットから読むかは、ビルドのときに `@devbi/vite` が `api/*.sql` を読んで埋め込む。
 - `table` タイル: spreadsheet-grid（`/lite` に列メニューと列幅の自動調整だけ）。中身は指標ファイルの集計の結果か、`query.sql`（ブラウザの DuckDB の SQL）の結果。
 - `query.sql` / `query.malloy`: 指標ファイルの行（明細）を、ブラウザの中で SQL / Malloy で集計する。
 
@@ -88,22 +89,26 @@ SELECT o.order_date AS 受注日, o.order_no AS 受注番号, l.line_no AS 行�
 ```
 api/order_lines.sql ── -- param: の行（型・表示名・既定値・候補）
         │                -- key: の行（行を見分ける列）
-        ▼
-GET api/schema ─────────▶ ブラウザ: パラメーターの欄を作る（dash.json の params で上書き）
-                                │ 値が決まる・変わる
-                                ▼
-POST api/query {name, params}  ◀── 表（ブラウザで持つ）: 結果を全部受け取り、grid が並べ替え・絞り込み・小計
-POST api/rows  {name, params, start, end, filters, sort} ◀── 表（サーバーで絞る）: 見えている分だけ
         │
-        ▼
-サーバー: データセットの SQL（中に :user.* の行レベル制御）→ 表の絞り込み・並べ替え・ページ → 読み取り専用で実行 → Arrow
+        ├─ ビルドのとき（@devbi/vite）: パラメーターの定義をダッシュボードに埋め込む
+        │        ▼
+        │   ブラウザ: パラメーターの欄を作る（dash.json の params で上書き）
+        │        │ 値が決まる・変わる
+        │        ▼
+        ├─ POST api/query {name, params} ◀── 表（ブラウザで持つ）: 結果を全部受け取り、grid が並べ替え・絞り込み・小計
+        └─ POST api/rows  {name, params, start, end, columnFilters, sort, globalText} ◀── 表（サーバーで絞る）: 見えている分だけ
+                 │
+                 ▼
+サーバー: `-- param:` で値を検査 → データセットの SQL（中に :user.* の行レベル制御）→ 表の絞り込み・並べ替え・ページ → 読み取りだけで実行 → Arrow
 ```
+
+パラメーターの定義は、スナップショットの一覧と同じく**ビルドのときに埋め込む**（ページを開くたびに `api/schema` を読みに行かない）。理由: 往復が 1 つ減る、API を置かずにスナップショットを静的に配る形でも欄が作れる、今のブラウザの作りと同じ。サーバーも同じ `-- param:` を読んで値を検査する（ブラウザの検査は使い勝手のため、守りはサーバー）。ビルドのあとにサーバーの SQL ファイルを書きかえると、今のスナップショットの一覧と同じく、ビルドし直すまで欄は古いまま（サーバーの検査で違いはエラーになる）。
 
 ## 4. データセット（`api/<名前>.sql`）
 
 ### 4.1 `-- param:` の行
 
-`-- connection:` と `-- snapshot:` と同じく、ファイルの先頭のコメントに書く。1 つのパラメーターに 1 行。
+`-- connection:` と `-- snapshot:` と同じく、ファイルの先頭のコメント（最初の SQL の文字より前）に書く。1 つのパラメーターに 1 行。
 
 ```sql
 -- param: from date label=受注日（から） default=month_start
@@ -113,42 +118,49 @@ POST api/rows  {name, params, start, end, filters, sort} ◀── 表（サー�
 ```
 
 - 形: `-- param: <名前> <型> <キー>=<値> …`。値に空白を入れるときは `label="受注日 から"` と `"` で囲む。
-- `<名前>` は SQL の `:名前` と同じ（大文字と小文字は区別しない）。SQL にない名前を書く、型を書かない、同じ名前を 2 回書くのはエラー。
-- `-- param:` を書かないパラメーターは、いまと同じ（型なし。文字・数値・真偽・null をそのまま渡す）。入力欄は文字の欄になる。今の `api/*.sql` と `read_api` はそのまま動く。
-- `user` と `user.` で始まる名前は書けない（行レベル制御の予約名。[9 章](#9-守りと行レベル制御)）。
+- `<名前>` は SQL の `:名前` と同じ（大文字と小文字は区別しない）。SQL にない名前を書く、型を書かない、同じ名前を 2 回書く、知らないキーを書くのはエラー（何行目の何が違うかを出す）。
+- `-- param:` を書かないパラメーターは、いまと同じ（型なし。文字・数値・真偽・null をそのまま渡す）。入力欄は文字の欄になる。
+- 名前が `user.` で始まるものと、行レベル制御を使うプロジェクトでは名前が `user` そのものも、書けない（行レベル制御の予約名。先頭の `user` は大文字と小文字を問わない。[9 章](#9-守りと行レベル制御)）。`user_id`、`username` などは今までどおり使える。
+- `-- param:` と `-- key:` の行は、`-- connection:` などと同じく `api/schema` の説明文には出さない。
 
 | キー | 中身 |
 | --- | --- |
 | `label` | 入力欄の名前。既定はパラメーターの名前 |
 | `default` | 既定値（[4.5](#45-既定値)） |
 | `values` | 候補の一覧を出すデータセットの名前（[4.4](#44-候補の一覧と連動)） |
-| `optional` | 空でもよい。空のときは NULL を渡す。書かなければ、値が入るまで表を出さず「受注日（から）を入れてください」と出す |
+| `optional` | 空でもよい。空のときは NULL を渡す。書かなければ、値が入るまで表を出さず「受注日（から）を入れてください」と出す。複数の値（`[]`）には付けられない |
 | `hidden` | 入力欄を出さない（URL・埋め込み・クリックからだけ入る） |
+
+今の `api/*.sql` と `read_api` はそのまま動く。ただし、先頭のコメントに説明として `-- param: …` や `-- key: …` で始まる行を書いていたファイルは、指示として読まれて（形が違えば）エラーになる。v0 の変更として reference と変更の一覧に書き、`devbi-check` がその行を指して知らせる。
 
 別ファイル（`api/<名前>.yaml`）に書く案も考えたが、SQL と 2 つのファイルがずれやすいので、1 つのファイルに書く案をすすめる（[14 章](#14-決めてほしいこと)の 1）。
 
 ### 4.2 型と値の渡し方
 
-| 型 | 入力欄 | ブラウザから送る値 | サーバーの検査と渡し方 |
+| 型 | 入力欄 | ブラウザから送る値 | サーバーの検査 |
 | --- | --- | --- | --- |
 | `text` | 文字の欄（候補があれば選ぶ欄） | 文字 | 長さの上限（4,000 文字） |
 | `integer` | 数の欄 | 数 | 整数か |
 | `number` | 数の欄 | 数 | 有限の数か |
-| `date` | 日付の欄 | `'2026-04-01'` | 日付として読めるか。DB ごとに日付として比べられる形で渡す |
-| `datetime` | 日時の欄 | `'2026-04-01T09:00'`（時差なし） | 同上 |
-| `boolean` | チェック | `true` / `false` | Oracle（23ai より前）と SQLite は `1` / `0`（いまと同じ） |
+| `date` | 日付の欄 | `'2026-04-01'` | 日付として読めるか |
+| `datetime` | 日時の欄 | `'2026-04-01T09:00'`（時差なし） | 日時として読めるか |
+| `boolean` | チェック | `true` / `false` | 真偽か |
 
-- サーバーは、ブラウザの値を型で検査してから渡す。型に合わない値は 400 と日本語のメッセージ。
-- 日付をドライバーにどの形で渡すか（文字か、ドライバーの日付の型か）は DB ごとに決める。Oracle の Thin モードは JavaScript の日付をサーバーの時差で読む問題がある（[reference.md の Oracle の注意](../reference.md#接続先)）ので、`NLS_DATE_FORMAT` に合わせた文字で渡す案が有力。5 つの DB のテストで決める。
-- metrics.yaml の `read_api('orders', from = '2024-04-01')` の値も同じ検査を通る。
+- サーバーは、ブラウザの値を型で検査してから渡す。型に合わない値は 400 と日本語のメッセージ。metrics.yaml の `read_api('orders', from = '2024-04-01')` の値も同じ検査を通る。
+- 型を書いたパラメーターは、DB にも型付きで渡す。
+  - PostgreSQL: 今は型を付けずに渡していて、`:customer IS NULL OR …` のように型の決まらない場所が先に来ると「could not determine data type of parameter $1」になる。型を書いたパラメーターは、出てくる場所ごとに `$1::integer`（`date`、`timestamp`、`text`、`numeric`、`boolean`、`bigint`）と書いて渡す。
+  - 日付をドライバーにどの形で渡すか（文字か、ドライバーの日付の型か）は DB ごとに決める。Oracle の Thin モードは JavaScript の日付をサーバーの時差で読む問題がある（[reference.md の Oracle の注意](../reference.md#接続先)）ので、`NLS_DATE_FORMAT` に合わせた文字で渡す案が有力。5 つの DB のテストで決める。
+- 真偽は、Oracle と SQLite には今と同じく `1` / `0` で渡す。
 
 ### 4.3 複数の値（`text[]` など）
 
 型に `[]` を付けると複数の値。SQL では `IN (:regions)` の形でだけ使える（それ以外の場所に書くと、読み込むときにエラー）。
 
 - サーバーが値の数だけ広げる: `IN (:regions)` → `IN (?, ?, ?)`（PostgreSQL なら `$2, $3, $4`）。値はすべてパラメーターで渡し、SQL に値を書き込まない。
-- 1 つも選ばないのは「入っていない」扱い（`optional` でも同じ。`IN ()` は書けないので）。「すべて」は候補の値を全部送る（SSRS の「すべて選択」と同じ）。
-- 上限は 1 つのパラメーターに 1,000 個（Oracle の IN の上限が 1,000、SQL Server のパラメーターの上限が 2,100）。超えるときは「候補を絞るか、すべてのときはこのパラメーターを使わない SQL にしてください」と出す。候補が 1,000 を超えそうな軸（顧客など）は、複数の値ではなく `optional` の 1 つの値（`(:customer IS NULL OR c.id = :customer)`）をすすめる、と reference に書く。
+- 1 つも選ばないことはできない（`IN ()` は書けないので）。必須のパラメーターと同じく、選ぶまで表を出さず「地域を 1 つ以上選んでください」と出す。
+- 「すべて」は候補の値を全部送る（SSRS の「すべて選択」と同じ）。つまり、その列が NULL の行と、候補にない値の行は出ない。NULL の行も出したいとき、候補が多いときは、複数の値のパラメーターにせず、`optional` の 1 つの値（`(:customer IS NULL OR c.id = :customer)`）か、パラメーターで絞らない SQL にする。reference にこの書き方を載せる。
+- 上限は 1 つの文の全体で数える。SQL Server は 1 つの文のパラメーターが 2,100 まで、Oracle は 1 つの `IN` が 1,000 まで。MySQL と SQLite は `?` を出てくる場所ごとに使うので、同じパラメーターを 2 か所に書くと 2 つ分になる。DevBI は、1 つの `IN` を 1,000 まで、文の全体（表の絞り込みの値も含む）を 2,000 までにし、超えるときは「候補を絞るか、すべてのときはこのパラメーターを使わない SQL にしてください」と出す。
+- リクエストの本文は今 64 KB まで。複数の値を送る口は 256 KB にし、それを超えるときはブラウザが送る前に知らせる。
 
 ### 4.4 候補の一覧と連動
 
@@ -167,16 +179,17 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 
 ### 4.5 既定値
 
-| 書き方 | 意味 |
-| --- | --- |
-| `default=2024-04-01`、`default=10`、`default=受付` | その値 |
-| `default=today` / `tomorrow` / `yesterday` | 今日 / 明日 / 昨日 |
-| `default=month_start` / `next_month_start` / `previous_month_start` | 今月 / 来月 / 先月の 1 日 |
-| `default=year_start` / `fiscal_year_start` | 今年の 1/1 / 今年度の初日（年度の始まりは `fiscal_year_start` の月。dash.json の `params` か、データセットの `-- param:` の `fiscal_year_start=4`） |
-| `default=today-30` | 30 日前（`+` も書ける） |
-| `default=all` | 複数の値で、候補の全部 |
-| `default=関東,近畿` | 複数の値（`,` 区切り） |
+| 書き方 | 使える型 | 意味 |
+| --- | --- | --- |
+| `default=2024-04-01`、`default=10`、`default=受付` | どれでも | その値 |
+| `default=today` / `tomorrow` / `yesterday` | `date`、`datetime` | 今日 / 明日 / 昨日（日時なら 0:00） |
+| `default=month_start` / `next_month_start` / `previous_month_start` | 同上 | 今月 / 来月 / 先月の 1 日 |
+| `default=year_start` / `fiscal_year_start` | 同上 | 今年の 1/1 / 今年度の初日（年度の始まりの月は dash.json の `fiscalYearStart`。既定は 1） |
+| `default=today-30` | 同上 | 30 日前（`+` も書ける） |
+| `default=all` | 複数の値で `values` のあるもの | 候補の全部 |
+| `default=関東,近畿` | 複数の値 | その値（`,` 区切り） |
 
+- `today` などの言葉は日付と日時の型だけ、`all` は候補のある複数の値だけの意味で、ほかの型では書いた文字のまま。候補のある複数の値で、文字の `all` そのものを既定にしたいときは、dash.json の `params` に配列で `["all"]` と書く。
 - 「今日」は**見ている人のブラウザの日付**。`date-range` の「最新の月」（データの最終日が基準）とは違う。データベースから取る前なので、データの最終日はまだ分からないため。
 - 既定値のないパラメーターは、入れるまで表を出さない（`optional` なら NULL）。
 
@@ -189,23 +202,25 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 結果の 1 行を見分ける列（結果の列の名前）。次のことに使う。
 
 - 表の行の見分け（行を選んだまま読み直しても、同じ行に選択が残る）。
-- サーバーで絞る表（[7.3](#73-サーバーで絞ってページ送りrows-server)）の並べ替えの最後に足す。同じ値の行の並びが毎回同じでないと、ページの境目で行が重なったり抜けたりするため。サーバーで絞る表には `-- key:` が要る（ないと `devbi-check` とタイルでエラー）。
+- サーバーで絞る表（[7.3](#73-サーバーで絞ってページ送りrows-server)）の並べ替えの最後に足す。同じ値の行の並びが毎回同じでないと、ページの境目で行が重なったり抜けたりするため。サーバーで絞る表には `-- key:` が要る（ないと `devbi-check` とタイルでエラー）。並べ替えの列と同じ列は足さない（SQL Server は `ORDER BY` に同じ列が 2 回あるとエラー）。
 
 ### 4.7 SQL を読み取る（列とパラメーターの型）
 
-「SQL を解析して表示する」のうち、列の名前と型は、**DevBI が SQL を自前で読むのではなく、データベースに聞く**。5 つの DB の書き方の違い（Oracle の大文字の別名、SQL Server の `[列]`、計算した列の型）を自前で正しく読むのは無理があり、DB に聞けば実際に返る列と同じになるため。どの DB も、実行せずに結果の列を返す仕組みがある。
+「SQL を解析して表示する」のうち、列の名前と型は、**DevBI が SQL を自前で読むのではなく、データベースに聞く**。5 つの DB の書き方の違い（Oracle の大文字の別名、SQL Server の `[列]`、計算した列の型）を自前で正しく読むのは無理があり、DB に聞けば実際に返る列と同じになるため。
 
-| DB | 結果の列（実行しない） | パラメーターの型 |
+| DB | 結果の列の名前と型 | パラメーターの型 |
 | --- | --- | --- |
-| SQL Server | `sp_describe_first_result_set` | `sp_describe_undeclared_parameters` |
-| PostgreSQL | `PREPARE` + `pg_prepared_statements.result_types`（16 以上。15 以下は `LIMIT 0` で包んで実行） | `pg_prepared_statements.parameter_types` |
-| Oracle | node-oracledb の `getStatementInfo()` | なし |
-| MySQL / MariaDB | mysql2 の `prepare()` の `columns` | なし（数だけ） |
-| SQLite | `prepare()` の `columns()` | なし |
+| SQL Server | `sp_describe_first_result_set`（実行しない） | `sp_describe_undeclared_parameters` |
+| PostgreSQL | 今の `limited()` で `LIMIT 0` に包んで実行し、`fields` を読む（`pg_prepared_statements.result_types` は型だけで列名がないので使わない） | `PREPARE` して `pg_prepared_statements.parameter_types` を読み、すぐ `DEALLOCATE`（プールの接続に残さない） |
+| Oracle | node-oracledb の `getStatementInfo()`（実行しない） | なし |
+| MySQL / MariaDB | mysql2 の `prepare()` の `columns`（実行しない） | なし（数だけ） |
+| SQLite | `prepare()` の `columns()`（実行しない） | なし |
 
-- これを「列を聞く」口（`describe`）として @devbi/server に足す。使うのは開発のときだけ（GUI エディタの列の一覧、`devbi-check` の列名の確かめ、`pnpm gen` の行の型）。ページを開いたときの表の列は、いまと同じく返ってきた Arrow の列から決める（聞きに行く往復を増やさない）。
+- これを「列を聞く」口（`POST api/describe`）として @devbi/server に足す。口を開けるのは開発のときだけ（GUI エディタの列の一覧、`devbi-check` の列名の確かめ、`pnpm gen` の行の型）。`devbi-serve` と C# の見本では口を出さない。
+- ページを開いたときの表の列は、いまと同じく返ってきた Arrow の列から決める（聞きに行く往復を増やさない）。サーバーで絞る表で、ブラウザから来た列の名前を照らすための列の一覧は、サーバーが中で（口とは別に）同じ方法で聞き、SQL の文の中身ごとに覚えておく（[8.5](#85-表の絞り込みから-where-へ)）。
 - パラメーターの型を DB が教えてくれるとき（SQL Server、PostgreSQL）は、`-- param:` がないパラメーターに「`-- param: from date` と書くと日付の欄になります」と `devbi-check` が教える。勝手に型を決めはしない（書いたものだけが動きを決める）。
 - Oracle の桁の指定のない `NUMBER` や SQLite の計算した列のように、型が中身で決まる列は「実行するまで分からない」として扱う。
+- 列の名前の照らし方（`-- key:`、`options.columns`、`click`、ブラウザから来る列の名前）: まず同じ名前、なければ大文字と小文字を区別せずに 1 つだけ当たる名前。Oracle の `AS amount` は `AMOUNT` で返るので、`amount` と書いても当たる。2 つ以上に当たるときはエラー。
 
 ## 5. ダッシュボードのパラメーター（dash.json の `params`）
 
@@ -213,13 +228,17 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 
 ダッシュボードのタイルが読むデータセットの `-- param:` から、パラメーターの欄を作る。同じ名前のパラメーターは 1 つの欄にまとめる（明細の表と、地域別の小計の表が同じ `from` を使えば、欄は 1 つ）。
 
+- まとめる 2 つのデータセットで型が違うときはエラー。表示名・既定値・候補・`optional` が違うときは、dash.json の `params` にそのパラメーターを書いて決めるよう、エラーで知らせる。
+- `-- param:` のないパラメーター（型なし）と、型のあるパラメーターをまとめるときは、型のあるほうに合わせる。
+
 ### 5.2 書いて変える
 
 ```json
 {
   "title": "受注明細",
+  "fiscalYearStart": 4,
   "params": {
-    "from": { "label": "期間（から）", "default": "fiscal_year_start", "fiscal_year_start": 4 },
+    "from": { "label": "期間（から）", "default": "fiscal_year_start" },
     "to": { "label": "期間（まで）", "default": "tomorrow" },
     "regions": { "default": ["関東"] },
     "customer": { "type": "integer", "hidden": true }
@@ -228,8 +247,10 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 }
 ```
 
-- キーは `-- param:` と同じ（`type`、`label`、`default`、`values`、`optional`、`hidden`、`fiscal_year_start`）。`default` の複数の値は配列でも書ける。
+- キーは `-- param:` と同じ（`type`、`label`、`default`、`values`、`optional`、`hidden`）。`type` の複数の値は `"text[]"`。`default` の複数の値は配列で書く。
 - 書いたものが `-- param:` より勝つ。`type` が `-- param:` と食い違うとエラー。
+- どのデータセットの `-- param:` にもない名前（タイルの `{ "param": "start" }` だけで使う名前など）は、ここに `type` を書く（書かなければエラー）。
+- `fiscalYearStart` は、既定値の `fiscal_year_start` が使う年度の始まりの月（1〜12、既定は 1）。
 - 欄の並びは `params` に書いた順、そのあとに書いていないものをタイルの順に。
 
 ### 5.3 タイルとのつなぎ方
@@ -259,10 +280,11 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 
 ### 5.5 URL・埋め込み・React から値を渡す
 
-- URL: `#/sales-report?from=2026-04-01&regions=関東,近畿`。値を変えると URL も変わるので、その URL を送れば同じ表が開く（SSRS の URL アクセスと同じ）。
-- 埋め込み: `<div data-devbi="sales-report" data-devbi-params='{"customer": 1024}'>`、`DevBI.mount(el, { params })`。
-- React: `<Dashboard params={{ customer: 1024 }} onParamsChange={…} />`。社内アプリの画面で選んでいる顧客を渡す、といった使い方。
-- `hidden` のパラメーターも、これらからは入る。**パラメーターは見る人が変えられる値なので、権限には使わない**（URL を書き換えれば別の顧客になる）。見せてよい行を決めるのは行レベル制御（`:user.*`）の役目（[9 章](#9-守りと行レベル制御)）。
+- URL（DevBI のサイトだけ。`DevbiApp` のとき）: `#/sales-report?from=2026-04-01&regions=関東&regions=近畿`（複数の値は同じキーを繰り返す。値の `,` もそのまま書ける）。値を変えると URL も変わるので、その URL を送れば同じ表が開く（SSRS の URL アクセスと同じ）。今は `#/` のあと全部をダッシュボードの名前として読んでいるので、`?` からあとを分けるように変える。
+- 埋め込みと React の部品は、置いた先のアプリのルーティングとぶつかるので URL を書きかえない。代わりに値を渡す口を使う。
+  - 埋め込み: `<div data-devbi="sales-report" data-devbi-params='{"customer": 1024}'>`、`DevBI.mount(el, { params })`。
+  - React: `<Dashboard params={{ customer: 1024 }} onParamsChange={…} />`。社内アプリの画面で選んでいる顧客を渡す、といった使い方。
+- `hidden` のパラメーターも、これらからは入る。**パラメーターは見る人が変えられる値なので、権限には使わない**（URL や開発者ツールで書き換えれば別の顧客になる）。見せてよい行を決めるのは行レベル制御（`:user.*`）の役目（[9 章](#9-守りと行レベル制御)）。
 
 ## 6. タイルから読む（`query.dataset`）
 
@@ -285,7 +307,7 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 | 列の型 | `fields` の `kind` | 既定の書式 |
 | --- | --- | --- |
 | 数（整数・小数） | `measure` | 数の書式（`#,##0`。小数は `#,##0.##`） |
-| 日付・日時 | `dimension` | `2026/04/01`、`2026/04/01 9:00` |
+| 日付・日時 | `time`（粒度なし。`query.sql` の日付の列と同じ） | `2026/04/01`、`2026/04/01 9:00` |
 | 文字・真偽 | `dimension` | そのまま |
 
 - `-- key:` の列は数でも `dimension`（受注番号に 3 桁の区切りを付けない）。
@@ -293,7 +315,7 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 
 ### 6.3 表のほかのタイル
 
-`rows` と `fields` で描くタイル（`kpi`、`bar`、`line`、`area`、`barlist`、`pivot`）は、そのままデータセットの結果も描ける（`bar` の横軸は最初の軸の列）。`explore`（Perspective）にデータセットの明細を入れるのも同じ仕組みでできる。ただし最初に作るのは表で、ほかのタイルは表のあと（[13 章](#13-進め方)）。
+`rows` と `fields` で描くタイル（`kpi`、`bar`、`line`、`area`、`barlist`、`pivot`）は、そのままデータセットの結果も描ける。`explore`（Perspective）にデータセットの明細を入れるのも同じ仕組みでできる。ただし最初に作るのは表で、ほかのタイルは表のあと（[13 章](#13-進め方)）。
 
 `select` と `date-range` は指標ファイルのためのタイルなので、データセットには使わない。データセットを絞るのはパラメーターの欄。
 
@@ -330,8 +352,8 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 | `columns` | 出す列と順。文字は列の名前だけ、`{ field, … }` で細かく。書かなければ全部の列を SQL の順に | `columns` |
 | `columns[].label` / `format` / `width` / `align` / `hidden` | 見出し、[書式](../reference.md#書式)、幅、寄せ、隠す | `title`、`valueFormatter`、`width`、`align` |
 | `columns[].pin` | `left` / `right` に固定 | 3 つのペインの固定列 |
-| `columns[].filter` | 列の絞り込みの種類。`auto`（既定。型から）/ `text` / `number` / `date` / `set` / `none` | `filterType` |
-| `columns[].agg` | グループと合計の行の集計（`sum` / `avg` / `min` / `max` / `count`） | `aggFunc` |
+| `columns[].filter` | 列の絞り込み。`true`（既定）/ `false`。種類は DevBI が列の型から決める（数は `numberSet`、日付と日時は `dateSet`、文字と真偽は `textSet`。条件と、値の一覧から選ぶ欄の両方がある） | `filterType` |
+| `columns[].agg` | グループと合計の行の集計（`sum` / `avg` / `min` / `max` / `count`。`count` は行の数） | `aggFunc` |
 | `columns[].style` | `bar`（データバー）/ `scale`（色の濃さ）/ `{ "chips": { "遅れ": "critical", … } }` | `conditionalFormat` |
 | `groupBy` | 行グループにする列（順に階層）。小計は `agg` の列。ブラウザで持つ表だけ | `rowGroup` |
 | `totals` | 表の下に合計の行 | `totalRow` |
@@ -341,26 +363,31 @@ SELECT DISTINCT region AS 値 FROM customers ORDER BY 1
 
 いまの表タイルと同じく、読み取り専用、Ctrl+C（Mac は ⌘+C）で表示どおりの文字をコピー、ライト・ダーク、列の見出しの ⋮ で並べ替えと列幅。
 
+grid の絞り込みの種類を `auto` にしないのは、`auto` が行の中身から種類を決め、サーバーで絞る表では文字の部分一致に落ちるため。DevBI は Arrow の型を知っているので、自分で決めて渡す。
+
 spreadsheet-grid は `/lite` で使う機能だけを選んで組み込んでいる。データセットの表は機能が多い（絞り込み、グループ、合計、条件付き書式、検索、SSRM）ので、今の表タイルとは別のファイル（別の JS のまとまり）にして、データセットの表のあるページだけで読む。今の表タイルの大きさは変えない。
 
 ### 7.2 ブラウザで持つ（`rows: "client"`）
 
-- パラメーターが決まるたびに `POST api/query` を 1 回。結果（Arrow）をそのまま表に渡す。並べ替え・列の絞り込み・グループ・合計・検索はブラウザの中なので、DB へは行かず、すぐ変わる。
+- パラメーターが決まるたびに `POST api/query` を 1 回。結果（Arrow）を行にして表に渡す。並べ替え・列の絞り込み・グループ・合計・検索はブラウザの中なので、DB へは行かず、すぐ変わる。
 - 上限はいまと同じ 1,000,000 行（`--max-rows`）。目安として 10 万行くらいまではこちら。
-- このタイルの行は DuckDB-wasm を通らない。データセットのタイルだけのダッシュボードは、DuckDB-wasm（数 MB）を読まずに開ける。
+- 日付と日時は、grid が見る人の時刻の年月日として読める形で渡す。今の DevBI の行の日時は「DB での時刻をそのまま UTC として持つ Date」なので、そのまま渡すと日本では 15:00 以降の日時が次の日として絞り込まれる。`'2026-04-01'` / `'2026-04-01 09:00'` の文字で渡す（並べ替えも文字の順で正しい）か、見る人の時刻の Date にするかを、実装の PR のテストで決める。
+- このタイルの行は DuckDB-wasm を通さない。データセットのタイルだけのダッシュボードは、DuckDB-wasm（数 MB）を読まずに開けるようにする。今は `DevbiProvider` がどのダッシュボードでもすぐエンジンを作り、API とスナップショットを読む処理も DuckDB-wasm を読み込む `engine.ts` の中にあるので、読む処理をエンジンの外に出し、エンジンは指標ファイルのタイルが要るときだけ作るように作り替える（[13 章](#13-進め方)の 2 に入れる）。
 
 ### 7.3 サーバーで絞ってページ送り（`rows: "server"`）
 
-spreadsheet-grid の SSRM（`dataSource.getRows({ startIndex, endIndex, query })`）をそのまま使う。
+spreadsheet-grid の SSRM（`dataSource.getRows({ startIndex, endIndex, query, signal })`）をそのまま使う。
 
 - 表が見えている範囲のブロック（100 行ずつ）だけを `POST api/rows` で読む。列の絞り込み・並べ替え・検索の欄は、grid がサーバーへ送る記述子（`ServerSideQuery`）を DevBI のサーバーが WHERE と ORDER BY にする（[8.5](#85-表の絞り込みから-where-へ)）。
-- 件数は、絞り込みが変わったときだけ数える（最初のブロックで `COUNT(*)` も聞き、同じ絞り込みのあいだはブラウザで覚えておく）。
+- grid は答えのたびに件数（`totalRowCount`）が要る。DevBI のブラウザ側は、絞り込みが変わったあとの最初のブロックでだけサーバーに件数も聞き（`count: true`）、同じ絞り込みのあいだは覚えた件数を返す。
+- 相対の日付の期間（今日・今月・過去 30 日）は、ブラウザが見る人の日付で範囲にしてから送る（パラメーターの「今日」と同じ時計）。
 - 列の絞り込みの候補（値の一覧から選ぶ）は `POST api/values`（`DISTINCT`、1,000 件で打ち切り）。
-- 合計の行は `POST api/aggregate`（絞り込んだあとの全体の `SUM` など）。
+- 合計の行は `POST api/aggregate`（絞り込んだあとの全体の `SUM` など）。データバーと色の濃さ（`style`）の最小・最大も、ここで聞いて grid に渡す（渡さないと、grid は読み込んだ範囲の最小・最大を使うので、スクロールで帯の長さが変わる）。
 - グループと小計は使えない（spreadsheet-grid のグループはブラウザで持つ表だけ。[15 章](#15-spreadsheet-grid-の穴)）。
 - Excel への書き出しは、絞り込みと並べ替えを付けた `POST api/query` で全部の行を読んで書く（上限 1,000,000 行。Excel の行の上限は 1,048,576）。
 - スナップショットからは読まない（DB に SQL を投げる形なので）。
 - `-- key:` が要る（[4.6](#46----key-の行)）。
+- 速くスクロールすると、ブロックごとにデータセットの SQL 全体・並べ替え・OFFSET が走る。止めた要求は DB でも止める（[9 章](#9-守りと行レベル制御)）。
 
 どちらを既定にするかは [14 章](#14-決めてほしいこと)の 2。
 
@@ -369,7 +396,7 @@ spreadsheet-grid の SSRM（`dataSource.getRows({ startIndex, endIndex, query })
 | | SSRS の Tablix | DevBI のデータセットの表 |
 | --- | --- | --- |
 | 並べ替え | 見出しのボタンで描き直し（サーバー） | 見出しのメニュー。ブラウザで持つ表ならその場で |
-| 列ごとの絞り込み | なし（パラメーターで作る） | 文字・数・日付・値の一覧から選ぶ |
+| 列ごとの絞り込み | なし（パラメーターで作る） | 文字・数・日付の条件と、値の一覧から選ぶ |
 | グループと小計 | レイアウトで作る | `groupBy` と `agg`。見る人が開閉、列メニューからグループを変えられる |
 | コピー | なし（Excel に書き出す） | 範囲を選んで Ctrl+C、そのまま Excel に貼れる |
 | 大きな結果 | ページに分けて描く | 100 万行まで 1 つの表でスクロール、それより大きければサーバーで絞る表 |
@@ -383,7 +410,7 @@ API の形は C#（ASP.NET）の見本と、Next.js の `createApiHandler` も�
 
 ### 8.1 `GET api/schema`
 
-各データセットに `parameters` と `key` を足す。今の `params`（名前の配列）は残す（今のブラウザと C# の見本を壊さないため）。
+各データセットに `parameters` と `key` を足す。今の `params`（名前の配列）は残す（今の使い手と C# の見本を壊さないため）。ブラウザのダッシュボードはここを読まない（定義はビルドのときに埋め込む。[3 章](#3-全体の形)）。エディタや、ほかの道具がデータセットの一覧を知るための口。
 
 ```json
 { "name": "order_lines", "description": "受注の明細…", "params": ["from", "to", "regions"],
@@ -396,81 +423,97 @@ API の形は C#（ASP.NET）の見本と、Next.js の `createApiHandler` も�
 
 ### 8.2 `POST api/query`
 
-- `params` の値に配列（複数の値のパラメーター）が書けるようになる。型の検査をする。
-- サーバーで絞る表の書き出しのために、`filters`・`sort`・`globalText`（grid の `ServerSideQuery` と同じ形）を足せる。
+- `params` の値に配列（複数の値のパラメーター）が書けるようになる。`-- param:` の型で検査する。
+- サーバーで絞る表の書き出しのために、`columnFilters`・`sort`・`globalText`（grid の `ServerSideQuery` と同じ名前と形）を足せる。
 
 ### 8.3 足す口
 
 | 口 | 送るもの | 返すもの |
 | --- | --- | --- |
-| `POST api/rows` | `{ name, params, start, end, filters?, sort?, globalText?, count? }` | Arrow（その範囲の行）。`count: true` なら `X-DevBI-Total-Rows` に絞り込んだあとの件数 |
-| `POST api/values` | `{ name, params, column, filters?, globalText?, search?, limit? }` | `{ "values": […], "truncated": false }` |
-| `POST api/aggregate` | `{ name, params, filters?, globalText?, aggs: { "金額": "sum" } }` | `{ "金額": 1234567 }` |
+| `POST api/rows` | `{ name, params, start, end, columnFilters?, sort?, globalText?, count? }`（`end` は含まない。`end - start` は 1,000 まで） | Arrow（その範囲の行）。`count: true` なら `X-DevBI-Total-Rows` に絞り込んだあとの件数 |
+| `POST api/values` | `{ name, params, column, columnFilters?, globalText?, search?, limit? }`（`limit` は 1,000 まで） | `{ "values": […], "truncated": false }`。空白（NULL か空の文字）の行があれば `""` も入れる |
+| `POST api/aggregate` | `{ name, params, columnFilters?, globalText?, aggs: { "金額": ["sum", "min", "max"] } }` | `{ "金額": { "sum": 1234567, "min": 0, "max": 98000 } }` |
 | `POST api/describe`（開発のときだけ） | `{ name }` | `{ "columns": [{ "name": "受注日", "type": "DATE" }, …], "params": { "from": "date" } }` |
 
-- どれも `api/query` と同じく `Content-Type: application/json` だけを受け付け、同じ時間の上限・行の上限で、同じ入口（行レベル制御の `run(name, params, { user })`）を通る。
-- `describe` は `@devbi/vite`（開発サーバー）と CLI だけで有効にし、`devbi-serve` と本番の C# では出さない（本番では使い道がないので、口を増やさない）。
+- どれも `api/query` と同じく `Content-Type: application/json` だけを受け付け、同じ時間の上限・行の上限で、同じ入口（行レベル制御の `run`。[9 章](#9-守りと行レベル制御)）を通る。
+- ブラウザから来るものは、決まった形と照らしてから使う。知らない `kind`・`mode`・`operator`・並べ替えの向き・集計の名前は 400。
+- サーバーが新しい口に答えないとき（古い版の C# の見本など。404 か 405）は、サーバーで絞る表だけが「このサーバーはサーバーで絞る表に対応していません」と出し、ブラウザで持つ表は `api/query` だけで動く。
 
 ### 8.4 包み方
 
 `api/rows`・`api/values`・`api/aggregate` と、絞り込みのある `api/query` は、データセットの SQL を包んで実行する。
 
 ```sql
-WITH <データセットの先頭の WITH の中身>,
-     __devbi_d AS (<データセットの最後の SELECT（最後の ORDER BY を外したもの）>)
-SELECT * FROM __devbi_d
+WITH <データセットの先頭の WITH の中身>      ← データセットに WITH があるときだけ
+SELECT * FROM (
+<データセットの本体（WITH のあと全部。UNION なども含む）>
+) devbi_d
  WHERE <表の絞り込み>
  ORDER BY <並べ替え>, <-- key: の列>
  <ページ>
 ```
 
-- データセットの先頭の `WITH` は外へ出す。SQL Server は派生表と CTE の中に `WITH` を書けないため。ほかの DB でも同じ形にそろえる（DB ごとに形を変えると、テストの組み合わせが増えるので）。
-- 最後の（いちばん外の）`ORDER BY` は外し、表で並べ替えていないときの並びに使う。SQL Server は `TOP` か `OFFSET` のない `ORDER BY` を派生表と CTE の中に書けないため。
+- データセットの先頭の `WITH` は外へ出し、本体は派生表にする。SQL Server は派生表の中に `WITH` を書けないため。どの DB でもこの形にそろえる（DB ごとに形を変えると、テストの組み合わせが増えるので）。派生表の形なので、`WITH` のない MySQL 5.7 でも、データセット自身が `WITH` を使わなければ動く。
+- 派生表の名前は `devbi_d`（Oracle は引用符のない名前を英字で始めないといけないので、`__` で始めない）。本体と閉じ括弧のあいだには改行を入れる（本体が `--` のコメントで終わっていても閉じ括弧が消えないように。今の `limited()` と同じ）。
+- 本体の最後の `ORDER BY`:
+  - SQL Server で、本体に `TOP` も `OFFSET` もないときだけ外す（SQL Server は、そのどちらもない `ORDER BY` を派生表の中に書けないため）。ほかの DB と、`TOP` / `OFFSET` のある SQL Server では外さない（`TOP 10 … ORDER BY` から外すと、どの 10 行が残るかが変わってしまう）。`LIMIT` と `FETCH` も外さない。
+  - 表で並べ替えていないときの外の並びには、その `ORDER BY` が結果の列の名前か列の番号だけで書いてあれば、それを使う。`o.order_date` や式で書いてあると外からは見えないので、`-- key:` の並びにし、`devbi-check` が「結果の列の名前で書くと、サーバーで絞る表でも同じ並びになります」と知らせる。
 - SQL Server の最後の `OPTION (…)` は外の SQL の最後へ移す。`FOR XML` / `FOR JSON` のデータセットは包めないので、サーバーで絞る表ではエラー。
-- 先頭の `WITH`、最後の `ORDER BY`、`OPTION` の場所は、今の `sqltext.ts`（引用符とコメントを読み分ける部分）で、括弧の外のものを探す。DevBI が SQL の文法を全部読むのではなく、この 3 つの場所だけを探す。
-- ページ: PostgreSQL・MySQL・SQLite は `LIMIT ? OFFSET ?`、SQL Server（2012 以上）と Oracle（12c 以上）は `OFFSET ? ROWS FETCH NEXT ? ROWS ONLY`。Oracle 11g（Thick モード）ではサーバーで絞る表は使えない（ブラウザで持つ表は使える）。
-- 空の値は、並べ替えの向きによらず最後（spreadsheet-grid と同じ）。PostgreSQL と Oracle は `NULLS LAST`、ほかは `CASE WHEN x IS NULL THEN 1 ELSE 0 END` を先に置く。
-- 読み取り専用の確かめ（SELECT か WITH で始まる 1 文だけ）は、いまと同じくデータセットのファイルに対して行う。包む部分は DevBI が作る文なので、ブラウザから来たものは列の名前と値だけ。
+- SQL Server は、派生表の列に名前のない列（`COUNT(*)`）と同じ名前の列を許さない。サーバーで絞る表のデータセットは、すべての列に `AS` で名前を付ける（`devbi-check` が確かめる）。
+- 先頭の `WITH`、最後の `ORDER BY`・`TOP`・`OFFSET`・`LIMIT`・`FETCH`・`OPTION` の場所は、今の `sqltext.ts`（引用符とコメントを読み分ける部分）で、括弧の外のものを探す。DevBI が SQL の文法を全部読むのではなく、この場所だけを探す。
+- ページ: PostgreSQL・SQLite は `LIMIT ? OFFSET ?`、SQL Server（2012 以上）と Oracle（12c 以上）は `OFFSET ? ROWS FETCH NEXT ? ROWS ONLY`。MySQL は、mysql2 がプリペアドステートメントの数を DOUBLE で送り、MySQL 8.0.22 以降が `LIMIT ?` の DOUBLE を断るので、サーバーが整数と確かめた値を SQL に書き込む（ブラウザの値をそのまま書かない。サーバーが作る整数だけ）。Oracle 11g（Thick モード）ではサーバーで絞る表は使えない（ブラウザで持つ表は使える）。
+- MySQL は、今の `sql_select_limit`（行の上限）より SQL に書いた `LIMIT` が勝つ。ページの `LIMIT` は 1,000 以下なので、上限を超えることはない。
+- 読み取り専用の確かめ（SELECT か WITH で始まる 1 文だけ）は、いまと同じくデータセットのファイルに対して行う。包む部分は DevBI が作る文で、ブラウザから来たもの（列の名前と値など）は [8.5](#85-表の絞り込みから-where-へ) の形でしか入らない。
 
 ### 8.5 表の絞り込みから WHERE へ
 
-grid が送る `ColumnFilterValue`（`kind` で分かれる）を、DB ごとの WHERE にする。
+grid が送る `ColumnFilterValue`（`kind` で分かれる）を、DB ごとの WHERE にする。DevBI の表は種類を `numberSet`・`textSet`・`dateSet` にしか設定しない（[7.1](#71-表の-options)）ので、受け付けるのはこの 3 つと、その中の条件の形だけ。
 
-| `kind` | WHERE |
+| 絞り込み | WHERE |
 | --- | --- |
-| `set`（`include` / `exclude`） | `x IN (?, …)` / `x NOT IN (?, …)`。空白（`''`）は `x IS NULL OR x = ''` に読みかえる |
-| `number`（比較 / 範囲 / 空 / 空でない） | `x >= ?`、`x BETWEEN ? AND ?`、`x IS NULL` … |
-| `text`（部分一致） | `LOWER(x) LIKE LOWER(?) ESCAPE '\'`（`%` と `_` はエスケープ） |
-| `textSet` / `numberSet` / `dateSet` | 条件 AND 選んだ値 |
-| `dateSet` の相対の期間（今日・今月・過去 30 日） | サーバーの日付で範囲にする（スナップショットの時刻と同じく、サーバーの時計） |
-| 検索の欄（`globalText`） | 文字の列ごとの部分一致を OR で（数と日付の列は探さない。DB ごとに文字にした形が画面の書式と違うため） |
-| 並べ替え（`sort`） | `ORDER BY "列" ASC / DESC` |
+| 値の一覧から選ぶ（`set` の部分。`include`） | `x IN (?, …)`。空白（`''`）を選んでいれば `OR x IS NULL`（文字の列なら `OR x = ''` も） |
+| 値の一覧で外す（`exclude`） | `(x IS NULL OR x NOT IN (?, …))`（`NOT IN` だけだと NULL の行も消えるため）。空白を外したときは `x IS NOT NULL AND …`（文字の列なら `x <> ''` も） |
+| 数の条件（比較・範囲・空・空でない） | `x >= ?`、`x BETWEEN ? AND ?`、`x IS NULL` … |
+| 文字の条件（含む・等しい・始まる・終わる・空） | `LOWER(x) LIKE LOWER(?) ESCAPE '!'`。値の `!`・`%`・`_`（SQL Server は `[` も）は `!` でエスケープする。`\` は MySQL の引用符の読み方で意味が変わるので使わない |
+| 日付の条件（範囲・以降・以前・等しい） | 日付の列も日時の列も、日の範囲にする: `x >= ? AND x < ?`（終わりの日の次の日の 0:00 の前まで） |
+| 日付の値の一覧（`'YYYY-MM-DD'` の日付キー） | 日付の列は `x IN (?, …)`、日時の列（と時刻を持つ Oracle の `DATE`）は、日ごとの範囲を `OR` で |
+| 相対の日付（今日・今月・過去 30 日） | ブラウザが見る人の日付で範囲にしてから送る（[7.3](#73-サーバーで絞ってページ送りrows-server)） |
+| 検索の欄（`globalText`） | 文字の列ごとの部分一致を `OR` で（数と日付の列は探さない。DB ごとに文字にした形が画面の書式と違うため） |
+| 並べ替え（`sort`） | `ORDER BY "列" ASC / DESC`。空は向きによらず最後（spreadsheet-grid と同じ）。PostgreSQL・Oracle・SQLite（3.30 以上）は `NULLS LAST`、SQL Server と MySQL は `CASE WHEN x IS NULL THEN 1 ELSE 0 END` を先に。文字の列では `''` も空として最後にする |
+| 集計（`api/aggregate`） | `sum` は桁あふれしないよう BIGINT か DECIMAL で（SQL Server の `SUM(int)` は int を超えるとエラー）、`avg` は `AVG(CAST(x AS FLOAT))`（SQL Server の整数の `AVG` は切り捨て）、`count` は `COUNT(*)`（grid の `count` は行の数）、`min` / `max` はそのまま |
 
-- 列の名前は、そのデータセットの結果の列と照らしてから、DB の書き方で引用符に囲む（引用符の文字は二重にする）。結果の列は `describe` で聞き、SQL の文の中身ごとにサーバーが覚えておく。知らない列の名前は 400。
-- 値はすべてパラメーターで渡す。
-- `custom`（自前の絞り込み）は使わない（データセットの表の列には設定しない）。
+- 列の名前は、そのデータセットの結果の列と照らしてから（[4.7](#47-sql-を読み取る列とパラメーターの型) の照らし方）、DB の書き方で引用符に囲む（引用符の文字は二重にする）。知らない列の名前は 400。
+- 値はすべてパラメーターで渡す。grid の値の一覧（`set`）の値はいつも文字なので、列の型（数・日付）にしてから渡す。読めない値は 400。
+- 値の数は、データセットのパラメーターと合わせて 1 つの文で 2,000 まで（[4.3](#43-複数の値text-など)）。
 
 ### 8.6 ASP.NET・Next.js
 
-- C# の見本（`dotnet/`）にも同じ口と包み方を足す。テストは Node の側と同じ答えになるかを比べる（スナップショットのファイル名のときと同じやり方）。
+- C# の見本（`dotnet/`）にも、`-- param:` の読み方と検査、複数の値の展開、PostgreSQL の型付きのパラメーター、新しい口と包み方を足す（今の `ApiPath` は `schema` と `query` だけ）。テストは Node の側と同じ答えになるかを比べる（スナップショットのファイル名のときと同じやり方）。
+- handoff の「既存アプリの API に `schema` と `query` の 2 本を足す」は、ブラウザで持つ表なら今のまま 2 本で足りる。サーバーで絞る表を使うときだけ、`rows`・`values`・`aggregate` の 3 本と包み方が要る、と reference に書き分ける。
 - Next.js は `createApiHandler` の `fetch` がそのまま新しい口に答える。
 
 ## 9. 守りと行レベル制御
 
-- ブラウザから SQL は来ない、という今の約束は変えない。来るのはデータセットの名前、パラメーターの値、表の絞り込み・並べ替えの記述子（列の名前と値）だけ。列の名前は結果の列と照らし、値はパラメーターで渡す。
+- ブラウザから SQL は来ない、という今の約束は変えない。来るのはデータセットの名前、パラメーターの値、表の絞り込み・並べ替え・範囲・集計の記述子だけ。どれも決まった形と照らし（[8.3](#83-足す口)）、列の名前は結果の列と照らして引用符に囲み、値はパラメーターで渡す。
 - パラメーターは見る人が変えられる値。権限には使わない。見せてよい行は、行レベル制御の設計どおりデータセットの SQL に `WHERE c.region = :user.region` と書く（値はサーバーがログインした人から入れる）。
-  - ブラウザから来るパラメーターの名前が `user` か `user.` で始まるもの（大文字と小文字を問わず）は 400。
+  - ブラウザから来るパラメーターの名前が `user.` で始まるものは、いつも 400。名前が `user` そのものは、行レベル制御を使うプロジェクトでだけ 400（使わないプロジェクトでは、今までどおりのパラメーター）。先頭の `user` は大文字と小文字を問わない。
   - `-- param:` と dash.json の `params` にも、その名前は書けない。
+  - `:user.region` のように `.` を含む名前の読み方は、行レベル制御の PR で `parameters()` に入る（今は `.` の前までを名前として読む）。
 - `api/query`・`rows`・`values`・`aggregate` は、どれも行レベル制御と同じ入口（ログインの確かめ 401、`-- roles:` の 403、`:user.*` の値）を通る。件数・候補・合計も、`:user.*` で絞ったあとの SQL を包んで出すので、見えない行は数にも候補にも出ない。`-- roles:` に入らない人には `api/schema` にもデータセットが出ない（行レベル制御の設計）。
+  - 入口は `run(name, params, { user, wrap })`。今の `run(name, params)` の 3 つめの引数に、行レベル制御が `user` を、この設計が包み方（絞り込み・範囲・集計）の `wrap` を並べる（2 つの設計で合意済み）。後から入る PR が合わせる。
 - 人ごとに中身が変わる答えは `Cache-Control: no-store`。
-- サーバーで絞る表は、スクロールと絞り込みのたびに小さな SQL を投げる。1 つずつは時間の上限（`--timeout`）で止まる。1 人が同時に投げる数は、ブラウザ側で前の要求を止めてから次を投げる（grid が `signal` で止める）ことで抑える。DB への同時の接続の数の上限は、行レベル制御と合わせて実装の PR で決める。
+- サーバーで絞る表は、スクロールと絞り込みのたびに SQL を投げる。1 人でも DB を詰まらせられるので、3 の PR で次を入れる（どれも要る）。
+  - 止めた要求を DB でも止める。今の `run` は止める合図を受け取らず、ブラウザが要求を止めても DB の SQL は最後まで走る。リクエストが切れたら（Node の `req` の `close`、`fetch` の `request.signal`）、SQL Server は `cancel()`、Oracle は `break()`、MySQL は `KILL QUERY`、PostgreSQL は `pg_cancel_backend` で止める。
+  - 接続のプール（今はどの DB も 4 本で全員が分け合う）の空きを待つ時間の上限。今の時間の上限（`--timeout`）は接続を取ったあとから数えるので、待つ時間は入らない。
+  - 1 人（行レベル制御でログインした人。なければ接続元）とデータセットごとの同時に走る数の上限。
+  - 1 回に読む範囲の上限（`end - start` は 1,000 まで）。
 - パラメーターの値は URL に出る。人に見せたくない値（社員番号など）を、パラメーターで渡す形にしない（`:user.*` で）。
 
 ## 10. スナップショットとキャッシュ
 
-- ブラウザ: 結果は（データセット、パラメーターの値）ごとに覚える（サーバーで絞る表は、さらに絞り込み・並べ替え・範囲ごと）。前の値に戻したときは読み直さない。「更新」で捨てて読み直す。
-- スナップショット（`-- snapshot:`）は、**既定のパラメーターの組だけ**を作る。データセットのタイルで、パラメーターが既定のままならファイルを読み、変えたら API で読む（ファイルがない・違うときに API で読むのは今と同じ）。
-  - 既定値が「今日」などのときは、作る時点のサーバーの日付で決める。ブラウザの日付と違う（日付が変わる前後）ときは、ファイル名が違うので API で読む。
+- ブラウザ: 結果は（API の場所と `fetch`、データセット、パラメーターの値）ごとに覚える（サーバーで絞る表は、さらに絞り込み・並べ替え・範囲ごと）。前の値に戻したときは読み直さない。覚えるのは直近の 5 組まで（ブラウザで持つ表は 1 組で 100 万行になりうるので）。「更新」で捨てて読み直す。
+- スナップショット（`-- snapshot:`）は、データセットのタイルでは、**既定値がすべて固定の 1 つの値（文字・数・真偽・null）のときだけ**、その組を作る。パラメーターが既定のままならファイルを読み、変えたら API で読む（ファイルがない・違うときに API で読むのは今と同じ）。
+  - 既定値に「今日」などの言葉、`all`、複数の値があるデータセットのタイルは、スナップショットにしない（いつも API）。言葉は日ごとにファイルの名前が変わって古いファイルが溜まり、`all` は作る時点で候補を実行しないと値が決まらず、配列はファイルの名前の決め方（`snapshotFile`）がまだ決めていないため。
   - 作るものの一覧は、今の「models/ の `read_api`」に「dashboards/ のデータセットのタイル（既定のパラメーター）」を足す。
   - `:user.*` を使うデータセットと `-- roles:` のデータセットは、`-- access: all` のほかはスナップショットにできない（行レベル制御の設計）。
 - サーバーで絞る表は、スナップショットを使わない。
@@ -479,7 +522,7 @@ grid が送る `ColumnFilterValue`（`kind` で分かれる）を、DB ごとの
 
 - **GUI エディタ**: 設定欄の「データ」で「指標ファイル」と「データセット」を選べる。データセットを選ぶと、`describe` で列の一覧が出て、出す列・順・表示名・書式・グループ・合計を選べる。パラメーターの欄は既定値で動く。SQL ファイルそのものはエディタでは書かない（VS Code や Claude Code で書く。エディタは dash.json だけを書く今の約束のまま）。
 - **コードにする**: データセットの表も TSX にできる（`export const query = { dataset: "order_lines" }` と組み込みの表）。
-- **devbi-check**: データセットの名前、パラメーターのつなぎ方、`-- param:` の書き方、`IN (:複数)` 以外での複数の値、連動の輪、`-- key:` を確かめる。DB につながるときは `describe` で列の名前（`options.columns`、`-- key:`、`click`）も確かめる。つながらないときは書き方だけ。
+- **devbi-check**: データセットの名前、パラメーターのつなぎ方、`-- param:` と `-- key:` の書き方（今のファイルで説明として書いていた行を含む）、`IN (:複数)` 以外での複数の値、連動の輪、まとめるパラメーターの食い違い、`user` の名前を確かめる。サーバーで絞る表のデータセットは、名前のない列と、結果の列の名前で書いていない最後の `ORDER BY` も知らせる。DB につながるときは `describe` で列の名前（`options.columns`、`-- key:`、`click`）も確かめる。つながらないときは書き方だけ。
 - **pnpm gen**: データセットの名前とパラメーターの名前を補完に出す（dash.json の JSON Schema）。DB につながるときは、列から行の型を作る（`RowOf<typeof query>` が使える）。
 - **Excel と PDF**: Excel は、ブラウザで持つ表なら grid の今の表示（絞り込み・並べ替え・グループのあと。`getExportData`）を、サーバーで絞る表なら絞り込みを付けて全部の行を読んで書く。シートの注記にパラメーターの値を書く。印刷は今の表と同じく、見えている行を表にする（サーバーで絞る表は読み込んだ分だけで、そう注記する）。
 
@@ -495,9 +538,9 @@ grid が送る `ColumnFilterValue`（`kind` で分かれる）を、DB ごとの
 
 それぞれ 1 つの PR。各 PR で reference.md と manual-check.md を直し、サンプル（examples/sales）に SSRS 風のダッシュボードを 1 つ足す。
 
-1. **データセットのパラメーター（サーバー）**: `-- param:` と `-- key:` の読み込み、型の検査と渡し方、複数の値の展開、`api/schema` の `parameters`・`key`、`user.*` を弾く、C# の見本も同じに。5 つの DB でテスト。行レベル制御の PR と同じ `run` を触るので、先に入ったほうに合わせる。
-2. **パラメーターの欄とデータセットの表（ブラウザで持つ）**: dash.json の `params`、欄（見出しの下）、`query.dataset`、`query.params`、URL・埋め込み・React からの値、「更新」、表の `options`（`columns`・`groupBy`・`totals`・`search`・列の絞り込み・`style`）、候補の一覧と連動（`values`）、行のクリックでパラメーター（`click`）、Excel・印刷、スナップショットの既定の組、`devbi-check`。大きければ「欄と `query.dataset`」と「表の `options` と候補」の 2 つに分ける。
-3. **サーバーで絞る表（SSRM）**: `api/rows`・`api/values`・`api/aggregate`、包み方、絞り込みから WHERE、5 つの DB のページの書き方、C# の見本。
+1. **データセットのパラメーター（サーバー）**: `-- param:` と `-- key:` の読み込み（説明文から外す）、型の検査と渡し方（PostgreSQL の型付きのパラメーター）、複数の値の展開と数の上限、`api/schema` の `parameters`・`key`、`user` の名前を弾く、C# の見本も同じに。5 つの DB でテスト。行レベル制御の PR と同じ `run` と `parameters()` を触るので、先に入ったほうに合わせる。
+2. **パラメーターの欄とデータセットの表（ブラウザで持つ）**: ビルドのときのパラメーターの定義の埋め込み、dash.json の `params` と `fiscalYearStart`、欄（見出しの下）、`query.dataset`、`query.params`、URL・埋め込み・React からの値、「更新」、表の `options`（`columns`・`groupBy`・`totals`・`search`・列の絞り込み・`style`）、日付を grid に渡す形、候補の一覧と連動（`values`）、行のクリックでパラメーター（`click`）、Excel・印刷、スナップショットの既定の組、`devbi-check`、DuckDB-wasm を要るときだけ作る作り替え。大きいので「欄と `query.dataset`（と作り替え）」と「表の `options` と候補」の 2 つに分ける。
+3. **サーバーで絞る表（SSRM）**: `api/rows`・`api/values`・`api/aggregate`、包み方、絞り込みから WHERE、5 つの DB のページの書き方、止めた要求を DB でも止める仕組みと同時に走る数の上限、C# の見本。
 4. **列を聞く（describe）とエディタ**: 5 つの DB の `describe`、GUI エディタのデータセットの選択と列の一覧、`devbi-check` の列の確かめ、`pnpm gen` の行の型。
 5. 後で（決まってから）: 表のほかのタイル（`bar` など）と `explore` にデータセット、列と軸を結ぶクロスフィルタ、metrics.yaml の `read_api` からパラメーターを使う（`read_api('orders', from = $from)`。ページを開いている間にデータが変わらないという今の前提を変えるので、別に設計する）、展開行、表のことばで絞り込み（spreadsheet-grid の `/ai`）、`.rsd` / `.rdl` からの移行。
 
@@ -506,7 +549,7 @@ grid が送る `ColumnFilterValue`（`kind` で分かれる）を、DB ごとの
 それぞれ、おすすめで進めてよいかを確かめたい。
 
 1. **パラメーターの書き場所**: SQL ファイルの先頭のコメント（`-- param:`）。**おすすめ**。1 つのファイルで済み、今の `-- connection:` / `-- snapshot:` と同じ書き方。別ファイル（`api/<名前>.yaml`）なら JSON Schema の補完が効くが、SQL とずれやすい。
-2. **表の既定の読み方**: ブラウザで持つ（`rows: "client"`）を既定にし、大きな表だけ `rows: "server"` を書く。**おすすめ**。絞り込みとグループがその場で効き、作りも簡単。サーバーで絞る表は、グループと小計が使えない。
+2. **表の既定の読み方**: ブラウザで持つ（`rows: "client"`）を既定にし、大きな表だけ `rows: "server"` を書く。**おすすめ**。絞り込みとグループがその場で効き、作りも簡単で、DB への負担も 1 回の SQL だけ。サーバーで絞る表は、グループと小計が使えず、スクロールのたびに DB へ行く。
 3. **読み直すとき**: 値が決まったらすぐ読み直す。**おすすめ**。重い SQL のダッシュボードだけ `"apply": "button"` で SSRS と同じ「表示」ボタンにする。逆（ボタンを既定）にもできる。
 4. **最初に作る範囲**: [13 章](#13-進め方)の 1 と 2（ブラウザで持つ表まで）。**おすすめ**。サーバーで絞る表（3）は、実際の表の大きさを見てから。
 
