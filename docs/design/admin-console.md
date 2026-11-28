@@ -1,6 +1,6 @@
 # 設計: 管理者向けの管理画面（リポジトリから作るカタログ）
 
-- 状態: **設計（作るのはまだ）**。2026-11-24 に設計。[15 章](#15-決めること確かめること)の決めることを利用者が決めてから、[14 章](#14-作る順番pr-の分け方)の順で PR に分けて作ります。決まった形は、作る PR で [reference.md](../reference.md) と [deploying.md](../deploying.md) に書きます。
+- 状態: **作っています**。2026-11-24 に設計。2026-11-28 に、[15 章](#15-決めること確かめること)の 1・3・4・5 を勧めのとおりに決めました。2（閲覧数をどこから数えるか）は、見直して勧めを変えたので、利用者に聞いています（閲覧数を作る 14 章の 4 より前に決めます。1〜3 はどちらでも同じ）。[14 章](#14-作る順番pr-の分け方)の順で PR に分けて作ります。決まった形は、作る PR で [reference.md](../reference.md) と [deploying.md](../deploying.md) に書きます。
 - このフォルダ（`docs/design/`）のファイルは、ドキュメントのサイトのページになりません。
 - 関係する設計: [行レベル制御](row-level-security.md)（閲覧の記録に、同じ「利用者」を使う）、[SQL のデータセット](sql-datasets.md)（管理画面に、データセットのパラメーターを並べる）。
 
@@ -404,11 +404,13 @@ devbi-catalog views --view-log D:\devbi\views --catalog C:\inetpub\catalog\catal
 
 ### 10.7 静的なサイトの閲覧数（あとで）
 
-IIS などがファイルを配るだけの置き方には、DevBI のサーバーがありません。あとで、次の形を考えています。メモとして残します。
+IIS などがファイルを配るだけの置き方には、DevBI のサーバーがありません。そこで、次の形を考えています。[15 章](#15-決めること確かめること)の 2 で、この形を 10.2〜10.6 より先に作る案を聞いています（IIS が前にあれば、`devbi-serve` と ASP.NET のアプリの閲覧も、同じログから人数まで数えられるため）。
 
 - ブラウザが、開いたときに `GET devbi-view.txt?project=…&dashboard=…`（`dist/` に置く空のファイル）を読む。`#` のあとと違い、`?` のあとは Web サーバーのアクセスログに残る。
 - `devbi-catalog` が、IIS のログ（W3C の形。`cs-uri-query` と、Windows 認証の名前の `cs-username`）と nginx のログを読んで数える。IIS のログの時刻は既定で UTC なので、日付の区切りに気をつける。
 - ブラウザのキャッシュで 2 回目からが届かないことがないよう、`cache: "no-store"` で読む。
+- 数えるのは、状態が `2xx` か `304` の行だけ（Windows 認証の最初の `401` の行は数えない）。人数は `cs-username` で数え、空なら回数だけ。Web サーバーが何台かあるときは、`--access-log` を台数分渡す。
+- だれが見たかは、IIS がもともと書いているログにあるだけで、DevBI は新しく書きません。`devbi-catalog views` が書く `views.json` は、数えた回数と人数だけです（`--with-users` のときだけ ID も）。
 
 ## 11. 設定ファイル（`devbi-catalog.yaml`）
 
@@ -571,21 +573,34 @@ call C:\devbi-tools\node_modules\.bin\devbi-catalog.cmd --repo C:\git\reports.gi
 ## 14. 作る順番（PR の分け方）
 
 1. **カタログの中身（`catalog.json`）**: 新しいパッケージ `@devbi/catalog`（公開するパッケージが 7 つになるので、`scripts/version.mjs`・`publish.mjs`・`check:packed` と、releasing.md の「6 つのパッケージ」と表も直す）。まず、`readProject` を「ファイルを読む関数を受け取り、ファイルごとの結果と問題を返す」関数に分ける（[5.2](#52-読むのはコミットしたファイルだけ)。開発サーバーと `devbi-check` は今と同じ動き）。その関数は、DuckDB-wasm などの重い依存のない場所（`devbi` のコアか `@devbi/catalog`）に置く（`@devbi/vite` は DuckDB-wasm を連れてくるため）。そのうえで、コミットの中身を git から読む、プロジェクトを見つける、`package.json` の版と `.env` の変数の名前を読む、つながり（`values=` も）、`git log` を 1 回読んで振り分ける（名前の変更、消したもの、浅い clone、ファイルを後から取りに行く clone）、リモートの見分けとリンク（8.1 の表をテストの材料にする）、ブランチの名前、設定ファイルと JSON Schema、`devbi-catalog --json`。テストは、一時フォルダに git のリポジトリを作り、日時と人を決めたコミットを積んで確かめる（日本語のファイル名、マージ コミットと squash、名前の変更、浅い clone、bare リポジトリ、`.mailmap`）。reference.md に「管理画面（devbi-catalog）」の節を足し、コマンドのオプションの表を 1 つにまとめる（`--out` は、管理画面ではフォルダ、`views` ではファイル）。
+   2026-11-28 に、**1a**（`readProject` を分けるだけ）と **1b**（`@devbi/catalog` と、そのほか全部）に分けた。1a は開発サーバーとビルドと `devbi-check` が必ず通る場所を変えるので、ほかの変更と混ぜずに、動きが変わらないことだけを確かめる。分けた関数は `@devbi/server` に置く（DuckDB-wasm を連れてこず、`api/*.sql` を読む関数がもうあるため。`@devbi/vite` と `@devbi/catalog` の両方がそれを使う）。
 2. **画面**: `index.html` 1 つ（React と Vite でビルドしてパッケージに入れておく。DuckDB-wasm は使わない）。全体・プロジェクト・ダッシュボード・変更の履歴の 4 つの画面、`--open`（作って開く）、`--no-sql`、`--strict`、管理画面そのものの守り（[12.4](#124-管理画面そのものの守り)）。このリポジトリの管理画面を、ドキュメントのサイトの `/devbi/catalog/` に置いて見られるようにする（ライブデモと同じ `pages.yml`。今の `pages.yml` の `actions/checkout` は浅い clone なので、`fetch-depth: 0` を足す）。12.1 で「GitHub Pages には置かない」と書いたのに置けるのは、このリポジトリが公開の OSS で、中身がもともとだれにでも見えるからだと、ページにも書く。e2e と manual-check.md。
 3. **置き方の手順**: deploying.md に「管理画面を置く」（見せる相手、IIS の承認規則と `robocopy`、GitHub Actions・Azure Pipelines・社内サーバーのタスクの例、版を決めて入れること、浅い clone、`safe.directory`）。小さければ 2 に入れる。
-4. **閲覧の記録（Node と `devbi-serve`）**: ブラウザの `views: true` と `POST api/view`（`DevbiApp`・埋め込み・`<Dashboard>`、ホストの `fetch`）、`@devbi/vite` が入れる `project`、Node の `views` と `fileViews`、`devbi-serve --view-log`・`--view-days`・`--view-user`・`--view-key-file`、API の口の一覧（`apiPathPattern`）への `view` の追加、開発サーバーと `vite preview` の `204`、守り（[10.4](#104-守り)）、`devbi-catalog views`（`--catalog`、`--with-users`）、閲覧数の画面。reference.md の「API の形」、deploying.md（記録のフォルダのアクセス権、社員に知らせること）。Next.js の見本に `views` を足す。ドキュメントのサイトの管理画面には、作ったサンプルの閲覧数を入れる（サンプルだと画面に書く）。
+4. **閲覧の記録（Node と `devbi-serve`）**（[15 章](#15-決めること確かめること)の 2 の答えで変わる。アクセスログから数える形にしたら、4 は [10.7](#107-静的なサイトの閲覧数あとで) の形（ブラウザの `GET devbi-view.txt`、`devbi-catalog views --access-log`、閲覧数の画面）にし、ここに書いた DevBI のサーバーが書く形と 5 は、ログを読めない置き方のためにあとにする）: ブラウザの `views: true` と `POST api/view`（`DevbiApp`・埋め込み・`<Dashboard>`、ホストの `fetch`）、`@devbi/vite` が入れる `project`、Node の `views` と `fileViews`、`devbi-serve --view-log`・`--view-days`・`--view-user`・`--view-key-file`、API の口の一覧（`apiPathPattern`）への `view` の追加、開発サーバーと `vite preview` の `204`、守り（[10.4](#104-守り)）、`devbi-catalog views`（`--catalog`、`--with-users`）、閲覧数の画面。reference.md の「API の形」、deploying.md（記録のフォルダのアクセス権、社員に知らせること）。Next.js の見本に `views` を足す。ドキュメントのサイトの管理画面には、作ったサンプルの閲覧数を入れる（サンプルだと画面に書く）。
 5. **閲覧の記録（C#）**: ASP.NET Core の `MapDevBIApi`（今は `api/schema` と `api/query` だけ）と WebForms の `DevBIHttpHandler` の両方に `api/view`、`DevBIOptions.ViewLog`・`ViewLogDays`・`OnView`、API と同じ利用者（`user:` と `UserOf`）、パリティのテスト（`project`・`dashboard` の確かめ、ハッシュ、記録の 1 行の形）。
 6. あとで: 静的なサイトの閲覧数（[10.7](#107-静的なサイトの閲覧数あとで)）、本番に出ている版（ビルドのときに `dist/devbi-build.json` にコミットを書き、管理画面が読んで「本番は 3 コミット前」と出す。管理画面とダッシュボードのオリジンが違えば CORS が要る）、`devbi-check` のファイルの検査の結果、差分、CODEOWNERS から担当、利用者の ID を人の名前にして出すこと、リモートでファイルを直す画面へのリンク（GitHub の `/edit/`、Azure DevOps の編集）。
 
 ## 15. 決めること・確かめること
 
-利用者に決めてもらいたいこと:
+2026-11-28 に利用者が、1・3・4・5 を勧めのとおりに決めました（「これが最適なら作り始めてよい。よりよい案があれば判断に付き合う」）。2 は、見直して勧めを変えたので聞いています。
 
-1. **管理画面の形**: リポジトリから作る静的なサイト（`devbi-catalog`。この設計）でよいか。ほかの案は、`devbi-serve` の中に管理画面を足す形です（いつも最新で、閲覧数もその場で読めるが、`devbi-serve` を使わない置き方（静的なサイト、ASP.NET のアプリ）では使えない）。**勧め: 静的なサイト。** どの置き方とも組み合わせられ、GitHub・Azure DevOps・bare リポジトリで同じに動くため。
-2. **会社での置き方**: 会社では、DevBI をどう置きそうか（IIS の静的なサイト / IIS の後ろの `devbi-serve` / ASP.NET のアプリに埋め込み）。閲覧数をどこから数えるかの順番が変わります。**勧め: まず DevBI のサーバー（`devbi-serve`・Node・C#）が書く形（14 章の 4・5）。** ただし、IIS の後ろの `devbi-serve` では利用者が届かないので、回数だけになります（[10.5](#105-数える)）。人数まで要るなら、C# の形が向いています。静的なサイトのアクセスログから数える形（10.7）は、IIS のログで確かめられてから。
-3. **閲覧の記録に何を書くか**: だれが見たかを、記録と管理画面にどこまで残すか。**勧め: 記録には ID をハッシュにして書き（人数は数えられる）、管理画面には回数と人数だけを出す。** ID そのものを書いて、見た人の一覧を出すのは、`--view-user id` と `--with-users` を付けたときだけ（[10.6](#106-だれが見たかを残すか)）。
-4. **設定の置き場所**: リポジトリのルートの `devbi-catalog.yaml` 1 つか、プロジェクトごとのファイルか。**勧め: ルートの 1 つ**（[11 章](#11-設定ファイルdevbi-catalogyaml)）。
-5. **最初に作る範囲**: 14 章の 1〜3（閲覧数なしの管理画面）を先に作り、閲覧数（4・5）は 2 が決まってから、でよいか。**勧め: そのとおり。** 1〜3 は、会社の置き方によらず使えるため。
+1. **管理画面の形**: リポジトリから作る静的なサイト（`devbi-catalog`。この設計）。ほかの案は、`devbi-serve` の中に管理画面を足す形でした（いつも最新で、閲覧数もその場で読めるが、`devbi-serve` を使わない置き方（静的なサイト、ASP.NET のアプリ）では使えない）。**決めた: 静的なサイト。** どの置き方とも組み合わせられ、GitHub・Azure DevOps・bare リポジトリで同じに動くため。2026-11-24 に作った見本（データを中に入れた HTML 1 つ、約 100 KB）でも、この形で足りることを確かめた。
+2. **閲覧数をどこから数えるか**（前の題は「会社での置き方」。**利用者に聞いています**）: 前は「まず DevBI のサーバーが書く形（14 章の 4・5）」を勧めていました。見直して、IIS が前にあるなら、Web サーバーのアクセスログから数える形（[10.7](#107-静的なサイトの閲覧数あとで)）のほうがよいと考えを変えました。
+
+   | | A. アクセスログから数える（10.7） | B. DevBI のサーバーが書く（10.2〜10.6） |
+   | --- | --- | --- |
+   | IIS の静的なサイト | 回数と人数 | 数えられない（サーバーがない） |
+   | IIS の後ろの `devbi-serve` | 回数と人数（IIS の Windows 認証の名前がログに残る） | 回数だけ（利用者が届かない。[10.5](#105-数える)） |
+   | IIS の ASP.NET のアプリ | 回数と人数 | 回数と人数（14 章の 5） |
+   | ログを読めない置き方（クラウド、Next.js） | 数えられない | 回数と人数 |
+   | 作るもの | ブラウザの `GET` と、ログを読んで数える `devbi-catalog views --access-log` | ブラウザの `POST`、Node・`devbi-serve`・C# の 3 つに受け口と記録のファイルと守り（[10.4](#104-守り)） |
+   | だれが見たかの記録 | IIS がもともと書いているログだけ。DevBI は新しく書かない | DevBI が新しく書く（ハッシュ。3） |
+   | 確かめ | IIS ではまだ（`cs-uri-query` と `cs-username` は IIS の既定の項目。社内のログを 1 行見れば確かめられる） | CI で全部確かめられる |
+
+   **勧め: 会社の DevBI の前に IIS があり、そのログを管理者が読めるなら A。** サーバーのコードを足さずに、3 つの置き方のどれでも人数まで出せ、DevBI が新しく個人の記録を作らないため。B は、ログを読めない置き方のために、あとで足す。会社の置き方がまだわからなければ、1〜3 を作るあいだに決めれば間に合います（1〜3 はどちらでも同じ）。
+3. **閲覧の記録に何を書くか**: だれが見たかを、記録と管理画面にどこまで残すか。**決めた: 記録には ID をハッシュにして書き（人数は数えられる）、管理画面には回数と人数だけを出す。** ID そのものを書いて、見た人の一覧を出すのは、`--view-user id` と `--with-users` を付けたときだけ（[10.6](#106-だれが見たかを残すか)）。2 で A にしたときは、DevBI は記録を書かないので、管理画面に回数と人数だけを出す（ID は `--with-users` のときだけ）、が同じ決まりになる。
+4. **設定の置き場所**: リポジトリのルートの `devbi-catalog.yaml` 1 つか、プロジェクトごとのファイルか。**決めた: ルートの 1 つ**（[11 章](#11-設定ファイルdevbi-catalogyaml)）。
+5. **最初に作る範囲**: 14 章の 1〜3（閲覧数なしの管理画面）を先に作り、閲覧数（4・5）は 2 が決まってから。**決めた: そのとおり。** 1〜3 は、会社の置き方によらず使えるため。
 
 作るときに確かめること:
 
@@ -595,7 +610,7 @@ call C:\devbi-tools\node_modules\.bin\devbi-catalog.cmd --repo C:\git\reports.gi
 - Git for Windows で、ファイル共有の bare リポジトリを別のアカウントで読むときの `safe.directory`。
 - `keepalive` の `fetch` が、Windows 認証（NTLM・Kerberos）のサイトで届くか（開いてすぐ閉じたときも）。
 - 大きなリポジトリ（コミット 1 万、ファイル 10 万）で、`git log` と `git cat-file --batch` が何秒かかるか。
-- IIS の W3C ログの `cs-username` に、Windows 認証の名前が入ること（10.7 のため）。
+- IIS の W3C ログの `cs-uri-query` と `cs-username` に、`devbi-view.txt` の `?` のあとと Windows 認証の名前が入ること。ARR で `devbi-serve` に渡したリクエストと、ASP.NET のアプリの中のファイルでも同じか（15 章の 2 の A のため）。
 
 ## 付録: ほかの BI・道具との違い
 
